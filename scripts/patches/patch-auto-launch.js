@@ -20,34 +20,33 @@ const GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!l)u(d);return l}';
 const COMPACT_GET_LAUNCHER_ORIGINAL = 'getZaloLauncher:()=>u';
 const COMPACT_GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!u)d(l);return u}';
 
-const HANDLERS_ORIGINAL =
-  'checkAutoLaunchEnable:e=>{const{getZaloLauncher:t}=n("Wsuc");return t().isEnabled()},' +
-  'toggleAutoLaunch:(e,t)=>{const{appConfig:r}=n("ZQzv"),{getZaloLauncher:i}=n("Wsuc"),o=i();' +
-  't?($e.zsymb(4,"pM_gN_",["autolaunch to enable","PGmVrW"]),o.enable(),r.set("autolaunch",!0)):' +
-  '($e.zsymb(4,"b76Lft",["autolaunch to disable","sTBzDy"]),o.disable(),r.set("autolaunch",!1))},';
-
-const HANDLERS_PATCHED_V1 =
-  'checkAutoLaunchEnable:async e=>{try{const{getZaloLauncher:t}=n("Wsuc"),r=t();' +
-  'return!!(r&&"function"==typeof r.isEnabled)&&!!await r.isEnabled()}catch(e){return!1}},' +
-  'toggleAutoLaunch:async(e,t)=>{const{appConfig:r}=n("ZQzv"),{getZaloLauncher:i}=n("Wsuc"),o=i();' +
-  'if(!o)return r.set("autolaunch",!!t),!1;try{return t?' +
-  '($e.zsymb(4,"pM_gN_",["autolaunch to enable","PGmVrW"]),await o.enable(),r.set("autolaunch",!0),!0):' +
-  '($e.zsymb(4,"b76Lft",["autolaunch to disable","sTBzDy"]),await o.disable(),r.set("autolaunch",!1),!0)' +
-  '}catch(e){return $e.zsymb(19,"linux_auto_launch_error",e),!1}},';
+const HANDLERS_ORIGINAL = new RegExp(
+  'checkAutoLaunchEnable:e=>\\{const\\{getZaloLauncher:t\\}=n\\("([A-Za-z0-9._-]+)"\\);return t\\(\\)\\.isEnabled\\(\\)\\},' +
+  'toggleAutoLaunch:\\(e,t\\)=>\\{const\\{appConfig:r\\}=n\\("([A-Za-z0-9._-]+)"\\),\\{getZaloLauncher:i\\}=n\\("\\1"\\),o=i\\(\\);' +
+  't\\?\\(\\$e\\.zsymb\\(4,"([A-Za-z0-9._-]+)",\\["autolaunch to enable","([A-Za-z0-9._-]+)"\\]\\),o\\.enable\\(\\),r\\.set\\("autolaunch",!0\\)\\):' +
+  '\\(\\$e\\.zsymb\\(4,"([A-Za-z0-9._-]+)",\\["autolaunch to disable","([A-Za-z0-9._-]+)"\\]\\),o\\.disable\\(\\),r\\.set\\("autolaunch",!1\\)\\)\\},'
+);
 
 const HANDLERS_PATCHED =
-  'checkAutoLaunchEnable:async e=>{try{const{getZaloLauncher:t}=n("Wsuc"),r=t();' +
+  'checkAutoLaunchEnable:async e=>{try{const{getZaloLauncher:t}=n("$1"),r=t();' +
   'return!!(r&&"function"==typeof r.isEnabled)&&!!await r.isEnabled()}catch(e){return!1}},' +
-  'toggleAutoLaunch:async(e,t)=>{const{appConfig:r}=n("ZQzv"),{getZaloLauncher:i}=n("Wsuc");try{' +
+  'toggleAutoLaunch:async(e,t)=>{const{appConfig:r}=n("$2"),{getZaloLauncher:i}=n("$1");try{' +
   'const o=i();if(!o)return r.set("autolaunch",!!t),!1;return t?' +
-  '($e.zsymb(4,"pM_gN_",["autolaunch to enable","PGmVrW"]),await o.enable(),r.set("autolaunch",!0),!0):' +
-  '($e.zsymb(4,"b76Lft",["autolaunch to disable","sTBzDy"]),await o.disable(),r.set("autolaunch",!1),!0)' +
+  '($e.zsymb(4,"$3",["autolaunch to enable","$4"]),await o.enable(),r.set("autolaunch",!0),!0):' +
+  '($e.zsymb(4,"$5",["autolaunch to disable","$6"]),await o.disable(),r.set("autolaunch",!1),!0)' +
   '}catch(e){return $e.zsymb(19,"linux_auto_launch_error",e),!1}},';
 
-function replaceRequired(content, original, replacement, label, legacy = []) {
-  if (content.includes(replacement)) return content;
-  for (const candidate of [original, ...legacy]) {
-    if (content.includes(candidate)) return content.replace(candidate, replacement);
+function replaceRequired(content, original, replacement, label) {
+  if (content.includes(replacement) || content.includes('linux_auto_launch_error')) {
+    return content;
+  }
+
+  if (original instanceof RegExp) {
+    if (original.test(content)) {
+      return content.replace(original, replacement);
+    }
+  } else if (content.includes(original)) {
+    return content.replace(original, replacement);
   }
   throw new Error(`Auto-launch ${label} anchor not found; upstream Zalo bundle may have changed.`);
 }
@@ -77,7 +76,7 @@ function patchAutoLaunch(content) {
     );
   }
   content = replaceRequired(
-    content, HANDLERS_ORIGINAL, HANDLERS_PATCHED, 'IPC handler', [HANDLERS_PATCHED_V1]
+    content, HANDLERS_ORIGINAL, HANDLERS_PATCHED, 'IPC handler'
   );
   return content;
 }
