@@ -6,25 +6,34 @@ const APP_DIR = path.join(__dirname, '..', '..', 'app');
 const MAIN_DIST_DIR = path.join(APP_DIR, 'main-dist');
 const AUTO_LAUNCH_BUNDLES = ['main.js', 'compact-app.js'];
 
+// main-dist/main.js 26.08.20+ release: launcher=d, initializer=u, config=l (swap d and l).
+
+// const LAUNCHER_OPTIONS_ORIGINAL =
+//   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}l=new r(e)';
+// const LAUNCHER_OPTIONS_PATCHED =
+//   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe");l=new r(e)';
 const LAUNCHER_OPTIONS_ORIGINAL =
-  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}l=new r(e)';
+  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}d=new r(e)';
 const LAUNCHER_OPTIONS_PATCHED =
-  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe");l=new r(e)';
+  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe");d=new r(e)';
 const COMPACT_LAUNCHER_OPTIONS_ORIGINAL =
   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}u=new r(e)';
 const COMPACT_LAUNCHER_OPTIONS_PATCHED =
   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe");u=new r(e)';
 
-const GET_LAUNCHER_ORIGINAL = 'getZaloLauncher:()=>l';
-const GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!l)u(d);return l}';
+// const GET_LAUNCHER_ORIGINAL = 'getZaloLauncher:()=>l';
+// const GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!l)u(d);return l}';
+const GET_LAUNCHER_ORIGINAL = 'getZaloLauncher:()=>d';
+const GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!d)u(l);return d}';
+
 const COMPACT_GET_LAUNCHER_ORIGINAL = 'getZaloLauncher:()=>u';
 const COMPACT_GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!u)d(l);return u}';
 
 const HANDLERS_ORIGINAL = new RegExp(
   'checkAutoLaunchEnable:e=>\\{const\\{getZaloLauncher:t\\}=n\\("([A-Za-z0-9._-]+)"\\);return t\\(\\)\\.isEnabled\\(\\)\\},' +
   'toggleAutoLaunch:\\(e,t\\)=>\\{const\\{appConfig:r\\}=n\\("([A-Za-z0-9._-]+)"\\),\\{getZaloLauncher:i\\}=n\\("\\1"\\),o=i\\(\\);' +
-  't\\?\\(\\$e\\.zsymb\\(4,"([A-Za-z0-9._-]+)",\\["autolaunch to enable","([A-Za-z0-9._-]+)"\\]\\),o\\.enable\\(\\),r\\.set\\("autolaunch",!0\\)\\):' +
-  '\\(\\$e\\.zsymb\\(4,"([A-Za-z0-9._-]+)",\\["autolaunch to disable","([A-Za-z0-9._-]+)"\\]\\),o\\.disable\\(\\),r\\.set\\("autolaunch",!1\\)\\)\\},'
+  't\\?\\(([A-Za-z_$][A-Za-z0-9_$]*)\\.zsymb\\(4,"([A-Za-z0-9._-]+)",\\["autolaunch to enable","([A-Za-z0-9._-]+)"\\]\\),o\\.enable\\(\\),r\\.set\\("autolaunch",!0\\)\\):' +
+  '\\(\\3\\.zsymb\\(4,"([A-Za-z0-9._-]+)",\\["autolaunch to disable","([A-Za-z0-9._-]+)"\\]\\),o\\.disable\\(\\),r\\.set\\("autolaunch",!1\\)\\)\\},'
 );
 
 const HANDLERS_PATCHED =
@@ -32,9 +41,9 @@ const HANDLERS_PATCHED =
   'return!!(r&&"function"==typeof r.isEnabled)&&!!await r.isEnabled()}catch(e){return!1}},' +
   'toggleAutoLaunch:async(e,t)=>{const{appConfig:r}=n("$2"),{getZaloLauncher:i}=n("$1");try{' +
   'const o=i();if(!o)return r.set("autolaunch",!!t),!1;return t?' +
-  '($e.zsymb(4,"$3",["autolaunch to enable","$4"]),await o.enable(),r.set("autolaunch",!0),!0):' +
-  '($e.zsymb(4,"$5",["autolaunch to disable","$6"]),await o.disable(),r.set("autolaunch",!1),!0)' +
-  '}catch(e){return $e.zsymb(19,"linux_auto_launch_error",e),!1}},';
+  '($3.zsymb(4,"$4",["autolaunch to enable","$5"]),await o.enable(),r.set("autolaunch",!0),!0):' +
+  '($3.zsymb(4,"$6",["autolaunch to disable","$7"]),await o.disable(),r.set("autolaunch",!1),!0)' +
+  '}catch(e){return $3.zsymb(19,"linux_auto_launch_error",e),!1}},';
 
 function replaceRequired(content, original, replacement, label) {
   if (content.includes(replacement) || content.includes('linux_auto_launch_error')) {
