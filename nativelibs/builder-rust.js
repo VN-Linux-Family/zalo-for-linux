@@ -24,9 +24,19 @@ const releaseBinary = path.join(buildDir, 'release');
 logger.dim(`Lib dir: ${libDir}`);
 logger.dim(`Electron: ${ELECTRON_VERSION}`);
 
+// `openh264-sys2` compiles OpenH264's C++ through the `cc` crate, which
+// inherits CFLAGS/CXXFLAGS. A distro enabling LTO turns those objects into
+// slim-LTO members; cargo's final cdylib link does not pass `-flto`, so the
+// linker never materialises them and the addon keeps undefined Wels* symbols
+// (the module then fails to dlopen). Drop LTO flags for this build.
+const env = { ...process.env };
+for (const key of ['CFLAGS', 'CXXFLAGS', 'LDFLAGS']) {
+  if (env[key]) env[key] = env[key].replace(/\s*-flto(=\S+)?/g, '');
+}
+
 execSync(
   `cargo build --release`,
-  { cwd: libDir, stdio: 'ignore' }
+  { cwd: libDir, stdio: 'ignore', env }
 );
 
 const files = fs.readdirSync(releaseBinary).filter(f => f.endsWith('.so'));
