@@ -158,7 +158,13 @@ async function main() {
   const proxySo = path.join(ROOT, 'zcall-bridge', 'streamproxy.so');
   if (fs.existsSync(proxySrc)) {
     try {
-      execSync(`gcc -m32 -shared -fPIC -O2 "${proxySrc}" -ldl -lX11 -lxcb -o "${proxySo}"`, {
+      // Honor the distro toolchain environment so the shim gets the same
+      // hardening as the rest of the package (e.g. `-Wl,-z,now` for FULL RELRO).
+      // All three variables are unset in a plain shell, so nothing changes there.
+      const cc = process.env.CC || 'gcc';
+      const cflags = process.env.CFLAGS || '';
+      const ldflags = process.env.LDFLAGS || '';
+      execSync(`${cc} -m32 ${cflags} -shared -fPIC -O2 "${proxySrc}" -ldl -lX11 -lxcb ${ldflags} -o "${proxySo}"`, {
         cwd: ROOT, stdio: 'pipe'
       });
       logger.dim('streamproxy.so (32-bit) compiled from source');
