@@ -5,6 +5,7 @@ const logger = require('./utils/logger');
 
 const BASE_DIR = path.join(__dirname, '..');
 const APP_DIR = path.join(BASE_DIR, 'app');
+const DIST_DIR = path.join(BASE_DIR, 'dist');
 
 let ZALO_VERSION = null;
 const builtFiles = [];
@@ -30,18 +31,26 @@ async function main() {
     // silently bloat the standard variants — start clean; Phase 3 re-bundles.
     fs.rmSync(path.join(APP_DIR, 'native', 'wine-runtime'), { recursive: true, force: true });
 
+    // Check architecture for Full variants
+    const isArm64 = process.arch === 'arm64' || process.arch === 'aarch64';
+
     // Phase 1: Build original Zalo
     logger.step('PHASE 1: Building Zalo (Original)');
     await build('(Original)', '');
 
     // Phase 1.5: Full variant of the original (no ZaDark) — wine bundled.
-    logger.step('PHASE 1.5: Building Zalo (Full — wine bundled, no ZaDark)');
-    await bundleWineRuntime();
-    await build('(Full — wine bundled)', '-PlainFull');
-    // Remove the runtime again — the standard variants must not contain it,
-    // and a leftover from a previous run would silently bloat them (and the
-    // next Full build) to the Full size.
-    fs.rmSync(path.join(APP_DIR, 'native', 'wine-runtime'), { recursive: true, force: true });
+    // This is only built on x86_64, because zcall is not supported on aarch64.
+    if (!isArm64) {
+      logger.step('PHASE 1.5: Building Zalo (Full — wine bundled, no ZaDark)');
+      await bundleWineRuntime();
+      await build('(Full — wine bundled)', '-PlainFull');
+      // Remove the runtime again — the standard variants must not contain it,
+      // and a leftover from a previous run would silently bloat them (and the
+      // next Full build) to the Full size.
+      fs.rmSync(path.join(APP_DIR, 'native', 'wine-runtime'), { recursive: true, force: true });
+    } else {
+      logger.info('PHASE 1.5: Skipping Full variant build on aa64, zcall is not supported on this architecture');
+    }
 
     // Phase 2: Apply ZaDark integration and build final product
     logger.step('PHASE 2: Building Zalo (with ZaDark)');
@@ -52,10 +61,14 @@ async function main() {
 
     // Phase 3: Full variant of the ZaDark build — wine bundled, so the call
     // feature works out of the box with no first-run download.
-    logger.step('PHASE 3: Building Zalo (Full — wine bundled, with ZaDark)');
-    await bundleWineRuntime();
-    await build('(Full — wine bundled)', '-Full');
-    fs.rmSync(path.join(APP_DIR, 'native', 'wine-runtime'), { recursive: true, force: true });
+    if (!isArm64) {
+      logger.step('PHASE 3: Building Zalo (Full — wine bundled, with ZaDark)');
+      await bundleWineRuntime();
+      await build('(Full — wine bundled)', '-Full');
+      fs.rmSync(path.join(APP_DIR, 'native', 'wine-runtime'), { recursive: true, force: true });
+    } else {
+      logger.info('PHASE 3: Skipping Full with ZaDark variant build on aa64');
+    }
 
     // Final summary
     logger.step('BUILD SUMMARY');
@@ -77,6 +90,12 @@ const WINE_DOWNLOAD_URL =
   'https://github.com/Kron4ek/Wine-Builds/releases/download/11.14/wine-11.14-amd64.tar.xz';
 
 async function bundleWineRuntime() {
+  // we will skip the wine bundle if on aarch64 because zcall is currently not supported on it
+  if (process.arch === 'arm64' || process.arch === 'aarch64') {
+    logger.info('skipping wine bundle on aa64, zcall is not supported on this architecture');
+    return;
+  }
+
   const target = path.join(APP_DIR, 'native', 'wine-runtime');
   if (fs.existsSync(path.join(target, 'bin', 'wine'))) {
     logger.dim('wine runtime already bundled, skipping download');
@@ -128,6 +147,10 @@ async function build(buildName = '', outputSuffix = '') {
   try {
     // Get git commit hash for filename
     const commitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    const St2script = path.join(BASE_DIR, 'scripts', 'build-stage2.sh');
+
+    // Add the arch suffix for builds
+    const archSuffix = (process.arch === 'arm64' || process.arch === 'aarch64') ? '-aarch64' : '-x86_64';
 
     // Set artifact name and build command based on build type
     let artifactName;
@@ -149,16 +172,19 @@ async function build(buildName = '', outputSuffix = '') {
         }
       }
 
-      artifactName = `Zalo-${ZALO_VERSION}+ZaDark-${zadarkVersion}-${commitHash}${outputSuffix}.AppImage`;
+      artifactName = `Zalo-${ZALO_VERSION}+ZaDark-${zadarkVersion}-${commitHash}${outputSuffix}${archSuffix}.AppImage`;
       buildCommand = `npx electron-builder --linux --config.linux.artifactName="${artifactName}" -c.extraMetadata.version=${ZALO_VERSION} --publish=never`;
+      buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${ZALO_VERSION}" "${artifactName}" "${DIST_DIR}"`;
       logger.info(`Building ${buildName} with Zalo: ${ZALO_VERSION}, ZaDark: ${zadarkVersion}, Commit: ${commitHash}`);
     } else if (outputSuffix === '-PlainFull') {
-      artifactName = `Zalo-${ZALO_VERSION}-${commitHash}-Full.AppImage`;
+      artifactName = `Zalo-${ZALO_VERSION}-${commitHash}-Full${archSuffix}.AppImage`;
       buildCommand = `npx electron-builder --linux --config.linux.artifactName="${artifactName}" -c.extraMetadata.version=${ZALO_VERSION} --publish=never`;
+      buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${ZALO_VERSION}" "${artifactName}" "${DIST_DIR}"`;
       logger.info(`Building ${buildName} with Zalo: ${ZALO_VERSION}, Commit: ${commitHash}`);
     } else {
-      artifactName = `Zalo-${ZALO_VERSION}-${commitHash}.AppImage`;
+      artifactName = `Zalo-${ZALO_VERSION}-${commitHash}${archSuffix}.AppImage`;
       buildCommand = `npx electron-builder --linux --config.linux.artifactName="${artifactName}" -c.extraMetadata.version=${ZALO_VERSION} --publish=never`;
+      buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${ZALO_VERSION}" "${artifactName}" "${DIST_DIR}"`;
       logger.info(`Building ${buildName} with Zalo: ${ZALO_VERSION}, Commit: ${commitHash}`);
     }
     // Write build-info.json to the app directory so the AppImage will contain its metadata
@@ -178,9 +204,12 @@ async function build(buildName = '', outputSuffix = '') {
     }
 
     logger.dim(`Command: ${buildCommand}`);
+    logger.dim(`Command (Stage 2): ${buildCommandst2}`);
 
     // Capture build output to get file information
-    const buildOutput = execSync(buildCommand, {
+    const combinedCommand = `${buildCommand} && ${buildCommandst2}`;
+
+    const buildOutput = execSync(combinedCommand, {
       stdio: 'pipe',
       cwd: path.join(BASE_DIR),
       encoding: 'utf8'

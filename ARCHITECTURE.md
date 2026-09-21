@@ -25,6 +25,7 @@ zalo-for-linux/
 │   ├── prepare-app.js       # Extract app.asar + apply patches
 │   ├── prepare-zadark.js    # Build ZaDark dark-mode plugin
 │   ├── build.js             # Package into AppImage
+│   ├── build-stage2.sh      # Package into AppImage pt2 (uses quick-sharun)
 │   └── patches/             # Individual patch scripts
 │       ├── patch-titlebar.js
 │       ├── patch-sqlite3.js

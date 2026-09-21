@@ -30,7 +30,7 @@ async function main() {
   const releaseDir = path.join(ZJXL_DIR, 'target', 'release');
   const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
 
-  const destDir = path.join(APP_DIR, 'native', 'nativelibs', 'zjxl', 'build', 'linux_x64');
+  const destDir = path.join(APP_DIR, 'native', 'nativelibs', 'zjxl', 'build', 'linux');
   fs.ensureDirSync(destDir);
 
   for (const file of nodeFiles) {
@@ -47,7 +47,7 @@ async function main() {
     if (!content.includes("process.platform === 'linux'")) {
       content = content.replace(
         `} else {\n    return { error: 'not support' };\n  }`,
-        `} else if (process.platform === 'linux') {\n    if (process.arch === 'arm64') nodeAddon = require('./build/linux_arm64/jxl.node');\n    else nodeAddon = require('./build/linux_x64/jxl.node');\n  } else {\n    return { error: 'not support' };\n  }`
+        `} else if (process.platform === 'linux') {\n    nodeAddon = require('./build/linux/jxl.node');\n  } else {\n    return { error: 'not support' };\n  }`
       );
       fs.writeFileSync(indexJsPath, content, 'utf8');
       logger.dim('Patched index.js for Linux support');
