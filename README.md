@@ -8,7 +8,7 @@ Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.
 
 ## ⚠️ Important: Known Issues
 
-- **Can't make or receive calls:** The call module (`zcall`) only ships as a macOS native binary.
+- **✅ Fixed: Can't make or receive calls** - The call module (`zcall`), which only ships as a macOS native binary, now runs under a Wine-based bridge (`zcall-bridge`). Voice calls, video calls (camera) and screen sharing work on Linux. The **Full** AppImage variants bundle Wine + GStreamer out of the box; the standard variants offer a one-click first-run setup. See [`zcall-bridge/README.md`](./zcall-bridge/README.md) for details and system requirements.
 - **System/Auto Theme not working:** The app does not follow the system's dark/light mode. Both ZaDark and Zalo ignore `prefers-color-scheme`. See [issue #22](https://github.com/doandat943/zalo-for-linux/issues/22).
 - **✅ Fixed: Message Synchronization (E2EE)** - Thanks to [@realdtn2](https://github.com/realdtn2) for reimplementing `db-cross-v4` with C++. E2EE message sync now works on Linux without any Wine workaround. Thanks to [@DMKha2k7](https://github.com/DMKha2k7) for the PR. See [PR #24](https://github.com/doandat943/zalo-for-linux/pull/24) and [issue #15](https://github.com/doandat943/zalo-for-linux/issues/15).
 - **✅ Fixed: No Photos/Videos, Files and Links on the Conversation Info panel** - Caused by the missing `db-cross-v4` module.
@@ -69,6 +69,16 @@ We strongly recommend using **Gear Lever** to integrate the AppImage perfectly i
 4.  Click the **"Open"** button in the top-left corner and select the `.AppImage` file you downloaded.
 5.  The app will now appear in Gear Lever. Click the **"Unlock"** button, then choose **"Move to the app menu"** to integrate it into your system's application launcher.
 
+### Native packages
+
+Every release also ships native packages for the **standard variants** — light installers (~200MB). The package manager installs the small bridge-side GStreamer stack (64-bit), Xvfb and the 32-bit libraries from the distro repos, and the **install script downloads the verified wine 11.17 classic** into the app — calls work immediately after install (the 32-bit GStreamer stack for the camera ships inside the app itself; distro wines are too old — e.g. wine 9.0 on Ubuntu 24.04 — or wow64-only, which breaks video calls; offline installs fall back to the app's first-run download):
+
+- **`.deb`** for Debian/Ubuntu/Linux Mint (needs `universe`)
+- **`.rpm`** for Fedora/openSUSE
+- **`.pacman`** for Arch (install with `sudo pacman -U <file>`; the `multilib` repo must be enabled)
+
+Both standard variants (with and without ZaDark) are published in all formats. The **Full** variants (call engine bundled inside, works with zero setup on any distro) remain AppImage-only.
+
 ### Build from Source
 
 Prerequisites:
@@ -77,12 +87,21 @@ Prerequisites:
 - Node.js and npm
 - 7z (p7zip-full) for extracting the macOS app during setup
 - C++ build tools (for native addons): `build-essential`, `libssl-dev`, `liblzma-dev`
+- The `zcall-bridge` call-engine toolchain (see the apt command below)
+- `docker` (optional — only for bundling the self-contained 64-bit GStreamer into the **Full** variants; without it the Full AppImage falls back to the host's GStreamer at runtime)
 
 On Debian/Ubuntu:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev
+sudo dpkg --add-architecture i386
+sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev \
+  gcc-mingw-w64-i686 gcc-multilib libc6-dev-i386 libx11-dev libxcb1-dev libxext-dev \
+  libx11-dev:i386 libxcb1-dev:i386 libxext-dev:i386 libpipewire-0.3-0 rpm libarchive-tools
 ```
+
+(`gcc-mingw-w64-i686` builds `pipebridge.exe`; the multilib/i386 X11 dev
+packages build the 32-bit `streamproxy.so` capture shim; `libpipewire-0.3-0`
+is needed by the bundled-GStreamer self-containment checks.)
 
 Steps:
 

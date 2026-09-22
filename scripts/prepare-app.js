@@ -96,19 +96,36 @@ async function extractDMG() {
 
     const dmgPath = selectedFile.path;
 
-    if (!commandExists('7z')) {
-      logger.error('Dependency missing: 7z is not installed. Run: sudo apt-get install p7zip-full');
+    const sevenZip = find7z();
+    if (!sevenZip) {
+      logger.error('Dependency missing: 7z is not installed. Run: sudo apt install 7zip (p7zip 16.02 on Ubuntu 24.04 is too old for newer DMGs)');
       throw new Error('7z is required for DMG extraction.');
     }
 
     logger.info(`Extracting app.asar from ${selectedFile.name}...`);
-    const extractCommand = `7z x "${dmgPath}" "Zalo*/Zalo.app/Contents/Resources/app.asar*"`;
+    const extractCommand = `${sevenZip} x "${dmgPath}" "Zalo*/Zalo.app/Contents/Resources/app.asar*"`;
 
     try {
       execSync(extractCommand, { cwd: TEMP_DIR, stdio: 'pipe' });
     } catch (error) {
       // 7z might report "Headers Error" but still extract successfully
       logger.dim('Note: 7z reported warnings/errors (normal for DMG files)');
+    }
+
+    // 7z can also fail silently and extract nothing (e.g. p7zip 16.02 on newer
+    // DMGs). Verify before continuing, otherwise the next step crashes with a
+    // confusing chdir() TypeError.
+    const verifyCommand = `find "${TEMP_DIR}" -name "app.asar" -type f`;
+    let foundAsar;
+    try {
+      foundAsar = execSync(verifyCommand, { encoding: 'utf8', stdio: 'pipe' }).trim();
+    } catch (error) {
+      foundAsar = String(error.stdout || '').trim();
+    }
+    if (!foundAsar) {
+      logger.error('No app.asar extracted from the DMG. The installed 7z is likely too old to read this DMG format.');
+      logger.info('Fix on this machine: sudo apt remove p7zip p7zip-full && sudo apt install 7zip');
+      throw new Error('DMG extraction produced no app.asar');
     }
 
     logger.success('Extraction completed successfully');
@@ -126,9 +143,16 @@ async function extractAppAsar() {
     const result = execSync(findResourcesCommand, { cwd: TEMP_DIR, encoding: 'utf8', stdio: 'pipe' });
     resourcesPaths = result.trim().split('\n').filter(Boolean);
   } catch (error) {
-    resourcesPaths = [];
+    // find can exit non-zero on "Permission denied" for unrelated dirs
+    // (e.g. root-owned leftovers in temp/) while STILL printing matches —
+    // keep whatever it found on stdout.
+    resourcesPaths = String(error.stdout || '').trim().split('\n').filter(Boolean);
   }
   const resourcesPath = resourcesPaths[0];
+  if (!resourcesPath) {
+    logger.error('Could not locate Zalo.app/Contents/Resources under', TEMP_DIR);
+    throw new Error('Resources directory not found after DMG extraction');
+  }
 
   logger.info(`Extracting app.asar to app directory...`);
   const asarModule = require('@electron/asar');
@@ -203,13 +227,14 @@ async function extractAppAsar() {
   await patchShellOpenLinux();
 }
 
-function commandExists(command) {
-  try {
-    execSync(`command -v ${command}`, { stdio: 'ignore' });
-    return true;
-  } catch (error) {
-    return false;
+function find7z() {
+  for (const name of ['7zz', '7z']) {
+    try {
+      execSync(`command -v ${name}`, { stdio: 'ignore' });
+      return name;
+    } catch (error) { }
   }
+  return null;
 }
 
 function parseVersion(filename) {

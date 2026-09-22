@@ -6,11 +6,26 @@ const logger = require('./utils/logger');
 
 const ZADARK_DIR = path.join(__dirname, '..', 'plugins', 'zadark');
 
+async function withRetry(fn, tries = 3, delayMs = 2000) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 async function main() {
   try {
-    // Get all required versions
-    const targetZaloVersion = process.env.ZALO_VERSION || await getLatestZaloVersion();
-    const targetZaDarkVersion = process.env.ZADARK_VERSION || await getLatestZaDarkVersion();
+    // Get all required versions (network fetches get retries — CI routes to
+    // zalo.me/api.github.com can be slow and one-shot timeouts waste whole
+    // workflow runs).
+    const targetZaloVersion = process.env.ZALO_VERSION || await withRetry(getLatestZaloVersion);
+    const targetZaDarkVersion = process.env.ZADARK_VERSION || await withRetry(getLatestZaDarkVersion);
 
     process.env.ZALO_VERSION = targetZaloVersion;
     process.env.ZADARK_VERSION = targetZaDarkVersion;
@@ -25,7 +40,7 @@ async function main() {
       fs.appendFileSync(process.env.GITHUB_ENV, `COMMIT_HASH=${targetCommit}\n`);
 
       // Check existing combinations in releases
-      const existingCombo = await getExistingCombinations();
+      const existingCombo = await withRetry(getExistingCombinations);
       logger.info(`Found ${existingCombo.length} existing combinations in releases`);
 
       // Check if combination already exists
@@ -48,7 +63,10 @@ async function main() {
     if (process.env.BUILD) logger.dim(`BUILD=${process.env.BUILD}`);
   } catch (error) {
     logger.error('Version check failed:', error.message);
-    process.exit(0); // Don't fail the whole pipeline
+    // Only tolerable when BOTH versions came from workflow inputs (the
+    // failure then only cost us the combination check, which is a
+    // skip-vs-build optimization). Missing versions = cannot build at all.
+    process.exit(process.env.ZALO_VERSION && process.env.ZADARK_VERSION ? 0 : 1);
   }
 }
 
@@ -77,7 +95,7 @@ async function getLatestZaloVersion() {
     });
 
     request.on('error', reject);
-    request.setTimeout(10000, () => {
+    request.setTimeout(30000, () => {
       request.destroy();
       reject(new Error('Request timeout'));
     });
@@ -153,7 +171,7 @@ async function getExistingCombinations() {
     });
 
     req.on('error', () => resolve([]));
-    req.setTimeout(10000, () => {
+    req.setTimeout(30000, () => {
       req.destroy();
       resolve([]);
     });

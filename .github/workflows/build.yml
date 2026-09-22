@@ -13,6 +13,11 @@ on:
         required: false
         default: ''
         type: string
+      zalo_win_version:
+        description: 'Zalo Windows Version for the call engine (leave empty for latest)'
+        required: false
+        default: ''
+        type: string
       zadark_version:
         description: 'ZaDark Version/Tag/Commit (leave empty for latest)'
         required: false
@@ -37,6 +42,9 @@ jobs:
       with:
         node-version: '22'
         cache: 'npm'
+
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
         
     - name: Cache Electron binaries
       uses: actions/cache@v3
@@ -45,19 +53,40 @@ jobs:
         key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
         restore-keys: |
           ${{ runner.os }}-electron-
+
+    - name: Cache build downloads (DMG, Windows installer, call engine)
+      uses: actions/cache@v3
+      with:
+        path: temp
+        key: ${{ runner.os }}-zalo-temp-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-zalo-temp-
+
+    - name: Cache Cargo registry and build artifacts
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          nativelibs/*/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('nativelibs/*/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
           
     - name: Install Node.js dependencies
       run: npm ci --prefer-offline --no-audit
 
     - name: Install system build dependencies
       run: |
+        sudo dpkg --add-architecture i386
         sudo apt-get update
-        sudo apt-get install -y liblzma-dev
+        sudo apt-get install -y liblzma-dev p7zip-full gcc-mingw-w64-i686 gcc gcc-multilib libc6-dev-i386 libx11-dev libxcb1-dev libxext-dev libx11-dev:i386 libxcb1-dev:i386 libxext-dev:i386 libpipewire-0.3-0 rpm libarchive-tools
 
     - name: Setup and Build
       id: build
       env:
         ZALO_VERSION: ${{ github.event.inputs.zalo_version }}
+        ZALO_WIN_VERSION: ${{ github.event.inputs.zalo_win_version }}
         ZADARK_VERSION: ${{ github.event.inputs.zadark_version }}
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_REPOSITORY: ${{ github.repository }}
@@ -78,7 +107,79 @@ jobs:
         name: ${{ steps.build.outputs.zadark_appimage_name }}
         path: ${{ steps.build.outputs.zadark_appimage_file }}
         retention-days: 30
-        
+
+    - name: Upload Full AppImage artifact (wine bundled, ZaDark)
+      if: steps.build.outputs.build == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.full_appimage_name }}
+        path: ${{ steps.build.outputs.full_appimage_file }}
+        retention-days: 30
+
+    - name: Upload Full AppImage artifact (wine bundled, no ZaDark)
+      if: steps.build.outputs.build == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.plainfull_appimage_name }}
+        path: ${{ steps.build.outputs.plainfull_appimage_file }}
+        retention-days: 30
+
+    - name: Upload deb artifact (Original)
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.original_deb_file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.original_deb_name }}
+        path: ${{ steps.build.outputs.original_deb_file }}
+        retention-days: 30
+
+    - name: Upload rpm artifact (Original)
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.original_rpm_file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.original_rpm_name }}
+        path: ${{ steps.build.outputs.original_rpm_file }}
+        retention-days: 30
+
+    - name: Upload pacman artifact (Original)
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.original_pacman_file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.original_pacman_name }}
+        path: ${{ steps.build.outputs.original_pacman_file }}
+        retention-days: 30
+
+    - name: Upload deb artifact (ZaDark)
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.zadark_deb_file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.zadark_deb_name }}
+        path: ${{ steps.build.outputs.zadark_deb_file }}
+        retention-days: 30
+
+    - name: Upload rpm artifact (ZaDark)
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.zadark_rpm_file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.zadark_rpm_name }}
+        path: ${{ steps.build.outputs.zadark_rpm_file }}
+        retention-days: 30
+
+    - name: Upload pacman artifact (ZaDark)
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.zadark_pacman_file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.zadark_pacman_name }}
+        path: ${{ steps.build.outputs.zadark_pacman_file }}
+        retention-days: 30
+
+    - name: Upload GStreamer runtime asset (standard-variant first-run download)
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.gst_runtime_file != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.gst_runtime_name }}
+        path: ${{ steps.build.outputs.gst_runtime_file }}
+        retention-days: 30
+
     - name: Create Release
       if: steps.build.outputs.build == 'true'
       uses: softprops/action-gh-release@v1
@@ -87,7 +188,7 @@ jobs:
         name: ${{ steps.build.outputs.zalo_version }}
         body: |
           ## 🚀 How to use
-          
+
           It is recommended to use [Gear Lever](https://github.com/mijorus/gearlever) to manage and integrate the AppImage.
 
           ```bash
@@ -98,16 +199,36 @@ jobs:
           flatpak run it.mijorus.gearlever --integrate ${{ steps.build.outputs.zadark_appimage_name }}
           ```
 
+          > 🍷 **Full variants** (self-contained call engine bundled inside — wine (classic 11.17) + the 32-bit GStreamer camera stack + the Wayland screen-share bridge (Xvfb/xdotool/pipewiresrc, host python3); voice/video/mic/camera/share-screen work with **no system package installs** — the host only needs its normal Wayland portal/PipeWire session):
+          > - `${{ steps.build.outputs.plainfull_appimage_name }}` (without ZaDark)
+          > - `${{ steps.build.outputs.full_appimage_name }}` (with ZaDark)
+          >
+          > 📦 **Standard variants** now also work without bundling: on first run they download wine (classic 11.17, ~96MB) + the bridge-only 64-bit GStreamer tree (`${{ steps.build.outputs.gst_runtime_name }}`) into the app's data dir — no system packages beyond the 32-bit libraries the app guides you through when needed. Using a system wine remains supported (see README).
+          >
+          > 🗃️ **Native packages** (standard variants — light installers: the package manager installs the small bridge-side GStreamer packages + the 32-bit libraries from the distro repos, and the install script downloads the verified wine 11.17 classic — calls work immediately after install; offline installs fall back to the app's first-run download):
+          > - Debian/Ubuntu/Mint: `${{ steps.build.outputs.original_deb_name }}` / `${{ steps.build.outputs.zadark_deb_name }}` (needs `universe`)
+          > - Fedora/openSUSE: `${{ steps.build.outputs.original_rpm_name }}` / `${{ steps.build.outputs.zadark_rpm_name }}`
+          > - Arch: `${{ steps.build.outputs.original_pacman_name }}` / `${{ steps.build.outputs.zadark_pacman_name }}` (needs the `multilib` repo enabled)
+
           ## 📋 System Requirements
           - Linux x64
-          - GLIBC 2.28 or later
-          
+          - GLIBC 2.35 or later (call engine)
+
           ## 🐛 Issues & Support
           Please report issues in the [GitHub Issues](https://github.com/${{ github.repository }}/issues) section.
 
         files: |
           ${{ steps.build.outputs.original_appimage_file }}
           ${{ steps.build.outputs.zadark_appimage_file }}
+          ${{ steps.build.outputs.plainfull_appimage_file }}
+          ${{ steps.build.outputs.full_appimage_file }}
+          ${{ steps.build.outputs.original_deb_file }}
+          ${{ steps.build.outputs.original_rpm_file }}
+          ${{ steps.build.outputs.original_pacman_file }}
+          ${{ steps.build.outputs.zadark_deb_file }}
+          ${{ steps.build.outputs.zadark_rpm_file }}
+          ${{ steps.build.outputs.zadark_pacman_file }}
+          ${{ steps.build.outputs.gst_runtime_file }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -130,7 +251,7 @@ jobs:
         fi
 
         for name in $asset_names; do
-          if [[ "$name" == Zalo-*.AppImage ]] && [[ "$name" != *"$CURRENT_COMMIT"* ]]; then
+          if [[ "$name" == Zalo-* ]] && [[ "$name" != *"$CURRENT_COMMIT"* ]]; then
             echo "Removing old asset: $name"
             gh release delete-asset "$RELEASE_TAG" "$name" --yes
           fi

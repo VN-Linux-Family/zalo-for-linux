@@ -1,17 +1,7 @@
-# zcall-bridge — cuộc gọi Zalo trên Linux qua Wine
+# zcall-bridge — gọi thoại/video/share screen trên Linux qua Wine
 
-Chạy engine gọi điện (voice/video) của Zalo trên Linux.
-
-## Vấn đề
-
-Zalo PC 26.x thực hiện cuộc gọi bằng helper **ZaloCall.exe** (app Qt, chỉ có
-bản Windows/macOS). Trên Linux không có helper tương ứng, và Wine ≥ 9.9 đã
-bỏ hỗ trợ AF_UNIX socket (nhánh macOS dùng unix socket).
-
-## Giải pháp
-
-Chạy **ZaloCall.exe bản Windows** dưới Wine, bắc cầu kênh giao tiếp bằng
-named pipes (thứ Wine hỗ trợ tốt):
+Chạy **ZaloCall.exe** (engine gọi của Zalo PC, bản Windows) dưới Wine, bắc cầu
+giao tiếp bằng named pipes:
 
 ```
 ┌── Zalo app (Linux, đã patch) ────────────────────────────────┐
@@ -22,156 +12,104 @@ named pipes (thứ Wine hỗ trợ tốt):
                │ TCP loopback
 ┌──────────────▼───────────────────────────────────────────────┐
 │  WINE prefix                                                  │
-│  pipebridge.exe (C, 252KB, không cần runtime)                │
-│    named pipes ⇄ TCP, pump dữ liệu 2 chiều                   │
+│  pipebridge.exe (C, không cần runtime) — named pipes ⇄ TCP   │
 │  ZaloCall.exe — engine gọi thật (Qt5)                        │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Transport: AES-128-CBC (key cố định trong app), message JSON phân tách `$`.
+Transport: AES-128-CBC, message JSON phân tách `$`.
 
-## Các patch (scripts/patches/)
-
-| Patch | Mục đích |
-|---|---|
-| `patch-zcall-callv2.js` | Nhánh Linux cho call-v2: TCP ports, spawn qua Wine + pipebridge, **gửi lại init trước mỗi makeCall** (chống lỗi -11 init_error), **fix cờ F kẹt queue gửi** của Zalo, bỏ qua unlink/verifyMd5 không áp dụng |
-| `patch-zcall-callgate.js` | Mở 2 gate UI: bỏ check `os.release() < 17` (viết cho Darwin kernel, trên Linux kernel 7.x luôn fail) và bật default `enableCall`/`enableVideoCall` |
-
-## Cài đặt
+## Cài đặt (máy build)
 
 ```bash
 node scripts/setup-zcall-bridge.js
 ```
 
-- Tải installer Windows chính thức, tách `plugins/capture/` →
-  `app/native/qt-call-and-cap/` (ZaloCall.exe + ZaviMeet.exe + Qt DLLs +
-  plugins, sau khi tỉa còn ~67MB)
-- Compile `pipebridge.c` bằng mingw (fallback dùng exe đã commit)
+Tải installer Windows chính thức → tách `plugins/capture/` →
+`app/native/qt-call-and-cap/` (tỉa còn ~67MB); compile `pipebridge.exe`
+(mingw: `gcc-mingw-w64-i686`) và 2 shim `streamproxy.so` / `streamproxy-x86_64.so`
+(multilib: `gcc-multilib libc6-dev-i386 libx11-dev:i386 libxcb1-dev:i386 libxext-dev:i386`).
+⚠️ Không thêm 2 file `.so` vào `.gitignore` — electron-builder tôn trọng
+`.gitignore` khi đóng gói `extraFiles`, ignore = AppImage ship thiếu shim.
 
-Yêu cầu: Wine chạy được 32-bit (wow64 như Wine 11). Khi app thoát, plugin
-kill toàn bộ phiên wine của prefix (`wineserver -k` + hard-kill
-wineserver/winedevice còn sót).
+**Wine yêu cầu**: bản **classic** (hỗ trợ 32-bit). App dùng và tự tải
+[`wine-11.17-amd64.tar.xz`](https://github.com/Kron4ek/Wine-Builds/releases/download/11.17/wine-11.17-amd64.tar.xz)
+— đã chạy video call ổn định trên Linux Mint.
 
-## Trải nghiệm người dùng: tự động cài wine
+## Người dùng cuối
 
-Người dùng **không cần cài gì thủ công**. Ngay lần mở app đầu tiên:
+Không cần cài gì thủ công:
 
-1. Nếu máy chưa có wine, app hiện cửa sổ hỏi **luôn nổi trên cửa sổ chính**
-   (không bị che): *"Tính năng gọi điện cần Wine. Tải và bật ngay bây giờ?"*
-   — nút **"Tải và bật ngay"** / **"Để sau"**, kèm link nguồn tải minh bạch
-   và checkbox **"Không hỏi lại lần sau nếu không tải"**
-2. Chọn tải → cửa sổ tiến trình *"Đang tải Wine (~54MB)…"* với % trực quan
-   → tự giải nén → tự khởi tạo prefix (mất ~1-2 phút tổng cộng)
-3. Xong → thông báo *"Tính năng gọi điện đã sẵn sàng!"* — gọi được ngay,
-   không cần khởi động lại, không cần quyền quản trị
-4. Chọn "Để sau" → **hỏi lại vào lần mở app sau**; tick "không hỏi lại" →
-   không bao giờ tự hỏi nữa. Cả hai trường hợp đều bật lại được qua
-   **menu khay hệ thống → "Cài đặt gọi điện…"**
+- **Biến thể Full**: wine classic + GStreamer 64-bit bundle sẵn trong
+  AppImage → mở là gọi/share màn hình được ngay.
+- **Bản thường / package native**: lần đầu app tự tải wine (~96MB) +
+  GStreamer (~105MB) về `<userData>/`; package native (deb/rpm/pacman) thay
+  vào đó để package manager cài wine + gst từ repo.
+- Có wine hệ thống hợp lệ → app dùng im lặng. Không có / không chạy được
+  app 32-bit → hộp thoại hỏi tải, bật lại được qua menu khay
+  → "Cài đặt gọi điện…".
 
-Wine tải về được lưu tại `<userData>/zcall-wine-runtime/` — hoàn toàn trong
-dữ liệu của app, không đụng hệ thống, gỡ app là sạch.
+Thứ tự dò wine: `ZCALL_WINE` → bundle Full → đã tải về → `wine` trong PATH →
+runner Bottles.
 
-## Cấu hình Wine (custom path)
+### Biến môi trường chính
 
-Người dùng nâng cao có thể chỉ định wine riêng. Khi app khởi động, plugin
-tự dò theo thứ tự ưu tiên:
+| Biến | Ý nghĩa |
+|---|---|
+| `ZCALL_WINE` | Đường dẫn tuyệt đối tới binary `wine` |
+| `ZCALL_WINEPREFIX` | Prefix riêng của app (mặc định `<userData>/zcall-wine`) |
+| `ZCALL_DISABLE` | Set giá trị bất kỳ để tắt tính năng gọi |
+| `ZCALL_WINE_DOWNLOAD_URL` | Ghi đè URL tải wine portable |
+| `ZCALL_CAMERA_LOCK_FMT` | `1` = khóa YUYV 640x480@30 (mặc định cho mọi wine — chất lượng cố định, không nhảy); `best` = tự dò format tốt nhất (HD cho máy mạnh) |
+| `ZCALL_CAMERA_HIDE` | Ẩn camera (gọi video một chiều, không crash) |
 
-```
-1. Biến môi trường ZCALL_WINE          ← ưu tiên cao nhất
-2. Wine đã tải tự động (mục trên)      ← <userData>/zcall-wine-runtime/bin/wine
-3. Lệnh `wine` trong PATH              ← wine hệ thống (apt install wine...)
-4. Runner Bottles (flatpak)            ← ~/.var/app/com.usebottles.bottles/
-                                          data/bottles/runners/kron4ek-wine-*/
-                                          bin/wine (chọn bản mới nhất)
-```
+## Thư viện 32-bit cho wine classic
 
-Nếu không tìm thấy wine: app vẫn chạy bình thường, chỉ **không có tính năng
-gọi** — và hộp thoại hỏi tải wine ở trên sẽ xuất hiện.
-
-### Các biến môi trường
-
-| Biến | Ý nghĩa | Mặc định |
-|---|---|---|
-| `ZCALL_WINE` | Đường dẫn tuyệt đối tới binary `wine` | tự dò (xem thứ tự trên) |
-| `ZCALL_WINEPREFIX` | Prefix wine dành riêng cho app | `<userData>/zcall-wine` |
-| `ZCALL_DISABLE` | Set bất kỳ giá trị nào để tắt hẳn tính năng gọi | — |
-| `ZCALL_AUTO_SETUP` | `'1'` = tải wine tự động, không hỏi (dùng khi triển khai hàng loạt/script) | — |
-| `ZCALL_WINE_DOWNLOAD_URL` | Ghi đè URL tải wine portable | URL kron4ek 11.14 trên GitHub |
-
-> ⚠️ Wine cần hỗ trợ chạy app 32-bit (ZaloCall.exe là PE32). Các bản Wine 8+
-> có chế độ wow64 chạy được 32-bit trên wine64 thuần; bản cũ hơn cần
-> `dpkg --add-architecture i386` + gói wine32.
-
-### Ví dụ chạy với wine tự chọn
-
-**Dev mode:**
+App tự hiện hướng dẫn đúng distro khi thiếu. Copy-paste nhanh:
 
 ```bash
-# Wine hệ thống bạn tự cài (ví dụ apt install wine)
-ZCALL_WINE=/usr/bin/wine npm start
+# Ubuntu/Debian
+sudo dpkg --add-architecture i386 && sudo apt update
+sudo apt install -y libc6:i386 libx11-6:i386 libfreetype6:i386 libgl1:i386 \
+  libpulse0:i386 libasound2:i386 zlib1g:i386 \
+  libgstreamer1.0-0:i386 libgstreamer-plugins-base1.0-0:i386 \
+  gstreamer1.0-plugins-good:i386 gstreamer1.0-libav:i386 libv4l-0:i386
 
-# Wine build riêng tải từ internet
-ZCALL_WINE=/opt/wine-10.0/bin/wine npm start
+# Fedora (H.264 decode cần RPM Fusion: gstreamer1-plugin-libav.i686)
+sudo dnf install -y glibc.i686 libX11.i686 freetype.i686 mesa-libGL.i686 \
+  pulseaudio-libs.i686 alsa-lib.i686 zlib-ng-compat.i686 \
+  gstreamer1.i686 gstreamer1-plugins-base.i686 gstreamer1-plugins-good.i686 libv4l.i686
 
-# Kèm prefix riêng
-ZCALL_WINE=/usr/bin/wine ZCALL_WINEPREFIX=~/zalo-call-prefix npm start
-
-# Tắt hẳn tính năng gọi
-ZCALL_DISABLE=1 npm start
+# Arch (bật multilib)
+sudo pacman -S --needed lib32-glibc lib32-libx11 lib32-freetype2 lib32-mesa \
+  lib32-libpulse lib32-alsa-lib lib32-zlib \
+  lib32-gstreamer lib32-gst-plugins-base lib32-gst-plugins-good lib32-gst-libav lib32-libv4l
 ```
 
-**AppImage (bản đóng gói):**
+## Share screen trên Wayland
 
-```bash
-# Chạy từ terminal, env áp dụng cho phiên đó
-ZCALL_WINE=/usr/bin/wine ./Zalo-<version>.AppImage
-```
+XWayland không thấy desktop → app có bridge riêng: XDG ScreenCast portal →
+PipeWire → GStreamer → **Xvfb headless `:99`** → shim `streamproxy.so` chặn
+lời gọi chụp màn hình của ZaloCall và trả nội dung từ `:99`. Bấm Share screen
+như thường — hộp thoại quyền portal tự hiện. Trên X11 hoạt động trực tiếp,
+không cần bridge.
 
-Muốn áp vĩnh viễn: sửa file `.desktop` của app (do Gear Lever/trình đơn tạo),
-thêm biến vào dòng `Exec`:
+## Lưu ý
 
-```ini
-Exec=env ZCALL_WINE=/usr/bin/wine /đường/dẫn/tới/Zalo.AppImage
-```
-
-### Kiểm tra wine có chạy được không
-
-```bash
-# 1. Wine hoạt động?
-/đường/dẫn/wine --version          # in ra phiên bản, ví dụ wine-11.14
-
-# 2. Chạy được app 32-bit? (tạo prefix thử — lần đầu mất ~30s)
-WINEPREFIX=/tmp/test-prefix /đường/dẫn/wine wineboot -u
-ls /tmp/test-prefix/drive_c        # có Program Files/ = OK
-rm -rf /tmp/test-prefix
-
-# 3. Mở app với env, gọi thử một cuộc thoại. Lần gọi đầu tiên hơi chậm
-#    (wine khởi động nguội + tạo prefix nếu chưa có ~5-15s).
-```
-
-### Prefix nằm ở đâu
-
-- Mặc định: `<userData>/zcall-wine` — `userData` của app là
-  `~/.config/ZaloData/` (hoặc theo env `XDG_CONFIG_HOME`).
-- App **chỉ thao tác wine trong đúng prefix này** — không đụng tới
-  `~/.wine` hay các prefix Bottles khác của bạn.
-- Khi app thoát, toàn bộ tiến trình wine của prefix này bị dọn sạch
-  (`wineserver -k` + hard-kill `wineserver`/`winedevice.exe` còn sót).
-- Muốn reset trạng thái gọi: xóa thư mục prefix rồi mở lại app —
-  plugin sẽ tự tạo lại prefix mới.
+- **Chỉ dùng wine classic**: bản wow64 crash camera DirectShow trên một số
+  máy (bug marshaling WoW64 trong qcap của wine, chưa merge tới 11.17 — repro
+  trong `camtest.c`).
+- **Camera**: app tự khóa YUYV 640x480@30 cho mượt (720p qua wine là
+  CPU-bound). Máy mạnh muốn HD: `ZCALL_CAMERA_LOCK_FMT=best`.
+- **Prefix**: `<userData>/zcall-wine`, không đụng `~/.wine`; app tự dọn
+  wine session khi thoát. Reset trạng thái gọi: xóa thư mục prefix.
 
 ## Đã xác minh
 
-- ✅ ZaloCall.exe chạy dưới Wine (wow64), kết nối đủ 2 kênh. Các bản đã test
-  thật qua replay (init → makeCall → incall → success → sendSignal):
-  **11.14** (96MB/852MB), **8.6** (54MB/565MB — dùng làm mặc định tải tự
-  động), **8.0.1** (53MB/564MB), **7.22** (53MB/563MB)
-- ✅ `native-ready` → `init` → `makeCall` → `callState: incall`, `show success`,
-  `sendSignal 401` — engine thực hiện cuộc gọi thật (voice + video signaling)
-- ✅ **Người dùng xác nhận cuộc gọi thoại hoạt động** trong app
-- ✅ pipebridge C (252KB) hoạt động trong app thật
-- ✅ Thư mục engine đã tỉa 196MB → **67MB** (bỏ pdbs, translations, Qt plugins
-  thừa, opengl32sw, Qt5Sql/Xml; giữ ZaviMeet cho group call) — call 1-1 vẫn chạy
-- ✅ Tắt app → wine session được dọn sạch (wineserver + winedevice)
-- ⚠️ Chưa test: video call end-to-end (máy test không có webcam) — signaling
-  video đã chạy, cần máy có camera để xác nhận capture + hiển thị
+- Gọi thoại + video call hoạt động: Mint 22 (wine 11.17 classic), Ubuntu
+  26.04, Fedora (wine 11.14/11.17 + gst 32-bit).
+- Share screen Wayland hoạt động (KDE, người dùng xác nhận).
+- Bundle Full self-contained — 4 gate tự động tại build (ldd, dlopen
+  RTLD_NOW, python dbus+gi, gst-inspect + Xvfb smoke).
+- Wine classic 11.17: `wineboot` + pipebridge + ZaloCall + camera DirectShow
+  chạy thật (repro `camtest.c` bắt frame thành công).

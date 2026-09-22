@@ -13,7 +13,7 @@ const { exec, execSync } = require('child_process');
 const SCREENSHOT_TOOLS = [
   { name: 'cosmic-screenshot',      cmd: 'cosmic-screenshot' },
   { name: 'deepin-screen-recorder', cmd: 'deepin-screen-recorder' },
-  { name: 'spectacle',              cmd: 'spectacle -rbc' },
+  { name: 'spectacle',              cmd: 'spectacle -rbcn' },
   { name: 'flameshot',              cmd: 'flameshot gui' },
   { name: 'gnome-screenshot',       cmd: 'gnome-screenshot -ac' },
   { name: 'xfce4-screenshooter',    cmd: 'xfce4-screenshooter -rc' },
@@ -48,9 +48,10 @@ function register({ ipcMain }) {
 
         // Restore window
         if (hideWindow && _mainWindow && !_mainWindow.isDestroyed()) {
-          _mainWindow.show();
           if (_mainWindow.isMinimized()) _mainWindow.restore();
+          _mainWindow.show();
           _mainWindow.focus();
+          _mainWindow.moveTop();
           if (!_mainWindow.webContents.isDestroyed()) {
             _mainWindow.webContents.send('show-from-tray');
           }
@@ -72,8 +73,8 @@ function _triggerScreenshot() {
         console.log(`[Screenshot Plugin] Using ${tool.name}`);
         exec(tool.cmd, (err) => {
           if (err) console.error(`[Screenshot Plugin] ${tool.name} error:`, err.message);
+          resolve(true);
         });
-        setTimeout(() => resolve(true), 1500);
         return;
       } catch (e) { /* tool not found, try next */ }
     }

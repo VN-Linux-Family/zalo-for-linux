@@ -112,7 +112,11 @@ static void bridge(const char *pipeName, unsigned short tcpPort, const char *lab
         t1 = CreateThread(NULL, 0, pump, &a1, 0, NULL);
         t2 = CreateThread(NULL, 0, pump, &a2, 0, NULL);
         WaitForSingleObject(t1, INFINITE);
-        WaitForSingleObject(t2, INFINITE);
+        /* The pipe->socket pump exits when ZaloCall goes away. Unblock the
+           socket->pipe pump (it may be parked in recv) so the loop can
+           re-create the pipes and wait for the next ZaloCall instance. */
+        shutdown(sock, SD_BOTH);
+        WaitForSingleObject(t2, 5000);
 
         fprintf(stderr, "[%s] connection ended, waiting for reconnect\n", label);
         closesocket(sock);
@@ -135,6 +139,14 @@ static DWORD WINAPI bridgeThread(LPVOID arg) {
 
 int main(int argc, char **argv) {
     WSADATA wsa;
+
+    /* Self-test used by the Linux app to verify this wine can run 32-bit
+       executables: pipebridge.exe --version prints and exits. */
+    if (argc > 1 && strcmp(argv[1], "--version") == 0) {
+        printf("pipebridge 1\n");
+        return 0;
+    }
+
     unsigned short recvPort = (argc > 1) ? (unsigned short)atoi(argv[1]) : 29631;
     unsigned short sendPort = (argc > 2) ? (unsigned short)atoi(argv[2]) : 29632;
 

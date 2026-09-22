@@ -13,11 +13,23 @@ reimplementation, see [nativelibs/README.md](./nativelibs/README.md).
 - Node.js and npm
 - `7z` (`p7zip-full`) for extracting the macOS app
 - C++ build tools for native addons (see [nativelibs/README.md](./nativelibs/README.md#requirements))
+- The `zcall-bridge` call-engine toolchain: `gcc-mingw-w64-i686`
+  (`pipebridge.exe`), 32-bit + 64-bit X11 dev libs (the `streamproxy`
+  capture shims), `libpipewire-0.3-0` (bundled-GStreamer self-containment
+  checks) — see the apt command below
+- `rpm` (`rpmbuild`) for the .rpm target and `libarchive-tools` (`bsdtar`)
+  for the pacman target — electron-builder's fpm needs both on the build
+  machine even on Debian/Ubuntu hosts
+- `docker` (optional, for the self-contained 64-bit GStreamer bundle —
+  without it the Full AppImage falls back to the host's GStreamer at runtime)
 
 On Debian/Ubuntu:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev
+sudo dpkg --add-architecture i386
+sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev \
+  gcc-mingw-w64-i686 gcc-multilib libc6-dev-i386 libx11-dev libxcb1-dev libxext-dev \
+  libx11-dev:i386 libxcb1-dev:i386 libxext-dev:i386 libpipewire-0.3-0 rpm libarchive-tools
 ```
 
 ## Quick Start
@@ -34,7 +46,8 @@ git submodule update --init --recursive
 npm run main
 ```
 
-Output: `dist/Zalo-<version>.AppImage`
+Output (standard variants): `dist/Zalo-<version>.{AppImage,deb,rpm,pacman}` — the
+Full variants (wine + GStreamer bundled) are AppImage-only.
 
 ## Two-Phase Build
 

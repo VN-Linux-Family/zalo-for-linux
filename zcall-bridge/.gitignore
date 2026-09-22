@@ -1,0 +1,8 @@
+# NOTE: streamproxy.so / streamproxy-x86_64.so must NOT be listed here —
+# electron-builder honors .gitignore when packaging extraFiles, and ignoring
+# them silently ships the AppImage WITHOUT the capture shim (share screen
+# dies, and ZaloCall runs without the preload the old releases had).
+# The shims are compiled by scripts/setup-zcall-bridge.js at build time.
+__pycache__/
+gst-i386/
+*.so

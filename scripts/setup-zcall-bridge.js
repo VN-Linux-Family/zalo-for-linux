@@ -8,13 +8,15 @@
  *      app/native/qt-call-and-cap/, then trims unneeded files
  *   2. Compiles pipebridge.c (252KB named-pipe <-> TCP pump, no runtime
  *      needed) with mingw, falling back to the committed prebuilt exe
+ *   3. Compiles streamproxy.c (LD_PRELOAD shim that redirects ZaloCall's
+ *      screen-capture reads to the Wayland bridge display) with gcc
  *
  * No proprietary binaries are committed to this repository — everything is
  * fetched from official sources at setup time (same policy as the macOS DMG).
  */
 
 const { execSync } = require('child_process');
-const fs = require('fs');
+const fs = require('fs-extra');
 const path = require('path');
 const https = require('https');
 const logger = require('./utils/logger');
@@ -74,8 +76,10 @@ async function main() {
 
   // -------------------------------------------------------------------------
   // 1. plugins/capture from the Windows installer
+  //    NOTE: the Windows version is resolved independently of ZALO_VERSION
+  //    (which refers to the macOS DMG) — the two version families can diverge.
   // -------------------------------------------------------------------------
-  const version = process.env.ZALO_VERSION || await getWindowsVersion();
+  const version = process.env.ZALO_WIN_VERSION || await getWindowsVersion();
   logger.info(`Setting up call-v2 runtime from Zalo Windows v${version}...`);
 
   const exeName = `ZaloSetup-${version}.exe`;
@@ -92,7 +96,8 @@ async function main() {
     fs.copyFileSync(path.join(TEMP_DIR, 'zcall-bridge-extract', 'app-32.7z'), inner7z);
   }
 
-  const captureOut = path.join(TEMP_DIR, 'capture-extract');
+  // version-tagged so CI caching never serves a stale engine for a new version
+  const captureOut = path.join(TEMP_DIR, `capture-extract-${version}`);
   if (!fs.existsSync(path.join(captureOut, 'ZaloCall.exe'))) {
     sevenz(`x -y "${path.basename(inner7z)}" 'Zalo-${version}/plugins/capture/*' -o${captureOut}`);
   }
@@ -116,9 +121,10 @@ async function main() {
   logger.dim('Trimmed unneeded Qt plugins / DLLs');
 
   // -------------------------------------------------------------------------
-  // 2. pipebridge.exe (tiny C named-pipe <-> TCP pump, no runtime needed)
-  //    Prefer compiling from source with mingw; fall back to the committed
-  //    prebuilt exe (our own code, reproducible from zcall-bridge/pipebridge.c).
+  // 2. pipebridge.exe (tiny C named-pipe <-> TCP pump, no runtime needed).
+  //    Compiled from source — requires mingw on the build machine
+  //    (i686-w64-mingw32-gcc). Binaries are not committed (*.exe is
+  //    gitignored per repo policy).
   // -------------------------------------------------------------------------
   const srcC = path.join(ROOT, 'zcall-bridge', 'pipebridge.c');
   const builtExe = path.join(ROOT, 'zcall-bridge', 'pipebridge.exe');
@@ -129,7 +135,10 @@ async function main() {
       });
       logger.dim('pipebridge.exe compiled from source');
     } catch (e) {
-      logger.warn('mingw compile failed, using committed prebuilt exe if present');
+      throw new Error(
+        'mingw (i686-w64-mingw32-gcc) is required to build pipebridge.exe — ' +
+        'install it with: sudo apt install gcc-mingw-w64-i686'
+      );
     }
   }
   if (fs.existsSync(builtExe)) {
@@ -137,6 +146,97 @@ async function main() {
     logger.success('pipebridge.exe installed');
   } else {
     logger.warn('pipebridge.exe missing — build it with: i686-w64-mingw32-gcc zcall-bridge/pipebridge.c -lws2_32 -O2 -o zcall-bridge/pipebridge.exe');
+  }
+
+  // -------------------------------------------------------------------------
+  // 3. streamproxy.so (LD_PRELOAD shim that redirects ZaloCall's
+  //    screen-capture reads to the bridge display). Two builds of the same
+  //    source, chosen at runtime by the wine flavor (see selectProxySo in
+  //    plugins/zcall-bridge/index.js):
+  //    - 32-bit: classic wine builds keep 32-bit unixlibs (lib/wine/i386-unix),
+  //      so ZaloCall runs in a 32-bit process whose winex11 driver binds the
+  //      32-bit libX11 — only a 32-bit preload can intercept.
+  //    - 64-bit: pure-wow64 wine builds (Full variant's bundled runtime) host
+  //      the 32-bit Windows code in ONE 64-bit process with 64-bit unixlibs —
+  //      only a 64-bit preload can intercept there.
+  // -------------------------------------------------------------------------
+  const proxySrc = path.join(ROOT, 'zcall-bridge', 'streamproxy.c');
+  const proxySo = path.join(ROOT, 'zcall-bridge', 'streamproxy.so');
+  if (fs.existsSync(proxySrc)) {
+    try {
+      execSync(`gcc -m32 -shared -fPIC -O2 "${proxySrc}" -ldl -lX11 -lxcb -lpthread -o "${proxySo}"`, {
+        cwd: ROOT, stdio: 'pipe'
+      });
+      logger.dim('streamproxy.so (32-bit) compiled from source');
+    } catch (e) {
+      throw new Error(
+        '32-bit build toolchain is required for streamproxy.so — ' +
+        'install with: sudo apt install gcc-multilib libc6-dev-i386 libx11-dev:i386 libxcb1-dev:i386 libxext-dev:i386' +
+        ' (gcc said: ' + String(e.stderr || e.message).trim().slice(-300) + ')'
+      );
+    }
+
+    // 3b. 64-bit variant — used when the selected wine is a pure-wow64 build
+    //     (Full variant's bundled wine). Non-fatal: the 32-bit shim above is
+    //     the hard requirement; this one only serves the wow64 runtime.
+    const proxySo64 = path.join(ROOT, 'zcall-bridge', 'streamproxy-x86_64.so');
+    try {
+      execSync(`gcc -shared -fPIC -O2 "${proxySrc}" -ldl -lX11 -lxcb -lpthread -o "${proxySo64}"`, {
+        cwd: ROOT, stdio: 'pipe'
+      });
+      logger.dim('streamproxy-x86_64.so (64-bit) compiled from source');
+    } catch (e) {
+      logger.warn('64-bit shim build failed — Full variants lose Wayland screen-share proxying: ' +
+        String(e.stderr || e.message).trim().slice(-200));
+    }
+  } else {
+    logger.warn('streamproxy.c missing — share screen will not work on Wayland');
+  }
+
+  // -------------------------------------------------------------------------
+  // 4. camtest.exe — the per-machine camera probe (wine DirectShow capture)
+  //    that decides whether the v4l2loopback bridge is needed. Same mingw
+  //    toolchain as pipebridge.exe above, so it is required too.
+  // -------------------------------------------------------------------------
+  const camtestSrc = path.join(ROOT, 'zcall-bridge', 'camtest.c');
+  const camtestExe = path.join(ROOT, 'zcall-bridge', 'camtest.exe');
+  try {
+    execSync(`i686-w64-mingw32-gcc "${camtestSrc}" -lstrmiids -lole32 -loleaut32 -o "${camtestExe}"`, {
+      cwd: ROOT, stdio: 'pipe'
+    });
+    logger.dim('camtest.exe compiled from source');
+  } catch (e) {
+    throw new Error(
+      'mingw (i686-w64-mingw32-gcc) is required to build camtest.exe — ' +
+      'install it with: sudo apt install gcc-mingw-w64-i686' +
+      ' (gcc said: ' + String(e.stderr || e.message).trim().slice(-300) + ')'
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // 5. Bundled 32-bit GStreamer stack (gst 1.28 + libv4l 1.32, Ubuntu 26.04
+  //    i386 packages). Ubuntu 24.04's i386 gst 1.24 + libv4l 1.26 stalls
+  //    UVC cameras (DQBUF EPIPE) in wine's capture path — classic wine
+  //    always uses this bundled stack (see applyWineEnv in the plugin).
+  //    The extracted tree IS committed (electron-builder honors .gitignore
+  //    when packaging extraFiles, so zcall-bridge/gst-i386 must stay
+  //    tracked); this step just regenerates it from the .debs.
+  // -------------------------------------------------------------------------
+  const gstDebDir = path.join(ROOT, 'scripts', 'gst-i386-debs');
+  const gstOutDir = path.join(ROOT, 'zcall-bridge', 'gst-i386');
+  if (fs.existsSync(gstDebDir)) {
+    try {
+      for (const deb of fs.readdirSync(gstDebDir)) {
+        if (!deb.endsWith('.deb')) continue;
+        execSync(`dpkg-deb -x "${path.join(gstDebDir, deb)}" "${gstOutDir}"`, {
+          cwd: ROOT, stdio: 'pipe'
+        });
+      }
+      logger.dim('gst-i386 bundle extracted from ' +
+        fs.readdirSync(gstDebDir).filter((n) => n.endsWith('.deb')).length + ' debs');
+    } catch (e) {
+      logger.warn('gst-i386 extraction failed: ' + String(e.stderr || e.message).trim().slice(-200));
+    }
   }
 
   logger.success('call-v2 runtime ready: ' + TARGET);

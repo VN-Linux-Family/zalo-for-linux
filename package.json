@@ -48,7 +48,12 @@
       "main.js",
       "package.json",
       "plugins/**/*",
+      "!plugins/zadark/**",
       "assets/**/*"
+    ],
+    "electronLanguages": [
+      "vi",
+      "en-US"
     ],
     "extraFiles": [
       {
@@ -59,6 +64,10 @@
           "!node_modules",
           "!package-lock.json"
         ]
+      },
+      {
+        "from": "zcall-bridge",
+        "to": "zcall-bridge"
       }
     ],
     "asarUnpack": [
@@ -67,9 +76,106 @@
     "buildDependenciesFromSource": false,
     "nodeGypRebuild": false,
     "npmRebuild": false,
+    "deb": {
+      "afterInstall": "scripts/linux-after-install.sh",
+      "afterRemove": "scripts/linux-after-remove.sh",
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "gstreamer1.0-pipewire",
+        "gstreamer1.0-tools",
+        "gstreamer1.0-x",
+        "libgstreamer1.0-0",
+        "libgstreamer-plugins-base1.0-0",
+        "xvfb",
+        "xdotool",
+        "python3",
+        "python3-dbus",
+        "python3-gi",
+        "libc6:i386",
+        "libx11-6:i386",
+        "libfreetype6:i386",
+        "libgl1:i386",
+        "libpulse0:i386",
+        "libasound2:i386",
+        "zlib1g:i386"
+      ]
+    },
+    "rpm": {
+      "afterInstall": "scripts/linux-after-install.sh",
+      "afterRemove": "scripts/linux-after-remove.sh",
+      "depends": [
+        "gtk3",
+        "libnotify",
+        "nss",
+        "libXScrnSaver",
+        "libXtst",
+        "xdg-utils",
+        "at-spi2-core",
+        "libuuid",
+        "libsecret",
+        "gstreamer1",
+        "gstreamer1-plugins-base",
+        "gstreamer1-plugin-pipewire",
+        "xorg-x11-server-Xvfb",
+        "xdotool",
+        "python3",
+        "python3-dbus",
+        "python3-gobject",
+        "glibc(x86-32)",
+        "libX11(x86-32)",
+        "freetype(x86-32)",
+        "libGL(x86-32)",
+        "pulseaudio-libs(x86-32)",
+        "alsa-lib(x86-32)",
+        "zlib(x86-32)"
+      ]
+    },
+    "pacman": {
+      "afterInstall": "scripts/linux-after-install.sh",
+      "afterRemove": "scripts/linux-after-remove.sh",
+      "depends": [
+        "gtk3",
+        "libnotify",
+        "nss",
+        "libxss",
+        "libxtst",
+        "xdg-utils",
+        "at-spi2-core",
+        "libsecret",
+        "gstreamer",
+        "gst-plugins-base",
+        "gst-plugin-pipewire",
+        "xorg-server-xvfb",
+        "xdotool",
+        "python",
+        "python-dbus",
+        "python-gobject",
+        "lib32-glibc",
+        "lib32-libx11",
+        "lib32-freetype2",
+        "lib32-libglvnd",
+        "lib32-libpulse",
+        "lib32-alsa-lib",
+        "lib32-zlib"
+      ]
+    },
     "linux": {
       "executableName": "zalo",
-      "target": "AppImage",
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm",
+        "pacman"
+      ],
+      "maintainer": "developer",
       "category": "Network",
       "desktop": {
         "entry": {
@@ -80,5 +186,8 @@
       "description": "Unofficial port of Zalo messaging application for Linux systems.",
       "icon": "app/pc-dist/favicon-512x512.png"
     }
+  },
+  "dependencies": {
+    "fs-extra": "^11.4.0"
   }
 }
