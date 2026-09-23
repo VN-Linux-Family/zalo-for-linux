@@ -124,6 +124,26 @@ jobs:
         path: ${{ steps.build.outputs.plainfull_appimage_file }}
         retention-days: 30
 
+  release:
+    name: Release the AppImages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        ref: ${{ github.ref_name }}
+        fetch-depth: 0 
+        
+    - name: Download all AppImage artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: Zalo*
+        path: dist
+        merge-multiple: true
+
     - name: Create Release
       if: steps.build.outputs.build == 'true'
       uses: softprops/action-gh-release@v1
