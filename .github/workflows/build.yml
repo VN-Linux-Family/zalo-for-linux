@@ -144,6 +144,9 @@ jobs:
         path: dist
         merge-multiple: true
 
+    - name: Get current commit hash via Git
+      run: echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
     - name: Create Release
       if: steps.build.outputs.build == 'true'
       uses: softprops/action-gh-release@v1
