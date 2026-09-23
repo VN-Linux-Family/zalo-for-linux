@@ -47,7 +47,7 @@ async function main() {
     if (!content.includes("process.platform === 'linux'")) {
       content = content.replace(
         `} else {\n    return {error: 'not support'};\n  }`,
-        `} else if (process.platform === 'linux'){\n    return require('./linux/file-utils.node');\n  } else {\n    return {error: 'not support'};`
+        `} else if (process.platform === 'linux'){\n    return require('./linux/file-utils.node');\n  } else {\n    return {error: 'not support'};\n  }`
       );
       fs.writeFileSync(indexJsPath, content, 'utf8');
       logger.dim('Patched index.js for Linux support');
