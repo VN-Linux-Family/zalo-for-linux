@@ -8,16 +8,10 @@ Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.
 
 ## ⚠️ Important: Known Issues
 
-- **Can't make or receive calls:** The call module (`zcall`) only ships as a macOS native binary.
+- **➖ Partly-fixed: Can't make or receive calls:** Thanks to @collyn for setting up a Wine wrapper to solve this. See [PR #62](https://github.com/doandat943/zalo-for-linux/pull/62) for more info, but currently calling is not available on aarch64, because Windows `zcall` only supports x86_64.
 - **System/Auto Theme not working:** The app does not follow the system's dark/light mode. Both ZaDark and Zalo ignore `prefers-color-scheme`. See [issue #22](https://github.com/doandat943/zalo-for-linux/issues/22).
-- **✅ Fixed: Message Synchronization (E2EE)** - Thanks to [@realdtn2](https://github.com/realdtn2) for reimplementing `db-cross-v4` with C++. E2EE message sync now works on Linux without any Wine workaround. Thanks to [@DMKha2k7](https://github.com/DMKha2k7) for the PR. See [PR #24](https://github.com/doandat943/zalo-for-linux/pull/24) and [issue #15](https://github.com/doandat943/zalo-for-linux/issues/15).
-- **✅ Fixed: No Photos/Videos, Files and Links on the Conversation Info panel** - Caused by the missing `db-cross-v4` module.
-- **✅ Fixed: Can't see message reactions** - Caused by the missing `db-cross-v4` module.
-- **✅ Fixed: Can't paste images from clipboard** - Image files (`.png`, `.jpg`, `.jpeg`, …) can now be pasted into chats via `Ctrl+V`. Works on Wayland (`wl-clipboard`) and X11 (`xclip`). Thanks to [@realdtn2](https://github.com/realdtn2) for the original solution and [@DMKha2k7](https://github.com/DMKha2k7) for the PR. See [PR #25](https://github.com/doandat943/zalo-for-linux/pull/25) and [issue #23](https://github.com/doandat943/zalo-for-linux/issues/23).
-- **✅ Fixed: Screenshot without/with Zalo window button** - Uses native Linux screenshot tools (see [issue #19](https://github.com/doandat943/zalo-for-linux/issues/19)). Supported tools: deepin-screen-recorder, spectacle, flameshot, gnome-screenshot, xfce4-screenshooter, mate-screenshot, ksnapshot, scrot. Thanks to [@hthienloc](https://github.com/hthienloc) for the solution.
-- **✅ Fixed: No title bar with minimize/maximize/close buttons** - Thanks to [@NanKillBro](https://github.com/NanKillBro) for the solution. For more details, see [issue #4](https://github.com/doandat943/zalo-for-linux/issues/4)
-- **✅ Fixed: No tray menu icon**
-- **✅ Fixed: Freeze on login screen** - Replaced macOS sqlite3 binaries with native Linux builds. See [issue #13](https://github.com/doandat943/zalo-for-linux/issues/13).
+
+> 💡 **For the full list of resolved issues, workarounds, and community credits, see [KNOWN_ISSUES.md](./KNOWN_ISSUES.md).**
 
 This project is best suited for users who need a native-feeling Zalo client on Linux and are comfortable with the technical workarounds required for full functionality.
 
@@ -73,15 +67,17 @@ We strongly recommend using **Gear Lever** to integrate the AppImage perfectly i
 
 Prerequisites:
 
-- Linux x86_64
+- Linux x86_64 or aarch64
 - Node.js and npm
 - 7z (p7zip-full) for extracting the macOS app during setup
 - C++ build tools (for native addons): `build-essential`, `libssl-dev`, `liblzma-dev`
+- `zcall` build tools: `gcc-mingw-w64-i686` `gcc-multilib` `libc6-dev-i386` `libx11-dev` `libxcb1-dev` `libx11-dev:i386` `libxcb1-dev:i386` `libxext-dev:i386`
 
 On Debian/Ubuntu:
 
 ```bash
-sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev
+sudo dpkg --add-architecture i386
+sudo apt update && sudo apt install -y liblzma-dev p7zip-full gcc-mingw-w64-i686 gcc gcc-multilib libc6-dev-i386 libx11-dev libxcb1-dev libx11-dev:i386 libxcb1-dev:i386 libxext-dev:i386 zsync
 ```
 
 Steps:
@@ -111,13 +107,16 @@ This project is not a from-scratch rewrite of Zalo. It works by:
 2.  Using `7z` to extract the `app.asar` archive, which contains the main application logic written in JavaScript.
 3.  Removing incompatible native macOS files.
 4.  Wrapping the extracted application in a minimal, Linux-compatible Electron shell.
-5.  Using `electron-builder` to package everything into a single, portable `AppImage` file.
+5.  Using `electron-builder`, then `quick-sharun` to package everything into a single, portable `AppImage` file.
 
 For a deeper dive into the build pipeline and patching strategy, see
 [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 For native addons (db-cross-v4, etc.), see
 [`nativelibs/README.md`](./nativelibs/README.md).
+
+For the `zcall` bridge, see
+- [zcall-bridge/README.md](./zcall-bridge/README.md)
 
 ## 🐛 Troubleshooting & Debugging
 
@@ -127,9 +126,11 @@ If you encounter issues or want to inspect the app's behavior, you can easily op
 
 ## 📚 More Documentation
 
+- [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) — Known issues, workarounds, and resolved bug history
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — How the build pipeline and patches work
 - [DEVELOPMENT.md](./DEVELOPMENT.md) — Building from source, scripts, adding patches
 - [nativelibs/README.md](./nativelibs/README.md) — Native addons (db-cross-v4, etc.)
+- [zcall-bridge/README.md](./zcall-bridge/README.md) — `zcall` bridge
 
 ## 📄 License
 

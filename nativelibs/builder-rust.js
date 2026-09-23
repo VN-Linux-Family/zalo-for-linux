@@ -36,7 +36,7 @@ for (const key of ['CFLAGS', 'CXXFLAGS', 'LDFLAGS']) {
 
 execSync(
   `cargo build --release`,
-  { cwd: libDir, stdio: 'ignore', env }
+  { cwd: libDir, stdio: 'inherit', env }
 );
 
 const files = fs.readdirSync(releaseBinary).filter(f => f.endsWith('.so'));

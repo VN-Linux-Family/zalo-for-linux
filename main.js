@@ -24,7 +24,6 @@ let isAppQuitting = false;
 // Plugins
 // ---------------------------------------------------------------------------
 
-const zaluxPlugin = require('./plugins/zalux');
 const screenshotPlugin = require('./plugins/screenshot');
 const launcherBadgePlugin = require('./plugins/launcher-badge');
 const userscriptsPlugin = require('./plugins/userscripts');
@@ -175,7 +174,6 @@ app.once('ready', () => {
 
 // Register plugins
   launcherBadgePlugin.register({ app, ipcMain });
-  zaluxPlugin.register({ app, ipcMain, BrowserWindow, appDir });
   screenshotPlugin.register({ ipcMain });
   userscriptsPlugin.register({ app, ipcMain, BrowserWindow });
   zcallBridgePlugin.launch({ userDataDir: app.getPath('userData') });

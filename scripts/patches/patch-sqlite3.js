@@ -1,12 +1,13 @@
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
 
 const APP_DIR = path.join(__dirname, '..', '..', 'app');
 const NODE_MODULES = path.join(__dirname, '..', '..', 'node_modules');
 
 async function main() {
-  const sqliteTargetDir = path.join(APP_DIR, 'native', 'nativelibs', 'sqlite3', 'binding', 'napi-v6-linux-x64');
+  const sqliteTargetDir = path.join(APP_DIR, 'native', 'nativelibs', 'sqlite3', 'binding', `napi-v6-linux-${arch}`);
   fs.mkdirSync(sqliteTargetDir, { recursive: true });
 
   const targetNodePath = path.join(sqliteTargetDir, 'node_sqlite3.node');

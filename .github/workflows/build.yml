@@ -29,8 +29,33 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    outputs:
+      zalo_version: ${{ steps.build.outputs.zalo_version }}
+      original_appimage_name: ${{ steps.build.outputs.original_appimage_name }}
+      original_appimage_file: ${{ steps.build.outputs.original_appimage_file }}
+      zadark_appimage_name: ${{ steps.build.outputs.zadark_appimage_name }}
+      zadark_appimage_file: ${{ steps.build.outputs.zadark_appimage_file }}
+      full_appimage_name: ${{ steps.build.outputs.full_appimage_name }}
+      full_appimage_file: ${{ steps.build.outputs.full_appimage_file }}
+      plainfull_appimage_name: ${{ steps.build.outputs.plainfull_appimage_name }}
+      plainfull_appimage_file: ${{ steps.build.outputs.plainfull_appimage_file }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            sys_deps: >
+              sudo dpkg --add-architecture i386 &&
+              sudo apt update &&
+              sudo apt install -y build-essential liblzma-dev p7zip-full gcc-mingw-w64-i686 gcc gcc-multilib g++ clang libclang-dev llvm libc6-dev-i386 libx11-dev libxcb1-dev libx11-dev:i386 libxcb1-dev:i386 libxext-dev:i386 zsync
+          - arch: aarch64
+            runner: ubuntu-24.04-arm 
+            sys_deps: >
+              sudo apt update &&
+              sudo apt install -y build-essential liblzma-dev p7zip-full gcc g++ clang libclang-dev llvm libc6-dev libx11-dev libxcb1-dev libxext-dev
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -50,17 +75,17 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cache/electron
-        key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+        key: ${{ runner.os }}-${{ matrix.arch }}-electron-${{ hashFiles('package-lock.json') }}
         restore-keys: |
-          ${{ runner.os }}-electron-
+          ${{ runner.os }}-${{ matrix.arch }}-electron-
 
-    - name: Cache build downloads (DMG, Windows installer, call engine)
+    - name: Cache build downloads
       uses: actions/cache@v3
       with:
         path: temp
-        key: ${{ runner.os }}-zalo-temp-${{ hashFiles('package-lock.json') }}
+        key: ${{ runner.os }}-${{ matrix.arch }}-zalo-temp-${{ hashFiles('package-lock.json') }}
         restore-keys: |
-          ${{ runner.os }}-zalo-temp-
+          ${{ runner.os }}-${{ matrix.arch }}-zalo-temp-
 
     - name: Cache Cargo registry and build artifacts
       uses: actions/cache@v3
@@ -69,18 +94,15 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           nativelibs/*/target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('nativelibs/*/Cargo.lock') }}
+        key: ${{ runner.os }}-${{ matrix.arch }}-cargo-${{ hashFiles('nativelibs/*/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-
+          ${{ runner.os }}-${{ matrix.arch }}-cargo-
           
     - name: Install Node.js dependencies
       run: npm ci --prefer-offline --no-audit
 
-    - name: Install system build dependencies
-      run: |
-        sudo dpkg --add-architecture i386
-        sudo apt-get update
-        sudo apt-get install -y liblzma-dev p7zip-full gcc-mingw-w64-i686 gcc gcc-multilib libc6-dev-i386 libx11-dev libxcb1-dev libx11-dev:i386 libxcb1-dev:i386 libxext-dev:i386
+    - name: Install system build dependencies (${{ matrix.arch }})
+      run: ${{ matrix.sys_deps }}
 
     - name: Setup and Build
       id: build
@@ -93,35 +115,35 @@ jobs:
       run: npm run main
         
     - name: Upload Original AppImage artifact
-      if: steps.build.outputs.build == 'true'
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.original_appimage_file != ''
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.build.outputs.original_appimage_name }}
-        path: ${{ steps.build.outputs.original_appimage_file }}
+        name: ${{ steps.build.outputs.original_appimage_name }}-${{ matrix.arch }}
+        path: ${{ steps.build.outputs.original_appimage_file }}*
         retention-days: 30
         
     - name: Upload ZaDark AppImage artifact
-      if: steps.build.outputs.build == 'true'
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.zadark_appimage_file != ''
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.build.outputs.zadark_appimage_name }}
-        path: ${{ steps.build.outputs.zadark_appimage_file }}
+        name: ${{ steps.build.outputs.zadark_appimage_name }}-${{ matrix.arch }}
+        path: ${{ steps.build.outputs.zadark_appimage_file }}*
         retention-days: 30
 
     - name: Upload Full AppImage artifact (wine bundled, ZaDark)
-      if: steps.build.outputs.build == 'true'
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.full_appimage_file != ''
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.build.outputs.full_appimage_name }}
-        path: ${{ steps.build.outputs.full_appimage_file }}
+        name: ${{ steps.build.outputs.full_appimage_name }}-${{ matrix.arch }}
+        path: ${{ steps.build.outputs.full_appimage_file }}*
         retention-days: 30
 
     - name: Upload Full AppImage artifact (wine bundled, no ZaDark)
-      if: steps.build.outputs.build == 'true'
+      if: steps.build.outputs.build == 'true' && steps.build.outputs.plainfull_appimage_file != ''
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.build.outputs.plainfull_appimage_name }}
-        path: ${{ steps.build.outputs.plainfull_appimage_file }}
+        name: ${{ steps.build.outputs.plainfull_appimage_name }}-${{ matrix.arch }}
+        path: ${{ steps.build.outputs.plainfull_appimage_file }}*
         retention-days: 30
 
   release:
@@ -145,48 +167,41 @@ jobs:
         merge-multiple: true
 
     - name: Create Release
-      if: steps.build.outputs.build == 'true'
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ steps.build.outputs.zalo_version }}
-        name: ${{ steps.build.outputs.zalo_version }}
+        tag_name: ${{ needs.build.outputs.zalo_version }}
+        name: ${{ needs.build.outputs.zalo_version }}
         body: |
           ## 🚀 How to use
 
           It is recommended to use [Gear Lever](https://github.com/mijorus/gearlever) to manage and integrate the AppImage.
 
+          Choose the appropriate AppImage for your system architecture below (x64 or aa64) and download it.
+          
           ```bash
-          # Download the AppImage
-          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.build.outputs.zalo_version }}/${{ steps.build.outputs.zadark_appimage_name }}
-
           # Install with Gear Lever
-          flatpak run it.mijorus.gearlever --integrate ${{ steps.build.outputs.zadark_appimage_name }}
+          flatpak run it.mijorus.gearlever --integrate <downloaded-file>
           ```
 
           > 🍷 **Full variants** (portable wine bundled inside — the call feature, voice/video/share screen, works right after the first launch with no download; larger files ~430MB):
-          > - `${{ steps.build.outputs.plainfull_appimage_name }}` (without ZaDark)
-          > - `${{ steps.build.outputs.full_appimage_name }}` (with ZaDark)
+          > - `*-Full-x86_64.AppImage` (with ZaDark)
+          > - `*-PlainFull-x86_64.AppImage` (without ZaDark)
 
           ## 📋 System Requirements
-          - Linux x64
+          - Linux x64 or aa64
           - GLIBC 2.28 or later
 
           ## 🐛 Issues & Support
           Please report issues in the [GitHub Issues](https://github.com/${{ github.repository }}/issues) section.
 
-        files: |
-          ${{ steps.build.outputs.original_appimage_file }}
-          ${{ steps.build.outputs.zadark_appimage_file }}
-          ${{ steps.build.outputs.plainfull_appimage_file }}
-          ${{ steps.build.outputs.full_appimage_file }}
+        files: dist/*.AppImage*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Cleanup old release assets
-      if: steps.build.outputs.build == 'true'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        RELEASE_TAG: ${{ steps.build.outputs.zalo_version }}
+        RELEASE_TAG: ${{ needs.build.outputs.zalo_version }}
         CURRENT_COMMIT: ${{ env.COMMIT_HASH }}
       run: |
         set -euo pipefail
@@ -201,7 +216,7 @@ jobs:
         fi
 
         for name in $asset_names; do
-          if [[ "$name" == Zalo-*.AppImage ]] && [[ "$name" != *"$CURRENT_COMMIT"* ]]; then
+          if [[ "$name" == Zalo-*.AppImage* ]] && [[ "$name" != *"$CURRENT_COMMIT"* ]]; then
             echo "Removing old asset: $name"
             gh release delete-asset "$RELEASE_TAG" "$name" --yes
           fi
