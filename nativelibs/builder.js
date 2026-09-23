@@ -13,6 +13,7 @@ const { execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../scripts/utils/logger');
+const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
 
 const PACKAGE_JSON = require(path.join(__dirname, '..', 'package.json'));
 const ELECTRON_VERSION = PACKAGE_JSON.devDependencies.electron.replace(/^\^/, '');
@@ -33,7 +34,7 @@ if (!fs.existsSync(nodeModules)) {
 }
 
 execSync(
-  `npx node-gyp configure --target=${ELECTRON_VERSION} --arch=x64 --dist-url=https://www.electronjs.org/headers build`,
+  `npx node-gyp configure --target=${ELECTRON_VERSION} --arch=${arch} --dist-url=https://www.electronjs.org/headers build`,
   { cwd: libDir, stdio: 'ignore' }
 );
 

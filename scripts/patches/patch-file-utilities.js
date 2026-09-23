@@ -47,7 +47,7 @@ async function main() {
     if (!content.includes("case 'linux':")) {
       content = content.replace(
         `default:\n      throw new Error(\`Unsupported OS: \${platform}, architecture: \${arch}\`)\n  }\n}`,
-        `case 'linux':\n      switch (arch) {\n        case 'x64':\n          return join(__dirname, 'linux', 'file-utilities.node')\n        default:\n          throw new Error(\`Unsupported architecture on Linux: \${arch}\`)\n      }\n    default:\n      throw new Error(\`Unsupported OS: \${platform}, architecture: \${arch}\`)\n  }\n}`
+        `case 'linux':\n      return join(__dirname, 'linux', 'file-utilities.node')\n    default:\n      throw new Error(\`Unsupported OS: \${platform}, architecture: \${arch}\`)\n`
       );
       fs.writeFileSync(indexJsPath, content, 'utf8');
       logger.dim('Patched index.js for Linux support');
