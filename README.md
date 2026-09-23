@@ -10,6 +10,14 @@ Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.
 
 - **➖ Partly-fixed: Can't make or receive calls:** Thanks to @collyn for setting up a Wine wrapper to solve this. See [PR #62](https://github.com/doandat943/zalo-for-linux/pull/62) for more info, but currenly calling is not aviable on aarch64, because Windows `zcall` only supports x86_64.
 - **System/Auto Theme not working:** The app does not follow the system's dark/light mode. Both ZaDark and Zalo ignore `prefers-color-scheme`. See [issue #22](https://github.com/doandat943/zalo-for-linux/issues/22).
+- **✅ Fixed: Message Synchronization (E2EE)** - Thanks to [@realdtn2](https://github.com/realdtn2) for reimplementing `db-cross-v4` with C++. E2EE message sync now works on Linux without any Wine workaround. Thanks to [@DMKha2k7](https://github.com/DMKha2k7) for the PR. See [PR #24](https://github.com/doandat943/zalo-for-linux/pull/24) and [issue #15](https://github.com/doandat943/zalo-for-linux/issues/15).
+- **✅ Fixed: No Photos/Videos, Files and Links on the Conversation Info panel** - Caused by the missing `db-cross-v4` module.
+- **✅ Fixed: Can't see message reactions** - Caused by the missing `db-cross-v4` module.
+- **✅ Fixed: Can't paste images from clipboard** - Image files (`.png`, `.jpg`, `.jpeg`, …) can now be pasted into chats via `Ctrl+V`. Works on Wayland (`wl-clipboard`) and X11 (`xclip`). Thanks to [@realdtn2](https://github.com/realdtn2) for the original solution and [@DMKha2k7](https://github.com/DMKha2k7) for the PR. See [PR #25](https://github.com/doandat943/zalo-for-linux/pull/25) and [issue #23](https://github.com/doandat943/zalo-for-linux/issues/23).
+- **✅ Fixed: Screenshot without/with Zalo window button** - Uses native Linux screenshot tools (see [issue #19](https://github.com/doandat943/zalo-for-linux/issues/19)). Supported tools: deepin-screen-recorder, spectacle, flameshot, gnome-screenshot, xfce4-screenshooter, mate-screenshot, ksnapshot, scrot. Thanks to [@hthienloc](https://github.com/hthienloc) for the solution.
+- **✅ Fixed: No title bar with minimize/maximize/close buttons** - Thanks to [@NanKillBro](https://github.com/NanKillBro) for the solution. For more details, see [issue #4](https://github.com/doandat943/zalo-for-linux/issues/4)
+- **✅ Fixed: No tray menu icon**
+- **✅ Fixed: Freeze on login screen** - Replaced macOS sqlite3 binaries with native Linux builds. See [issue #13](https://github.com/doandat943/zalo-for-linux/issues/13).
 
 This project is best suited for users who need a native-feeling Zalo client on Linux and are comfortable with the technical workarounds required for full functionality.
 
@@ -126,6 +134,7 @@ If you encounter issues or want to inspect the app's behavior, you can easily op
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — How the build pipeline and patches work
 - [DEVELOPMENT.md](./DEVELOPMENT.md) — Building from source, scripts, adding patches
+- [nativelibs/README.md](./nativelibs/README.md) — Native addons (db-cross-v4, etc.)
 - [zcall-bridge/README.md](./zcall-bridge/README.md) — `zcall` bridge
 
 ## 📄 License
