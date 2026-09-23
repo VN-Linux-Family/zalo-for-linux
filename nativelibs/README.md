@@ -36,7 +36,12 @@ addons. Each addon is otherwise self-contained.
 
 | Addon | Status | Description |
 |-------|--------|-------------|
-| [db-cross-v4](./db-cross-v4) | ✅ Implemented | Backup decryption |
+| [db-cross-v4](./db-cross-v4) | ✅ Implemented | Backup decryption & E2EE message synchronization |
+| [file-utilities](./file-utilities) | ✅ Implemented | Asynchronous filesystem scanning & pattern matching |
+| [file-utils](./file-utils) | ✅ Implemented | Filesystem access and file management utilities |
+| [mp4thumb](./mp4thumb) | ✅ Implemented | Video thumbnail extraction from MP4 files |
+| [zimage](./zimage) | ✅ Implemented | Image processing, resizing, and format conversions |
+| [zjxl](./zjxl) | ✅ Implemented | JPEG XL (JXL) image decoding and encoding support |
 
 ## Building an Addon
 
