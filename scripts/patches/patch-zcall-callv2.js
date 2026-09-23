@@ -32,8 +32,8 @@ const REPLACEMENTS = [
   // 1. channel addresses: TCP ports on Linux (inline platform checks — no new
   //    variables: the module scope already uses every short name)
   {
-    from: 'y="win32"===n("jle/").platform(),g=y?"\\\\\\\\.\\\\pipe\\\\PipeZCallSend":"/tmp/socketzalosend2021",v=y?"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv":"/tmp/socketzalorecv2021"',
-    to: 'y="win32"===n("jle/").platform(),g=y?"\\\\\\\\.\\\\pipe\\\\PipeZCallSend":"linux"===n("jle/").platform()?29632:"/tmp/socketzalosend2021",v=y?"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv":"linux"===n("jle/").platform()?29631:"/tmp/socketzalorecv2021"',
+    from: /y="win32"===n\("([^"]+)"\)\.platform\(\),g=y\?"\\\\\\\\.\\\\pipe\\\\PipeZCallSend":"\/tmp\/socketzalosend2021",v=y\?"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv":"\/tmp\/socketzalorecv2021"/,
+    to: 'y="win32"===n("$1").platform(),g=y?"\\\\\\\\.\\\\pipe\\\\PipeZCallSend":"linux"===n("$1").platform()?29632:"/tmp/socketzalosend2021",v=y?"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv":"linux"===n("$1").platform()?29631:"/tmp/socketzalorecv2021"',
   },
   // 2. binary path: add Linux branch before the macOS branch
   {
@@ -52,6 +52,7 @@ const REPLACEMENTS = [
   {
     from: ';A=i(e,[v,g]),A.stdout.setEncoding("utf8")',
     to: ';"linux"===process.platform?(i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632"]),A=i(process.env.ZCALL_WINE||"wine",[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"])):A=i(e,[v,g]),A.stdout.setEncoding("utf8")',
+    already: ';"linux"===process.platform?(BB||(BB=!0,TK=',
   },
   // 4. listen: TCP on Linux, unix socket elsewhere
   {
@@ -85,8 +86,9 @@ const REPLACEMENTS = [
   //    message stalls in the queue forever (init goes through, makeCall
   //    never arrives). Reset the flag shortly after each write.
   {
-    from: 'F=!0,e.write(t)',
-    to: 'F=!0,e.write(t),setTimeout((()=>{F=!1,W(e)}),100)',
+    from: /,([$\w]+)=e=>\{if\(U\)if\(F\)[\s\S]{0,1000}?F=!0,e\.write\(t\)/,
+    to: '$&,setTimeout((()=>{F=!1,$1(e)}),100)',
+    already: /F=!0,e\.write\(t\),setTimeout\(\(\(\)=>\{F=!1,[$\w]+\(e\)\}\),100\)/,
   },
   // 8. Auth token handshake: the main process generates a random token,
   //    passes it to pipebridge, and requires it as the first line of every
@@ -99,12 +101,13 @@ const REPLACEMENTS = [
   //    wine missing). Without this, a failed first spawn leaves L=true
   //    forever and later call attempts never re-spawn until app restart.
   {
-    from: 'A.on("error",(e=>{d.zsymb(22,"4OM2ud",["client error","6Br8Rv"],e)}))',
-    to: 'A.on("error",(e=>{L=!1,d.zsymb(22,"4OM2ud",["client error","6Br8Rv"],e)}))',
+    from: /A\.on\("error",\(e=>\{d\.zsymb\((\d+),"([^"]+)",\["client error","([^"]+)"\],e\)\}\)\)/,
+    to: 'A.on("error",(e=>{L=!1,d.zsymb($1,"$2",["client error","$3"],e)}))',
   },
   {
     from: 'i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632"]),A=i(process.env.ZCALL_WINE||"wine"',
     to: 'TK="zcall-"+Math.random().toString(36).slice(2)+Date.now().toString(36),i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632",TK]),A=i(process.env.ZCALL_WINE||"wine"',
+    already: 'BB||(BB=!0,TK="zcall-"',
   },
   // 10. Wayland screen-share bridge: preload the streamproxy shim (when the
   //     plugin set ZCALL_PROXY_SO) so ZaloCall's screen-capture reads are
@@ -114,12 +117,13 @@ const REPLACEMENTS = [
     to: '[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"],{env:Object.assign({},process.env,{LD_PRELOAD:process.env.ZCALL_PROXY_SO||process.env.LD_PRELOAD||""})}))',
   },
   {
-    from: 'e.on("data",(e=>{z(e)})),e.on("end"',
-    to: 'e.on("data",(n=>{if(!e.t){e.t=!0;const t=n.toString();if(t.indexOf(TK)!==0)return e.destroy();n=t.slice(TK.length+1)}z(n)})),e.on("end"',
+    from: /e\.on\("data",\(([$\w]+)=>\{z\(\1\)\}\)\),e\.on\("end"/,
+    to: 'e.on("data",(n=>{if(e.t!==!0){e.t=(e.t||"")+n.toString();const p=e.t.indexOf("\\n");if(p<0)return;if(e.t.slice(0,p)!==TK)return e.destroy();n=e.t.slice(p+1),e.t=!0}n&&z(n)})),e.on("end"',
   },
   {
-    from: 'e.on("data",(t=>{d.zsymb(4,"VafRm1",["serverSend on data","ySFwkp"],t),y||(F=!1,W(e))}))',
-    to: 'e.on("data",(t=>{if(!e.t){e.t=!0;const i=t.toString();if(i.indexOf(TK)!==0)return e.destroy();t=i.slice(TK.length+1)}d.zsymb(4,"VafRm1",["serverSend on data","ySFwkp"],t),y||(F=!1,W(e))}))',
+    from: /e\.on\("data",\(([$\w]+)=>\{d\.zsymb\((\d+),"([^"]+)",\["serverSend on data","([^"]+)"\],\1\),y\|\|\(F=!1,([$\w]+)\(e\)\)\}\)\)/,
+    to: 'e.on("data",($1=>{if(e.t!==!0){e.t=(e.t||"")+$1.toString();const i=e.t.indexOf("\\n");if(i<0)return;if(e.t.slice(0,i)!==TK)return e.destroy();$1=e.t.slice(i+1),e.t=!0}d.zsymb($2,"$3",["serverSend on data","$4"],$1),y||(F=!1,$5(e))}))',
+    already: /e\.t=!0\}[$\w]+\(e\),d\.zsymb\(/,
   },
   // 11. Helper restart support. The Wayland screen bridge restarts ZaloCall
   //     mid-session (DISPLAY is read at spawn time), so the helper must be
@@ -136,8 +140,8 @@ const REPLACEMENTS = [
     to: 'BB||(BB=!0,TK="zcall-"+Math.random().toString(36).slice(2)+Date.now().toString(36),i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632",TK])),A=i(process.env.ZCALL_WINE||"wine"',
   },
   {
-    from: 'A.on("error",(e=>{L=!1,d.zsymb(22,"4OM2ud",["client error","6Br8Rv"],e)}))',
-    to: 'A.on("error",(e=>{L=!1,d.zsymb(22,"4OM2ud",["client error","6Br8Rv"],e)})),A.on("exit",(()=>{L=!1}))',
+    from: /A\.on\("error",\(e=>\{L=!1,d\.zsymb\((\d+),"([^"]+)",\["client error","([^"]+)"\],e\)\}\)\)/,
+    to: 'A.on("error",(e=>{L=!1,d.zsymb($1,"$2",["client error","$3"],e)})),A.on("exit",(()=>{L=!1}))',
   },
   // 12. Queue sends while the helper is restarting instead of writing to a
   //     destroyed socket (unhandled socket error would crash the main
@@ -151,14 +155,29 @@ const REPLACEMENTS = [
     to: 'D=t=>{y?V(e,t):e&&!e.destroyed?G(e,t):x.push(t)',
   },
   {
-    from: 't=i.slice(TK.length+1)}d.zsymb(4,"VafRm1",["serverSend on data","ySFwkp"],t),y||(F=!1,W(e))',
-    to: 't=i.slice(TK.length+1)}W(e),d.zsymb(4,"VafRm1",["serverSend on data","ySFwkp"],t),y||(F=!1,W(e))',
+    from: /e\.t=!0\}d\.zsymb\((\d+),"([^"]+)",\["serverSend on data","([^"]+)"\],([$\w]+)\),y\|\|\(F=!1,([$\w]+)\(e\)\)/,
+    to: 'e.t=!0}$5(e),d.zsymb($1,"$2",["serverSend on data","$3"],$4),y||(F=!1,$5(e))',
   },
   {
-    from: 'else if(e){if(x.length){const t=x.shift();$(e,t)',
-    to: 'else if(e&&!e.destroyed){if(x.length){const t=x.shift();$(e,t)',
+    from: /else if\(e\)\{if\(x\.length\)\{const ([$\w]+)=x\.shift\(\);([$\w]+)\(e,\1\)/,
+    to: 'else if(e&&!e.destroyed){if(x.length){const $1=x.shift();$2(e,$1)',
   },
 ];
+
+function isAlreadyApplied(content, to) {
+  const parts = to.split(/\$\d+/);
+  if (parts.length === 1) return content.includes(to) ? to : null;
+  for (let start = content.indexOf(parts[0]); start !== -1; start = content.indexOf(parts[0], start + 1)) {
+    let end = start + parts[0].length;
+    if (parts.slice(1).every(part => {
+      const next = content.indexOf(part, end);
+      if (next < 0 || next - end > 80) return false;
+      end = next + part.length;
+      return true;
+    })) return content.slice(start, end);
+  }
+  return null;
+}
 
 async function main() {
   if (!fs.existsSync(MAIN_JS)) {
@@ -174,23 +193,30 @@ async function main() {
 
   let content = fs.readFileSync(MAIN_JS, 'utf8');
   let applied = 0;
+  let missing = 0;
 
-  for (const { from, to } of REPLACEMENTS) {
-    if (content.includes(to)) {
-      logger.dim('call-v2 patch already applied: ' + to.slice(0, 50) + '...');
-      applied++;
+  for (const [index, { from, to, already }] of REPLACEMENTS.entries()) {
+    const done = (already && (typeof already === 'string' ? content.includes(already) && already : already.exec(content)?.[0])) || isAlreadyApplied(content, to);
+    if (done) {
+      logger.dim('call-v2 patch already applied: ' + done.slice(0, 60) + '...');
       continue;
     }
-    const count = content.split(from).length - 1;
+    const match = typeof from === 'string' ? null : from.exec(content);
+    const count = typeof from === 'string' ? content.split(from).length - 1 : Number(!!match);
     if (count === 0) {
-      logger.warn('call-v2 pattern not found: ' + from.slice(0, 60) + '...');
+      logger.warn(`call-v2 pattern not found at step ${index + 1}`);
+      missing++;
       continue;
     }
-    content = content.split(from).join(to);
+    content = typeof from === 'string' ? content.split(from).join(to) : content.replace(from, to);
     applied += count;
-    logger.dim(`call-v2 patched (x${count}): ${from.slice(0, 60)}...`);
+    logger.dim(`call-v2 patched (x${count}): ${(match ? match[0] : from).slice(0, 60)}...`);
   }
 
+  if (missing) {
+    logger.warn(`call-v2 patch incomplete: ${missing} pattern(s) not found`);
+    return;
+  }
   if (applied > 0) {
     fs.writeFileSync(MAIN_JS, content, 'utf8');
     logger.success('zcall call-v2 patch applied');
