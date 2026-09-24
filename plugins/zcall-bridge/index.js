@@ -633,6 +633,11 @@ function launch({ userDataDir }) {
   process.env.ZCALL_WINEPREFIX = prefix;
   if (!process.env.WINEDEBUG) process.env.WINEDEBUG = '-all';
 
+  const runtimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid ? process.getuid() : 1000}`;
+  if (!process.env.PULSE_SERVER) {
+    process.env.PULSE_SERVER = `unix:${runtimeDir}/pulse/native`;
+  }
+
   // Streamproxy: the capture shim is preloaded into the helper at ALL times.
   // It is inert while the bridge display is down (captures fall through to
   // the real display) and it signals a share request via a file, which the
