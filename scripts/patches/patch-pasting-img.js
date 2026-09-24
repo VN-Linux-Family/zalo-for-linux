@@ -162,10 +162,13 @@ window.addEventListener('DOMContentLoaded', () => {
             } else if (window.$zelectronNative.saveClipboardImageToTemp) {
                 const tmp = window.$zelectronNative.saveClipboardImageToTemp();
                 if (tmp && !tmp.startsWith('Error')) {
-                    const res = await fetch('file://' + tmp);
-                    const blob = await res.blob();
-                    file = new File([blob], 'screenshot.png', { type: 'image/png' });
-                    window.$zelectronNative.deleteFile && window.$zelectronNative.deleteFile(tmp);
+                    try {
+                        const res = await fetch('file://' + tmp);
+                        const blob = await res.blob();
+                        file = new File([blob], 'screenshot.png', { type: 'image/png' });
+                    } finally {
+                        window.$zelectronNative.deleteFile && window.$zelectronNative.deleteFile(tmp);
+                    }
                 }
             }
             if (!file) {
