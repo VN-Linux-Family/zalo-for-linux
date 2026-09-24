@@ -51,7 +51,7 @@ const REPLACEMENTS = [
   //    another dead linux branch into the ternary.
   {
     from: ';A=i(e,[v,g]),A.stdout.setEncoding("utf8")',
-    to: ';"linux"===process.platform?(i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632"]),A=i(process.env.ZCALL_WINE||"wine",[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"])):A=i(e,[v,g]),A.stdout.setEncoding("utf8")',
+    to: ';"linux"===process.platform?(i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632"],{env:Object.assign({},process.env,{WINEPREFIX:o.join(process.env.XDG_CONFIG_HOME||o.join(require("os").homedir(),".config"),"ZaloData","zcall-wine")})}),A=i(process.env.ZCALL_WINE||"wine",[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"],{env:Object.assign({},process.env,{WINEPREFIX:o.join(process.env.XDG_CONFIG_HOME||o.join(require("os").homedir(),".config"),"ZaloData","zcall-wine")})})):A=i(e,[v,g]),A.stdout.setEncoding("utf8")',
     already: ';"linux"===process.platform?(BB||(BB=!0,TK=',
   },
   // 4. listen: TCP on Linux, unix socket elsewhere
@@ -105,16 +105,16 @@ const REPLACEMENTS = [
     to: 'A.on("error",(e=>{L=!1,d.zsymb($1,"$2",["client error","$3"],e)}))',
   },
   {
-    from: 'i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632"]),A=i(process.env.ZCALL_WINE||"wine"',
-    to: 'TK="zcall-"+Math.random().toString(36).slice(2)+Date.now().toString(36),i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632",TK]),A=i(process.env.ZCALL_WINE||"wine"',
+    from: 'i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632"],{env:Object.assign({},process.env,{WINEPREFIX:o.join(process.env.XDG_CONFIG_HOME||o.join(require("os").homedir(),".config"),"ZaloData","zcall-wine")})}),A=i(process.env.ZCALL_WINE||"wine"',
+    to: 'TK="zcall-"+Math.random().toString(36).slice(2)+Date.now().toString(36),i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632",TK],{env:Object.assign({},process.env,{WINEPREFIX:o.join(process.env.XDG_CONFIG_HOME||o.join(require("os").homedir(),".config"),"ZaloData","zcall-wine")})}),A=i(process.env.ZCALL_WINE||"wine"',
     already: 'BB||(BB=!0,TK="zcall-"',
   },
   // 10. Wayland screen-share bridge: preload the streamproxy shim (when the
   //     plugin set ZCALL_PROXY_SO) so ZaloCall's screen-capture reads are
   //     served from the bridge display while the app itself stays native.
   {
-    from: '[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"]))',
-    to: '[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"],{env:Object.assign({},process.env,{LD_PRELOAD:process.env.ZCALL_PROXY_SO||process.env.LD_PRELOAD||""})}))',
+    from: '[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"],{env:Object.assign({},process.env,{WINEPREFIX:o.join(process.env.XDG_CONFIG_HOME||o.join(require("os").homedir(),".config"),"ZaloData","zcall-wine")})})',
+    to: '[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"],{env:Object.assign({},process.env,{LD_PRELOAD:process.env.ZCALL_PROXY_SO||process.env.LD_PRELOAD||"",WINEPREFIX:o.join(process.env.XDG_CONFIG_HOME||o.join(require("os").homedir(),".config"),"ZaloData","zcall-wine")})}))',
   },
   {
     from: /e\.on\("data",\(([$\w]+)=>\{z\(\1\)\}\)\),e\.on\("end"/,
@@ -136,8 +136,8 @@ const REPLACEMENTS = [
     to: 'F=!1,U=!1,TK=null,BB=!1',
   },
   {
-    from: 'TK="zcall-"+Math.random().toString(36).slice(2)+Date.now().toString(36),i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632",TK]),A=i(process.env.ZCALL_WINE||"wine"',
-    to: 'BB||(BB=!0,TK="zcall-"+Math.random().toString(36).slice(2)+Date.now().toString(36),i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632",TK])),A=i(process.env.ZCALL_WINE||"wine"',
+    from: 'TK="zcall-"+Math.random().toString(36).slice(2)+Date.now().toString(36),i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632",TK],{env:Object.assign({},process.env,{WINEPREFIX:o.join(process.env.XDG_CONFIG_HOME||o.join(require("os").homedir(),".config"),"ZaloData","zcall-wine")})}),A=i(process.env.ZCALL_WINE||"wine"',
+    to: 'BB||(BB=!0,TK="zcall-"+Math.random().toString(36).slice(2)+Date.now().toString(36),i(process.env.ZCALL_WINE||"wine",[o.join(__dirname,"..","native","qt-call-and-cap","pipebridge.exe"),"29631","29632",TK],{env:Object.assign({},process.env,{WINEPREFIX:o.join(process.env.XDG_CONFIG_HOME||o.join(require("os").homedir(),".config"),"ZaloData","zcall-wine")})})),A=i(process.env.ZCALL_WINE||"wine"',
   },
   {
     from: /A\.on\("error",\(e=>\{L=!1,d\.zsymb\((\d+),"([^"]+)",\["client error","([^"]+)"\],e\)\}\)\)/,
