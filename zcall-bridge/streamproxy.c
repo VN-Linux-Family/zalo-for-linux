@@ -163,7 +163,10 @@ Bool XShmGetImage(Display *dpy, Drawable d, XImage *image, int x, int y,
             size_t copy = im->bytes_per_line < image->bytes_per_line
                               ? im->bytes_per_line
                               : image->bytes_per_line;
-            for (unsigned int r = 0; r < (unsigned int)im->height; r++)
+            unsigned int rows = (unsigned int)im->height < (unsigned int)image->height
+                                    ? (unsigned int)im->height
+                                    : (unsigned int)image->height;
+            for (unsigned int r = 0; r < rows; r++)
                 memcpy(image->data + (size_t)r * image->bytes_per_line,
                        im->data + (size_t)r * im->bytes_per_line, copy);
             XDestroyImage(im);
