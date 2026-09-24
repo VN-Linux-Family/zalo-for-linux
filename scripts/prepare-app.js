@@ -201,6 +201,15 @@ async function extractAppAsar() {
 
   const { main: patchShellOpenLinux } = require('./patches/patch-shell-open-linux');
   await patchShellOpenLinux();
+
+  const { main: patchCallSignalFix } = require('./patches/patch-call-signal-fix');
+  await patchCallSignalFix();
+
+  const { main: patchNetworkAndSyncFix } = require('./patches/patch-network-and-sync-fix');
+  await patchNetworkAndSyncFix();
+
+  const { main: patchAutoTheme } = require('./patches/patch-auto-theme');
+  await patchAutoTheme();
 }
 
 function commandExists(command) {

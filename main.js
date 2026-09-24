@@ -20,6 +20,15 @@ let tray = null;
 let mainWindow = null;
 let isAppQuitting = false;
 
+// Linux optimizations & environment defaults
+if (process.platform === 'linux') {
+  const uid = process.getuid ? process.getuid() : 1000;
+  const runtimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`;
+  if (!process.env.PULSE_SERVER) {
+    process.env.PULSE_SERVER = `unix:${runtimeDir}/pulse/native`;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Plugins
 // ---------------------------------------------------------------------------
