@@ -40,8 +40,9 @@ function register({ ipcMain }) {
           _mainWindow.hide();
         }
 
+        let success = false;
         try {
-          await _triggerScreenshot();
+          success = await _triggerScreenshot();
         } catch (e) {
           console.error('[Screenshot Plugin]', e.message);
         }
@@ -54,6 +55,23 @@ function register({ ipcMain }) {
           _mainWindow.moveTop();
           if (!_mainWindow.webContents.isDestroyed()) {
             _mainWindow.webContents.send('show-from-tray');
+          }
+        }
+
+        // Auto-paste captured screenshot into chat
+        if (success) {
+          const targetSender = (event && event.sender && !event.sender.isDestroyed())
+            ? event.sender
+            : (_mainWindow && !_mainWindow.isDestroyed() ? _mainWindow.webContents : null);
+
+          if (targetSender && !targetSender.isDestroyed()) {
+            setTimeout(() => {
+              try {
+                if (!targetSender.isDestroyed()) {
+                  targetSender.send('zalo-linux-auto-paste-screenshot');
+                }
+              } catch (_) {}
+            }, 300);
           }
         }
 
@@ -73,7 +91,7 @@ function _triggerScreenshot() {
         console.log(`[Screenshot Plugin] Using ${tool.name}`);
         exec(tool.cmd, (err) => {
           if (err) console.error(`[Screenshot Plugin] ${tool.name} error:`, err.message);
-          resolve(true);
+          resolve(!err);
         });
         return;
       } catch (e) { /* tool not found, try next */ }
