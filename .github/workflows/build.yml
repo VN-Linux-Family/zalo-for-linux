@@ -155,9 +155,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: recursive
-        ref: ${{ github.ref_name }}
-        fetch-depth: 0 
+        ref: ${{ github.sha }}
         
     - name: Download all AppImage artifacts
       uses: actions/download-artifact@v4
