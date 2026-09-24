@@ -178,12 +178,12 @@ async function build(buildName = '', outputSuffix = '') {
       buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${ZALO_VERSION}" "${artifactName}" "${DIST_DIR}"`;
       logger.info(`Building ${buildName} with Zalo: ${ZALO_VERSION}, ZaDark: ${zadarkVersion}, Commit: ${commitHash}`);
     } else if (outputSuffix === '-PlainFull') {
-      artifactName = `Zalo-${ZALO_VERSION}-${commitHash}-Full${archSuffix}.AppImage`;
+      artifactName = `Zalo-${ZALO_VERSION}-Original-${commitHash}-Full${archSuffix}.AppImage`;
       buildCommand = `npx electron-builder --linux --config.linux.artifactName="${artifactName}" -c.extraMetadata.version=${ZALO_VERSION} --publish=never`;
       buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${ZALO_VERSION}" "${artifactName}" "${DIST_DIR}"`;
       logger.info(`Building ${buildName} with Zalo: ${ZALO_VERSION}, Commit: ${commitHash}`);
     } else {
-      artifactName = `Zalo-${ZALO_VERSION}-${commitHash}${archSuffix}.AppImage`;
+      artifactName = `Zalo-${ZALO_VERSION}-Original-${commitHash}${archSuffix}.AppImage`;
       buildCommand = `npx electron-builder --linux --config.linux.artifactName="${artifactName}" -c.extraMetadata.version=${ZALO_VERSION} --publish=never`;
       buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${ZALO_VERSION}" "${artifactName}" "${DIST_DIR}"`;
       logger.info(`Building ${buildName} with Zalo: ${ZALO_VERSION}, Commit: ${commitHash}`);
