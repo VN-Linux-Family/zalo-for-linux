@@ -20,6 +20,9 @@ let tray = null;
 let mainWindow = null;
 let isAppQuitting = false;
 
+// Hidden windows Zalo uses as background processes, never the main window.
+const BACKGROUND_WINDOW_TITLES = ['Shared Worker', 'SQLite'];
+
 // Linux optimizations & environment defaults
 if (process.platform === 'linux') {
   const uid = process.getuid ? process.getuid() : 1000;
@@ -37,6 +40,7 @@ const screenshotPlugin = require('./plugins/screenshot');
 const launcherBadgePlugin = require('./plugins/launcher-badge');
 const userscriptsPlugin = require('./plugins/userscripts');
 const zcallBridgePlugin = require('./plugins/zcall-bridge');
+const startHidden = require('./plugins/start-hidden').createStartHiddenController();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,6 +62,7 @@ function toggleDevTools() {
 }
 
 function showMainWindow() {
+  startHidden.release();
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   if (!mainWindow.isVisible()) mainWindow.show();
@@ -83,6 +88,12 @@ app.on('before-quit', () => {
   }
 });
 
+// Registered before Zalo's bootstrap, so this runs before Zalo's own
+// second-instance handler tries to show the window.
+app.on('second-instance', () => {
+  startHidden.release();
+});
+
 app.on('browser-window-created', (_evt, win) => {
   try {
     if (fs.existsSync(iconPath)) {
@@ -94,9 +105,13 @@ app.on('browser-window-created', (_evt, win) => {
     win.autoHideMenuBar = true;
 
     // Track the main Zalo window for tray menu
-    if (!mainWindow && win.getTitle() !== 'Shared Worker') {
+    if (!mainWindow && !BACKGROUND_WINDOW_TITLES.includes(win.getTitle())) {
       mainWindow = win;
       screenshotPlugin.setMainWindow(win);
+
+      // Only start hidden when the tray exists, otherwise the window
+      // would be unreachable.
+      if (tray) startHidden.attach(win);
 
       mainWindow.webContents.on('before-input-event', (_event, input) => {
         if ((input.control) && input.shift && input.key.toLowerCase() === 'i') {
