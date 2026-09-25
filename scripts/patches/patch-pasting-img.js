@@ -150,7 +150,7 @@ window.addEventListener('DOMContentLoaded', () => {
         } catch (_) { return false; }
     }
     async function tryPasteImage() {
-        if (!window.$zelectronNative) return;
+        if (!window.$zelectronNative) return false;
         try {
             let file = null;
             const b64 = window.$zelectronNative.getClipboardImagePNG && window.$zelectronNative.getClipboardImagePNG();
@@ -159,26 +159,43 @@ window.addEventListener('DOMContentLoaded', () => {
                 const bytes = new Uint8Array(binary.length);
                 for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
                 file = new File([bytes], 'image.png', { type: 'image/png' });
-            } else {
-                const filePath = window.$zelectronNative.getClipboardFilePath && window.$zelectronNative.getClipboardFilePath();
-                if (!filePath) return;
-                const ext = filePath.split('.').pop().toLowerCase();
-                const imageExts = ['png','jpg','jpeg','gif','webp','bmp','tiff','tif','avif','jxl'];
-                if (!imageExts.includes(ext)) return;
-                const res = await fetch('file://' + filePath);
-                const blob = await res.blob();
-                file = new File([blob], filePath.split('/').pop(), { type: blob.type || 'image/png' });
+            } else if (window.$zelectronNative.saveClipboardImageToTemp) {
+                const tmp = window.$zelectronNative.saveClipboardImageToTemp();
+                if (tmp && !tmp.startsWith('Error')) {
+                    try {
+                        const res = await fetch('file://' + tmp);
+                        const blob = await res.blob();
+                        file = new File([blob], 'screenshot.png', { type: 'image/png' });
+                    } finally {
+                        window.$zelectronNative.deleteFile && window.$zelectronNative.deleteFile(tmp);
+                    }
+                }
             }
-            if (!file) return;
+            if (!file) {
+                const filePath = window.$zelectronNative.getClipboardFilePath && window.$zelectronNative.getClipboardFilePath();
+                if (filePath) {
+                    const ext = filePath.split('.').pop().toLowerCase();
+                    const imageExts = ['png','jpg','jpeg','gif','webp','bmp','tiff','tif','avif','jxl'];
+                    if (imageExts.includes(ext)) {
+                        const res = await fetch('file://' + filePath);
+                        const blob = await res.blob();
+                        file = new File([blob], filePath.split('/').pop(), { type: blob.type || 'image/png' });
+                    }
+                }
+            }
+            if (!file) return false;
             const dt = new DataTransfer();
             dt.items.add(file);
             const target = document.getElementById('dragOverlayInputbox');
-            if (!target) return;
+            if (!target) return false;
             target.style.display = 'block';
             target.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }));
             target.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true }));
             target.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-        } catch(err) {}
+            return true;
+        } catch(err) {
+            return false;
+        }
     }
     let _lastPaste = 0;
     document.addEventListener('paste', async (e) => {
@@ -190,6 +207,21 @@ window.addEventListener('DOMContentLoaded', () => {
         _lastPaste = now;
         await tryPasteImage();
     }, true);
+
+    // Auto-paste captured screenshot from screenshot plugin
+    try {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.on('zalo-linux-auto-paste-screenshot', async () => {
+            for (let i = 0; i < 3; i++) {
+                const pasted = await tryPasteImage();
+                if (pasted) {
+                    _lastPaste = Date.now();
+                    break;
+                }
+                await new Promise(r => setTimeout(r, 200));
+            }
+        });
+    } catch (_) {}
 });
 // END CLIPBOARD IMAGE PASTE FIX
 `;
