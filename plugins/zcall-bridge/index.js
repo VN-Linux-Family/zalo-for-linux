@@ -44,8 +44,31 @@ const https = require('https');
 // it; wine 8.6 is lighter (54MB) but its msvcp140/ucrtbase lack
 // _Throw_C_error, which crashes ZaloCall when the video pipeline hits an
 // error (e.g. codec/format negotiation).
-const WINE_DOWNLOAD_URL =
-  'https://github.com/Kron4ek/Wine-Builds/releases/download/11.14/wine-11.14-amd64.tar.xz';
+async function getWineUrl(tag = '11.14') {
+  const url = `https://api.github.com/repos/Kron4ek/Wine-Builds/releases/tags/${tag}`;
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'Node' }
+  });
+  const data = await response.json();
+
+  const wineAsset = data.assets.find(asset => {
+    const name = asset.name.toLowerCase();
+    const isXz = name.endsWith('.xz');
+    const isAmd64 = name.includes('amd64');
+    const isExcluded = ['wow64', 'staging', 'tkg'].some(key => name.includes(key));
+
+    return isXz && isAmd64 && !isExcluded;
+  });
+
+  return wineAsset ? wineAsset.browser_download_url : null;
+}
+
+let WINE_DOWNLOAD_URL = null;
+
+(async () => {
+  WINE_DOWNLOAD_URL = await getWineUrl('11.14');
+})();
+
 const RUNTIME_DIRNAME = 'zcall-wine-runtime';
 const CONFIG_FILENAME = 'zcall-config.json';
 
@@ -181,7 +204,7 @@ function validateWine(winePath, prefix) {
   // Use a dedicated throwaway prefix: validating against the real prefix can
   // trigger slow version upgrade/downgrade passes (10-30s+) or corrupt state,
   // and a cold first run needs a generous timeout.
-  const valPrefix = prefix + '-validate';
+  const valPrefix = prefix;
   try {
     const res = spawnSync(winePath, [pipebridgePath, '--version'], {
       env: Object.assign({}, process.env, { WINEPREFIX: valPrefix, WINEDEBUG: '-all' }),
@@ -548,6 +571,7 @@ function launch({ userDataDir }) {
   if (process.env.ZCALL_DISABLE) return false;
 
   const prefix = process.env.ZCALL_WINEPREFIX || path.join(userDataDir, 'zcall-wine');
+  process.env.WINEPREFIX = prefix;
 
   // Clean stale wine processes from unclean previous exits
   sweepStaleProcesses(prefix);

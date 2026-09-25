@@ -114,7 +114,7 @@ const REPLACEMENTS = [
   //     served from the bridge display while the app itself stays native.
   {
     from: '[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"]))',
-    to: '[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"],{env:Object.assign({},process.env,{LD_PRELOAD:process.env.ZCALL_PROXY_SO||process.env.LD_PRELOAD||"",WINEPREFIX:o.join(process.env.XDG_CONFIG_HOME||o.join(require("os").homedir(),".config"),"ZaloData","zcall-wine")})}))',
+    to: '[e,"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv","\\\\\\\\.\\\\pipe\\\\PipeZCallSend"],{env:Object.assign({},process.env,{LD_PRELOAD:process.env.ZCALL_PROXY_SO||process.env.LD_PRELOAD||""})}))',
   },
   {
     from: /e\.on\("data",\(([$\w]+)=>\{z\(\1\)\}\)\),e\.on\("end"/,
