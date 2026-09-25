@@ -15,6 +15,23 @@ Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.
 
 This project is best suited for users who need a native-feeling Zalo client on Linux and are comfortable with the technical workarounds required for full functionality.
 
+## 🙈 Start hidden in the tray
+
+When **Settings → Launch Zalo on startup** is enabled, Zalo starts minimized
+to the system tray at login. The autostart entry it writes to
+`~/.config/autostart/` launches it with `--hidden`. If you enabled the setting
+with an older build, turn it off and on again to update the entry.
+
+You can also pass the flag yourself (`--start-hidden` works too):
+
+```bash
+/path/to/Zalo.AppImage --hidden
+```
+
+Open the window from the tray icon, by clicking a notification, or by launching
+Zalo again. If no system tray is available, the flag is ignored so the window
+is never unreachable.
+
 ## 🧩 Userscripts manager
 
 Open **Settings → Userscripts manager** to create, paste, edit, import, delete,

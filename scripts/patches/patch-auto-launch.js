@@ -14,12 +14,14 @@ const AUTO_LAUNCH_BUNDLES = ['main.js', 'compact-app.js'];
 //   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe");l=new r(e)';
 const LAUNCHER_OPTIONS_ORIGINAL =
   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}d=new r(e)';
+// On Linux, isHidden makes auto-launch append `--hidden` to the autostart Exec
+// line, which plugins/start-hidden handles by starting in the tray (#58).
 const LAUNCHER_OPTIONS_PATCHED =
-  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe");d=new r(e)';
+  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;d=new r(e)';
 const COMPACT_LAUNCHER_OPTIONS_ORIGINAL =
   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}u=new r(e)';
 const COMPACT_LAUNCHER_OPTIONS_PATCHED =
-  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe");u=new r(e)';
+  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;u=new r(e)';
 
 // const GET_LAUNCHER_ORIGINAL = 'getZaloLauncher:()=>l';
 // const GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!l)u(d);return l}';
