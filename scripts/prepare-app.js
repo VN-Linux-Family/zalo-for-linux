@@ -213,6 +213,12 @@ async function extractAppAsar() {
 
   const { main: patchAutoTheme } = require('./patches/patch-auto-theme');
   await patchAutoTheme();
+
+  const { main: patchWindowAppearance } = require('./patches/patch-window-appearance');
+  await patchWindowAppearance();
+
+  const { main: patchZcallWineTuning } = require('./patches/patch-zcall-wine-tuning');
+  await patchZcallWineTuning();
 }
 
 function commandExists(command) {

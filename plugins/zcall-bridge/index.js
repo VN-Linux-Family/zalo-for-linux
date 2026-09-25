@@ -632,6 +632,8 @@ function launch({ userDataDir }) {
   process.env.ZCALL_WINE = wine;
   process.env.ZCALL_WINEPREFIX = prefix;
   if (!process.env.WINEDEBUG) process.env.WINEDEBUG = '-all';
+  // No menu/icon churn from winemenubuilder, no Mono/Gecko install prompts.
+  if (!process.env.WINEDLLOVERRIDES) process.env.WINEDLLOVERRIDES = 'winemenubuilder.exe=d;mscoree=d;mshtml=d';
 
   const runtimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid ? process.getuid() : 1000}`;
   if (!process.env.PULSE_SERVER) {

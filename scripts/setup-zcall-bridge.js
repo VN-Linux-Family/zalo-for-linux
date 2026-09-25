@@ -10,6 +10,8 @@
  *      needed) with mingw, falling back to the committed prebuilt exe
  *   3. Compiles streamproxy.c (LD_PRELOAD shim that redirects ZaloCall's
  *      screen-capture reads to the Wayland bridge display) with gcc
+ *   4. Compiles zcall-raise.c (shows the call window, keeps wine in sync)
+ *      with gcc
  *
  * No proprietary binaries are committed to this repository — everything is
  * fetched from official sources at setup time (same policy as the macOS DMG).
@@ -185,6 +187,28 @@ async function main() {
     }
   } else {
     logger.warn('streamproxy.c missing — share screen will not work on Wayland');
+  }
+
+  // -------------------------------------------------------------------------
+  // 4. zcall-raise (native X11 helper): activates a new call window that
+  //    GNOME left minimized or behind Zalo, which also keeps wine's window
+  //    state in sync. Without it calls still work, but the call UI may open
+  //    hidden and can stay frozen on screen after the call.
+  // -------------------------------------------------------------------------
+  const raiseSrc = path.join(ROOT, 'zcall-bridge', 'zcall-raise.c');
+  if (fs.existsSync(raiseSrc)) {
+    try {
+      const cc = process.env.CC || 'gcc';
+      const cflags = process.env.CFLAGS || '';
+      const ldflags = process.env.LDFLAGS || '';
+      execSync(`${cc} ${cflags} -O2 "${raiseSrc}" -lX11 ${ldflags} -o "${path.join(ROOT, 'app', 'native', 'zcall-raise')}"`, {
+        cwd: ROOT, stdio: 'pipe'
+      });
+      logger.dim('zcall-raise compiled from source');
+    } catch (e) {
+      logger.warn('zcall-raise not built (needs gcc + libx11-dev): call window may open hidden — ' +
+        String(e.stderr || e.message).trim().slice(-200));
+    }
   }
 
   logger.success('call-v2 runtime ready: ' + TARGET);
