@@ -684,27 +684,38 @@ function watchShareRequests() {
   }, 200);
 }
 
+// ZaloCall -> renderer signal sent when screen sharing is turned on
+// (status 1) or off (status 0) during a call.
+const SIGNAL_SCREEN_SHARE = 12064;
+
 /**
- * Stops the screen bridge when the call ends (#91). ZaloCall reports its
- * state through call-update/callState and Zalo treats every state except
- * "free" as a running call. Without this, Xvfb, the portal stream and the
- * gst pipeline (and GNOME's screen-sharing indicator) stayed up until the
- * app quit.
+ * Stops the screen bridge when sharing stops or the call ends (#91).
+ * ZaloCall reports both to the renderer through the main process: sharing
+ * as call-send-signal 12064 {status}, the call as call-update/callState
+ * (Zalo treats every state except "free" as a running call). Without this,
+ * Xvfb, the portal stream and the gst pipeline stayed up until the app quit.
  */
 function watchCallState() {
   let electron;
   try { electron = require('electron'); } catch (e) { return; }
+  const stop = (why) => {
+    if (!screenBridgeActive()) return;
+    debugLog('screenbridge: ' + why + ' — stopping bridge');
+    stopScreenBridge();
+    // The next share must not wait out the denial cooldown.
+    lastAutoBridgeAt = 0;
+  };
   const hook = (contents) => {
     if (!contents || contents.__zcallStateHooked) return;
     contents.__zcallStateHooked = true;
     const send = contents.send;
     contents.send = function (channel, command, data, ...rest) {
       if (channel === 'call-update' && command === 'callState' &&
-          data && data.state === 'free' && screenBridgeActive()) {
-        debugLog('screenbridge: call ended — stopping bridge');
-        stopScreenBridge();
-        // The next call's share must not wait out the denial cooldown.
-        lastAutoBridgeAt = 0;
+          data && data.state === 'free') {
+        stop('call ended');
+      } else if (channel === 'call-send-signal' && Number(command) === SIGNAL_SCREEN_SHARE &&
+          data && Number(data.status) === 0) {
+        stop('sharing stopped');
       }
       return send.call(this, channel, command, data, ...rest);
     };
