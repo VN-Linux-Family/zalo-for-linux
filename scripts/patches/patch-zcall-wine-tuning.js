@@ -16,7 +16,9 @@
  *      otherwise later call attempts never re-spawn until app restart.
  *   4. Re-send the init payload before every makeCall (the helper rejects
  *      makeCall with -11 "init_error" if it has not seen init yet).
- *   5. Bind the helper TCP channels to 127.0.0.1 instead of all interfaces.
+ *   5. Bind the helper TCP channels to 127.0.0.1 where the spawn variant
+ *      left them on all interfaces (the `_we` variant). patch-zcall-callv2.js
+ *      already binds loopback, so this step is a no-op there.
  *   6. Start app/native/zcall-raise (zcall-bridge/zcall-raise.c) and stop it
  *      with the helper: it activates a new call window that GNOME left
  *      minimized or behind Zalo, which also keeps wine's window state in
@@ -69,10 +71,11 @@ const STEPS = [
     to: '.on("call-send-to-native",((e,t)=>{t._optional?delete t._optional:K(),t&&"makeCall"===t.command&&O&&D(O),D(t)}))',
     already: '"makeCall"===t.command&&O&&D(O)',
   },
-  // The first listen() of each helper channel bound every interface, which
-  // exposed the call control ports 29631/29632 on the LAN. (The EADDRINUSE
-  // recovery listen() was already loopback-only.) Once patched, the anchor
-  // is gone, so no `already` check is needed.
+  // In the `_we` spawn variant the first listen() of each helper channel
+  // bound every interface, exposing the call control ports 29631/29632 on
+  // the LAN (patch-zcall-callv2.js already binds loopback, so the anchor is
+  // absent there). Once patched, the anchor is gone, so no `already` check
+  // is needed.
   {
     name: 'bind helper recv channel to loopback',
     from: 'I.listen(v,(',
