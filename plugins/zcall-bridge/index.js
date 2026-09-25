@@ -181,7 +181,7 @@ function validateWine(winePath, prefix) {
   // Use a dedicated throwaway prefix: validating against the real prefix can
   // trigger slow version upgrade/downgrade passes (10-30s+) or corrupt state,
   // and a cold first run needs a generous timeout.
-  const valPrefix = prefix + '-validate';
+  const valPrefix = prefix;
   try {
     const res = spawnSync(winePath, [pipebridgePath, '--version'], {
       env: Object.assign({}, process.env, { WINEPREFIX: valPrefix, WINEDEBUG: '-all' }),
@@ -548,6 +548,7 @@ function launch({ userDataDir }) {
   if (process.env.ZCALL_DISABLE) return false;
 
   const prefix = process.env.ZCALL_WINEPREFIX || path.join(userDataDir, 'zcall-wine');
+  process.env.WINEPREFIX = prefix;
 
   // Clean stale wine processes from unclean previous exits
   sweepStaleProcesses(prefix);

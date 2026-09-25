@@ -8,12 +8,16 @@ This document tracks current limitations and historical issues that have been ad
 
 - **Partly-fixed: Audio/Video Calling on ARM64:** 
   Audio/video calling is supported on x86_64 via Wine TCP-to-named-pipe translation (`zcall-bridge`). However, calls are currently **not available on aarch64 (ARM64)** because the official Windows `ZaloCall.exe` and helper native binaries only support 32-bit/64-bit x86. See [PR #62](https://github.com/doandat943/zalo-for-linux/pull/62) and [Issue #70](https://github.com/doandat943/zalo-for-linux/issues/70).
-- **System/Auto Theme not working:** 
-  The app does not follow the system's dark/light mode preference automatically. Both ZaDark and Zalo ignore `prefers-color-scheme`. See [Issue #22](https://github.com/doandat943/zalo-for-linux/issues/22).
 
 ---
 
 ## ✅ Resolved Issues & Workarounds
+
+- **System/Auto Theme not working:** 
+  - **Issue:** The app does not follow the system's dark/light mode. Both ZaDark and Zalo ignore `prefers-color-scheme`. 
+  - **Solution:** The app now can do real-time detection via GNOME D-Bus (org.gnome.desktop.interface color-scheme), XDG Desktop Portal (org.freedesktop.appearane), or gtk-theme. Automatically synchronizes `nativeTheme.themeSource` and the `.dark` class in DOM without interfering with or altering the operating system's default title bar.
+  - **Credits:** Thanks to [@nct88](https://github.com/nct88). See [PR #87](https://github.com/VN-Linux-Family/zalo-for-linux/pull/87), [Issue #22](https://github.com/VN-Linux-Family/zalo-for-linux/issues/22), and [Issue #21](https://github.com/VN-Linux-Family/zalo-for-linux/issues/21#issuecomment-4437302799).
+
 
 - **Message Synchronization (E2EE):**
   - **Issue:** Missing `db-cross-v4` native module caused end-to-end encryption (E2EE) messages to fail to sync on Linux.
