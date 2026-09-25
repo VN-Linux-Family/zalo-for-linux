@@ -151,8 +151,11 @@ async function extractAppAsar() {
   // Apply patches
   logger.info('Applying platform patches...');
 
-  const { main: patchTitlebar } = require('./patches/patch-titlebar');
-  await patchTitlebar();
+  // const { main: patchTitlebar } = require('./patches/patch-titlebar');
+  // await patchTitlebar();
+
+  const { main: patchRemoveMenu } = require('./patches/patch-remove-menu');
+  await patchRemoveMenu();
 
   const { main: patchPastingImg } = require('./patches/patch-pasting-img');
   await patchPastingImg();
