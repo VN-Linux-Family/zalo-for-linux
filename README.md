@@ -9,7 +9,6 @@ Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.
 ## ⚠️ Important: Known Issues
 
 - **➖ Partly-fixed: Can't make or receive calls:** Thanks to @collyn for setting up a Wine wrapper to solve this. See [PR #62](https://github.com/doandat943/zalo-for-linux/pull/62) for more info, but currently calling is not available on aarch64, because Windows `zcall` only supports x86_64.
-- **System/Auto Theme not working:** The app does not follow the system's dark/light mode. Both ZaDark and Zalo ignore `prefers-color-scheme`. See [issue #22](https://github.com/doandat943/zalo-for-linux/issues/22).
 
 > 💡 **For the full list of resolved issues, workarounds, and community credits, see [KNOWN_ISSUES.md](./KNOWN_ISSUES.md).**
 
