@@ -32,7 +32,6 @@
 #include <X11/extensions/XShm.h>
 #include <xcb/xcb.h>
 #include <xcb/xproto.h>
-#include "shm_copy.h"
 
 static FILE *logf = NULL;
 
@@ -161,7 +160,15 @@ Bool XShmGetImage(Display *dpy, Drawable d, XImage *image, int x, int y,
                                     x, y, image->width, image->height,
                                     plane_mask, ZPixmap);
         if (im) {
-            shm_copy_image(image, im);
+            size_t copy = im->bytes_per_line < image->bytes_per_line
+                              ? (size_t)im->bytes_per_line
+                              : (size_t)image->bytes_per_line;
+            unsigned int rows = (unsigned int)im->height < (unsigned int)image->height
+                                    ? (unsigned int)im->height
+                                    : (unsigned int)image->height;
+            for (unsigned int r = 0; r < rows; r++)
+                memcpy(image->data + (size_t)r * image->bytes_per_line,
+                       im->data + (size_t)r * im->bytes_per_line, copy);
             XDestroyImage(im);
             plog("streamproxy: XShmGetImage root %dx%d -> proxied\n",
                  image->width, image->height);
