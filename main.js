@@ -40,6 +40,7 @@ const screenshotPlugin = require('./plugins/screenshot');
 const launcherBadgePlugin = require('./plugins/launcher-badge');
 const userscriptsPlugin = require('./plugins/userscripts');
 const zcallBridgePlugin = require('./plugins/zcall-bridge');
+const trayHost = require('./plugins/tray-host');
 // Created with the main window: the screen module is not usable before 'ready'.
 let windowState = null;
 const startHidden = require('./plugins/start-hidden').createStartHiddenController({
@@ -132,7 +133,7 @@ app.on('browser-window-created', (_evt, win) => {
 
       // Only start hidden when the tray exists, otherwise the window
       // would be unreachable.
-      if (tray) startHidden.attach(win);
+      if (tray && trayHost.isAvailable()) startHidden.attach(win);
 
       mainWindow.webContents.on('before-input-event', (_event, input) => {
         if ((input.control) && input.shift && input.key.toLowerCase() === 'i') {
@@ -185,13 +186,20 @@ app.on('browser-window-created', (_evt, win) => {
     // hiding immediately causes "Show" to be a no-op on some Linux DEs
     // (fixes #27).
     win.on('close', (event) => {
-      if (!isAppQuitting && tray && (win === mainWindow || win.getTitle().includes('Zalo'))) {
+      if (isAppQuitting) return;
+      if (tray && trayHost.isAvailable() && (win === mainWindow || win.getTitle().includes('Zalo'))) {
         event.preventDefault();
         setTimeout(() => {
           if (!isAppQuitting && !win.isDestroyed()) {
             win.hide();
           }
         }, 50);
+      } else if (win === mainWindow) {
+        // No tray host (stock GNOME): the tray icon is invisible, so a hidden
+        // window could never be reopened or quit. Quit instead.
+        event.preventDefault();
+        isAppQuitting = true;
+        setImmediate(() => app.quit());
       }
     });
   } catch (e) {
@@ -205,6 +213,8 @@ app.on('browser-window-created', (_evt, win) => {
 
 app.once('ready', () => {
   try { Menu.setApplicationMenu(null); } catch (_) { }
+
+  trayHost.init();
 
   if (fs.existsSync(iconPath)) {
     try {
