@@ -17,6 +17,10 @@
 
 const HIDDEN_FLAGS = ['--hidden', '--start-hidden'];
 const SUPPRESSED_METHODS = ['show', 'showInactive', 'focus'];
+// maximize() also maps a hidden window. Hiding it again right away leaves it
+// covering the screen from (0,0) without being maximized (#96), so it is
+// swallowed too and handed to `onMaximize` to be applied on the first show.
+const SUPPRESSED_MAXIMIZE = 'maximize';
 
 // Keep swallowing repeated show calls for this long after the first one.
 const DEFAULT_SETTLE_MS = 3000;
@@ -31,7 +35,8 @@ function createStartHiddenController({
   argv = process.argv,
   settleMs = DEFAULT_SETTLE_MS,
   maxMs = DEFAULT_MAX_MS,
-  timers = { setTimeout, clearTimeout }
+  timers = { setTimeout, clearTimeout },
+  onMaximize = null
 } = {}) {
   const enabled = isStartHiddenRequested(argv);
   let released = !enabled;
@@ -60,6 +65,11 @@ function createStartHiddenController({
       originals[name] = win[name];
       win[name] = () => onSuppressedShow();
     }
+    originals[SUPPRESSED_MAXIMIZE] = win[SUPPRESSED_MAXIMIZE];
+    win[SUPPRESSED_MAXIMIZE] = () => {
+      if (onMaximize) onMaximize();
+      onSuppressedShow();
+    };
     win.on('show', onShow);
     maxTimer = timers.setTimeout(release, maxMs);
 
@@ -77,7 +87,7 @@ function createStartHiddenController({
 
     win.removeListener('show', onShow);
     if (!win.isDestroyed()) {
-      for (const name of SUPPRESSED_METHODS) win[name] = originals[name];
+      for (const name of Object.keys(originals)) win[name] = originals[name];
     }
   }
 
