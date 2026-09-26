@@ -18,17 +18,42 @@
  * The plugin remembers the last normal bounds and the maximized flag while
  * the window is visible, and puts them back every time the window is shown,
  * whoever shows it (tray, second instance, notification, Zalo itself).
+ *
+ * The state is also written to `stateFile` and applied on the first show
+ * after a restart. Zalo only restores its saved position when the display id
+ * matches, and on XWayland that id changes between sessions, so an autostarted
+ * (--hidden) Zalo otherwise came back centered at its default size.
  */
 
 'use strict';
+
+const fs = require('fs');
 
 // Let the WM finish mapping the window before correcting it.
 const DEFAULT_SETTLE_MS = 80;
 // Coalesce bursts of move/resize events.
 const DEFAULT_SAVE_DELAY_MS = 250;
+// The main window doubles as the login window (min width 420). Only the chat
+// layout (min width 550) is saved and restored.
+const MIN_MAIN_LAYOUT_WIDTH = 500;
 
 function boundsEqual(a, b) {
   return !!a && !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+function isValidBounds(b) {
+  return !!b && [b.x, b.y, b.width, b.height].every(Number.isFinite) && b.width > 0 && b.height > 0;
+}
+
+function readStateFile(file) {
+  if (!file) return null;
+  try {
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!isValidBounds(data.bounds)) return null;
+    return { bounds: data.bounds, maximized: data.maximized === true };
+  } catch (_) {
+    return null;
+  }
 }
 
 // Clamp bounds into the work area of the display they belong to, so a window
@@ -51,6 +76,8 @@ function createWindowStateController({
   canPosition = true,
   settleMs = DEFAULT_SETTLE_MS,
   saveDelayMs = DEFAULT_SAVE_DELAY_MS,
+  // JSON file keeping the state across restarts; null disables it.
+  stateFile = null,
   timers = { setTimeout, clearTimeout }
 } = {}) {
   let win = null;
@@ -68,9 +95,26 @@ function createWindowStateController({
   let restoreTimer = null;
   let restoring = false;
   let suppressUnmaximize = false;
+  // State saved by the previous run, applied once the chat layout is shown.
+  let savedState = readStateFile(stateFile);
+  let lastWritten = null;
 
   function alive() {
     return win && !win.isDestroyed();
+  }
+
+  function isMainLayout() {
+    return win.getMinimumSize()[0] >= MIN_MAIN_LAYOUT_WIDTH;
+  }
+
+  function writeStateFile() {
+    if (!stateFile || !isValidBounds(normalBounds) || !isMainLayout()) return;
+    const data = JSON.stringify({ bounds: normalBounds, maximized });
+    if (data === lastWritten) return;
+    try {
+      fs.writeFileSync(stateFile, data);
+      lastWritten = data;
+    } catch (_) {}
   }
 
   function readState() {
@@ -87,6 +131,7 @@ function createWindowStateController({
     saveTimer = null;
     if (!alive() || restoring || !win.isVisible() || win.isMinimized() || win.isFullScreen()) return;
     readState();
+    writeStateFile();
   }
 
   function scheduleSave() {
@@ -104,6 +149,7 @@ function createWindowStateController({
     if (!win.isFullScreen()) readState();
     if (maximized) normalBoundsTrusted = false;
     pending = { maximized, bounds: normalBounds };
+    writeStateFile();
   }
 
   function applyBounds(bounds) {
@@ -115,11 +161,21 @@ function createWindowStateController({
     }
   }
 
+  function canRestore() {
+    return alive() && win.isVisible() && !win.isMinimized() && !win.isFullScreen();
+  }
+
   function restore() {
     restoreTimer = null;
-    const state = pending;
+    let state = pending;
     pending = null;
-    if (!alive() || !state || !win.isVisible() || win.isMinimized() || win.isFullScreen()) return;
+    if (!state && savedState && canRestore() && isMainLayout()) {
+      state = savedState;
+      savedState = null;
+    }
+    if (!state || !canRestore()) return;
+    // Whatever gets restored now supersedes the previous run's state.
+    savedState = null;
 
     restoring = true;
     try {
@@ -138,10 +194,17 @@ function createWindowStateController({
     }
   }
 
-  function onShow() {
-    if (!pending) return;
+  function scheduleRestore() {
+    if (!pending && !savedState) return;
     if (restoreTimer) timers.clearTimeout(restoreTimer);
     restoreTimer = timers.setTimeout(restore, settleMs);
+  }
+
+  // Zalo switches from the login layout to the chat layout by resizing the
+  // same window, which is when the previous run's state can be applied.
+  function onResize() {
+    if (savedState) scheduleRestore();
+    scheduleSave();
   }
 
   function onUnmaximize() {
@@ -182,9 +245,9 @@ function createWindowStateController({
     maximized = win.isMaximized();
 
     win.on('close', onClose);
-    win.on('show', onShow);
+    win.on('show', scheduleRestore);
     win.on('move', scheduleSave);
-    win.on('resize', scheduleSave);
+    win.on('resize', onResize);
     win.on('maximize', scheduleSave);
     win.on('unmaximize', onUnmaximize);
     win.once('closed', () => {
@@ -198,7 +261,12 @@ function createWindowStateController({
   // Remember a maximize that happened while the window could not be shown
   // (start-hidden), so the first real show maximizes it properly.
   function requestMaximize() {
-    if (alive()) normalBounds = win.getNormalBounds();
+    if (savedState) {
+      normalBounds = savedState.bounds;
+      savedState = null;
+    } else if (alive()) {
+      normalBounds = win.getNormalBounds();
+    }
     maximized = true;
     pending = { maximized: true, bounds: normalBounds };
   }

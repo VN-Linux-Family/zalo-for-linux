@@ -124,7 +124,8 @@ app.on('browser-window-created', (_evt, win) => {
       if (!windowState) {
         windowState = require('./plugins/window-state').createWindowStateController({
           screen,
-          canPosition: !isNativeWayland()
+          canPosition: !isNativeWayland(),
+          stateFile: path.join(app.getPath('userData'), 'zalo-linux-window-state.json')
         });
       }
       windowState.attach(win);
