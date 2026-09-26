@@ -656,6 +656,7 @@ function launch({ userDataDir }) {
       if (/^\d+x\d+$/.test(out.trim())) cachedBridgeRes = out.trim();
     } catch (e) { /* default */ }
     watchShareRequests();
+    watchCallState();
   }
 
   console.log('[zcall-bridge] wine ready:', wine, '(prefix:', prefix + ')');
@@ -681,6 +682,46 @@ function watchShareRequests() {
     debugLog('screenbridge: share request detected — starting bridge');
     startScreenBridge();
   }, 200);
+}
+
+// ZaloCall -> renderer signal sent when screen sharing is turned on
+// (status 1) or off (status 0) during a call.
+const SIGNAL_SCREEN_SHARE = 12064;
+
+/**
+ * Stops the screen bridge when sharing stops or the call ends (#91).
+ * ZaloCall reports both to the renderer through the main process: sharing
+ * as call-send-signal 12064 {status}, the call as call-update/callState
+ * (Zalo treats every state except "free" as a running call). Without this,
+ * Xvfb, the portal stream and the gst pipeline stayed up until the app quit.
+ */
+function watchCallState() {
+  let electron;
+  try { electron = require('electron'); } catch (e) { return; }
+  const stop = (why) => {
+    if (!screenBridgeActive()) return;
+    debugLog('screenbridge: ' + why + ' — stopping bridge');
+    stopScreenBridge();
+    // The next share must not wait out the denial cooldown.
+    lastAutoBridgeAt = 0;
+  };
+  const hook = (contents) => {
+    if (!contents || contents.__zcallStateHooked) return;
+    contents.__zcallStateHooked = true;
+    const send = contents.send;
+    contents.send = function (channel, command, data, ...rest) {
+      if (channel === 'call-update' && command === 'callState' &&
+          data && data.state === 'free') {
+        stop('call ended');
+      } else if (channel === 'call-send-signal' && Number(command) === SIGNAL_SCREEN_SHARE &&
+          data && Number(data.status) === 0) {
+        stop('sharing stopped');
+      }
+      return send.call(this, channel, command, data, ...rest);
+    };
+  };
+  electron.webContents.getAllWebContents().forEach(hook);
+  electron.app.on('web-contents-created', (_e, contents) => hook(contents));
 }
 
 /**
@@ -1159,7 +1200,9 @@ function startScreenBridge() {
     });
     py.on('exit', (code) => {
       debugLog('screenbridge: python exited code=' + code + ' granted=' + bridgeGranted);
-      stopScreenBridge();
+      // After a call-end stop this python is no longer ours; a bridge
+      // started since then must not be torn down by its late exit event.
+      if (bridgeProcs.includes(py)) stopScreenBridge();
     });
     bridgeProcs.push(py);
     // Let gst create its window, then stretch every window on the Xvfb

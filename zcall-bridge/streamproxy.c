@@ -84,13 +84,46 @@ static int src_io_handler(Display *d) {
     return 1;
 }
 
+/* Xlib calls exit() once an IO error handler returns, so the handler above
+ * alone still killed ZaloCall (and dropped the call) on the first grab after
+ * the bridge display went away. libX11 >= 1.7 lets a per-display exit
+ * handler replace that exit(); looked up at runtime so older libX11 still
+ * loads the shim. */
+typedef void (*io_exit_handler_fn)(Display *, void *);
+typedef void (*set_io_exit_handler_fn)(Display *, io_exit_handler_fn, void *);
+
+static void src_io_exit_handler(Display *d, void *unused) {
+    (void)d;
+    (void)unused;
+    plog("streamproxy: src display gone, continuing without it\n");
+}
+
+static void keep_alive_on_src_loss(Display *d) {
+    static set_io_exit_handler_fn set_exit = NULL;
+    static int looked_up = 0;
+    if (!looked_up) {
+        set_exit = (set_io_exit_handler_fn)dlsym(RTLD_DEFAULT, "XSetIOErrorExitHandler");
+        looked_up = 1;
+        if (!set_exit)
+            plog("streamproxy: libX11 has no XSetIOErrorExitHandler; losing the bridge display will end the app\n");
+    }
+    if (set_exit) set_exit(d, src_io_exit_handler, NULL);
+}
+
 static Display *ensure_src_dpy(void) {
     if (!src_dpy) {
         const char *n = getenv("ZCALL_PROXY_SRC");
         if (!n) n = ":99";
         src_dpy = XOpenDisplay(n);
         if (src_dpy) {
-            orig_io_handler = XSetIOErrorHandler(src_io_handler);
+            keep_alive_on_src_loss(src_dpy);
+            /* Once only: a reopen after a lost bridge must not chain the
+             * handler to itself. */
+            static int io_handler_set = 0;
+            if (!io_handler_set) {
+                orig_io_handler = XSetIOErrorHandler(src_io_handler);
+                io_handler_set = 1;
+            }
             plog("streamproxy: libX11 src %s opened\n", n);
         } else {
             plog("streamproxy: cannot open src %s (not proxying)\n", n);
@@ -101,6 +134,12 @@ static Display *ensure_src_dpy(void) {
 }
 
 static xcb_connection_t *ensure_src_c(void) {
+    /* The bridge display went away: drop the dead connection and retry. */
+    if (src_c && xcb_connection_has_error(src_c)) {
+        plog("streamproxy: xcb src connection broken, dropping cache\n");
+        xcb_disconnect(src_c);
+        src_c = NULL;
+    }
     if (!src_c) {
         const char *n = getenv("ZCALL_PROXY_SRC");
         if (!n) n = ":99";
