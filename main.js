@@ -92,9 +92,19 @@ function showMainWindow() {
 // App lifecycle
 // ---------------------------------------------------------------------------
 
+// Launching Zalo again (dock, menu, notification) starts a second instance
+// that only hands its arguments to the running one: Zalo's
+// second-instance.js quits it during bootstrap, but 'ready' and 'before-quit'
+// still fire in it. It must not start the tray or the plugins, nor tear the
+// call engine down: zcall-bridge kills every qt-call-and-cap / wine process
+// of our prefix at launch and quit, which ended the running instance's calls.
+function isPrimaryInstance() {
+  return app.hasSingleInstanceLock();
+}
+
 app.on('before-quit', () => {
   isAppQuitting = true;
-  zcallBridgePlugin.shutdown();
+  if (isPrimaryInstance()) zcallBridgePlugin.shutdown();
   if (tray) {
     tray.destroy();
     tray = null;
@@ -212,6 +222,7 @@ app.on('browser-window-created', (_evt, win) => {
 // ---------------------------------------------------------------------------
 
 app.once('ready', () => {
+  if (!isPrimaryInstance()) return;
   try { Menu.setApplicationMenu(null); } catch (_) { }
 
   trayHost.init();
