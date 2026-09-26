@@ -13,6 +13,12 @@
  * frameless. Zalo's own title bar (`#titleBar`, a `-webkit-app-region: drag`
  * strip that the compositor can move) stays, and patch-wayland-titlebar adds
  * the three buttons to it; they talk to this plugin over IPC.
+ *
+ * Electron 22 also crashes on native Wayland when a window that was hidden is
+ * shown again ("gtk_shell::get_gtk_surface already requested", SIGTRAP), with
+ * or without a frame. Closing to tray hides the window, so reopening Zalo from
+ * the dock or tray killed it. There, hiding a window that has been shown
+ * minimizes it instead, which restores fine.
  */
 
 'use strict';
@@ -56,6 +62,16 @@ function register({ app, ipcMain, BrowserWindow }) {
   });
 
   app.on('browser-window-created', (_event, win) => {
+    // Background windows (Shared Worker, SQLite) are never shown: leave their
+    // hide() alone, minimize() would map them.
+    let shown = false;
+    win.on('show', () => { shown = true; });
+    const originalHide = win.hide;
+    win.hide = function (...args) {
+      if (shown && !win.isDestroyed()) return win.minimize();
+      return originalHide.apply(this, args);
+    };
+
     const send = (maximized) => {
       if (!win.isDestroyed()) win.webContents.send(CHANNEL_MAXIMIZED, maximized);
     };
