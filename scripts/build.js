@@ -135,6 +135,8 @@ async function integrateZaDark() {
     zadarkPC.writeIndexFile(BASE_DIR);
     zadarkPC.writeBootstrapFile(BASE_DIR);
     zadarkPC.writePopupViewerFile(BASE_DIR);
+    // Zalo's dark theme strips ZaDark's CSS/scripts from the page (#66).
+    await require('./patches/patch-zadark-keep').main(APP_DIR);
     logger.success('ZaDark patches applied successfully');
 
   } catch (error) {
