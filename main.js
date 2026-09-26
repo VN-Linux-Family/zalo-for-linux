@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -40,7 +40,11 @@ const screenshotPlugin = require('./plugins/screenshot');
 const launcherBadgePlugin = require('./plugins/launcher-badge');
 const userscriptsPlugin = require('./plugins/userscripts');
 const zcallBridgePlugin = require('./plugins/zcall-bridge');
-const startHidden = require('./plugins/start-hidden').createStartHiddenController();
+// Created with the main window: the screen module is not usable before 'ready'.
+let windowState = null;
+const startHidden = require('./plugins/start-hidden').createStartHiddenController({
+  onMaximize: () => { if (windowState) windowState.requestMaximize(); }
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,6 +63,14 @@ function toggleDevTools() {
   } catch (e) {
     console.error('Toggle DevTools failed', e);
   }
+}
+
+// Native Wayland windows cannot be moved by the app, only X11/XWayland ones.
+function isNativeWayland() {
+  const platform = app.commandLine.getSwitchValue('ozone-platform');
+  const hint = app.commandLine.getSwitchValue('ozone-platform-hint');
+  return platform === 'wayland' ||
+    (hint === 'wayland' || hint === 'auto') && process.env.XDG_SESSION_TYPE === 'wayland';
 }
 
 function showMainWindow() {
@@ -108,6 +120,15 @@ app.on('browser-window-created', (_evt, win) => {
     if (!mainWindow && !BACKGROUND_WINDOW_TITLES.includes(win.getTitle())) {
       mainWindow = win;
       screenshotPlugin.setMainWindow(win);
+
+      if (!windowState) {
+        windowState = require('./plugins/window-state').createWindowStateController({
+          screen,
+          canPosition: !isNativeWayland(),
+          stateFile: path.join(app.getPath('userData'), 'zalo-linux-window-state.json')
+        });
+      }
+      windowState.attach(win);
 
       // Only start hidden when the tray exists, otherwise the window
       // would be unreachable.
