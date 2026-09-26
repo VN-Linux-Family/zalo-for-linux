@@ -19,8 +19,11 @@ const APP_DIR = path.join(__dirname, '..', '..', 'app');
 const THEME_MAIN_INJECTION = `
 // --- Zalo Linux Auto Dark/Light Theme Sync ---
 (function(){
-  if (process.platform !== "linux") return;
-  const { ipcMain: _ipc, BrowserWindow: _bw, nativeTheme: _nt } = require("electron");
+  // Injected into the main-window factory: guard against re-runs when the
+  // main window is recreated (duplicate handle() throws, duplicate monitors).
+  if (process.platform !== "linux" || global.__zaloThemeSync) return;
+  global.__zaloThemeSync = true;
+  const { app: _app, ipcMain: _ipc, BrowserWindow: _bw, nativeTheme: _nt } = require("electron");
 
   function isLinuxDark() {
     try {
@@ -43,6 +46,7 @@ const THEME_MAIN_INJECTION = `
     return false;
   }
 
+  _ipc.removeHandler("zalo-linux-get-theme");
   _ipc.handle("zalo-linux-get-theme", () => isLinuxDark() ? "dark" : "light");
 
   let _lastDark = null;
@@ -62,15 +66,30 @@ const THEME_MAIN_INJECTION = `
   }
 
   syncTheme();
+  // GNOME: the gsettings monitor pushes changes, no polling needed. Other
+  // desktops (portal / gtk-theme fallbacks) and a failed monitor poll.
+  // isLinuxDark() blocks the main process, so poll sparingly.
+  let _quitting = false;
+  let _poll = null;
+  const _startPoll = () => { if (!_poll && !_quitting) _poll = setInterval(syncTheme, 10000); };
+  if (!/GNOME/i.test(process.env.XDG_CURRENT_DESKTOP || "")) _startPoll();
   try {
     const { spawn: _sp } = require("child_process");
-    const _w = _sp("gsettings", ["monitor", "org.gnome.desktop.interface", "color-scheme"]);
+    const _w = _sp("gsettings", ["monitor", "org.gnome.desktop.interface", "color-scheme"], { stdio: ["ignore", "pipe", "ignore"] });
     _w.stdout.on("data", () => syncTheme());
-    _w.on("error", () => {});
-  } catch (_) {}
-  setInterval(syncTheme, 3000);
+    _w.on("error", _startPoll);
+    _w.on("exit", _startPoll);
+    // The monitor never exits on its own: without this every app launch
+    // left one orphaned gsettings process behind.
+    const _stop = () => { _quitting = true; try { _w.kill(); } catch (_) {} };
+    _app.on("will-quit", _stop);
+    process.on("exit", _stop);
+  } catch (_) { _startPoll(); }
 })();
 `;
+
+// Every version of the main.js injection above (closing `})();` at column 0).
+const THEME_MAIN_BLOCK_RE = /\/\/ --- Zalo Linux Auto Dark\/Light Theme Sync ---\n\(function\(\)\{[\s\S]*?\n\}\)\(\);\n?/;
 
 const THEME_PRELOAD_INJECTION = `
 // --- Zalo Linux Auto Dark/Light Theme Sync ---
@@ -120,7 +139,14 @@ async function main() {
   const mainJsPath = path.join(mainDistDir, 'main.js');
   if (fs.existsSync(mainJsPath)) {
     let content = fs.readFileSync(mainJsPath, 'utf8');
-    if (!content.includes('zalo-linux-theme-change')) {
+    const block = THEME_MAIN_INJECTION.replace(/^\n/, '');
+    if (THEME_MAIN_BLOCK_RE.test(content)) {
+      const updated = content.replace(THEME_MAIN_BLOCK_RE, () => block);
+      if (updated !== content) {
+        fs.writeFileSync(mainJsPath, updated, 'utf8');
+        logger.dim('Updated auto theme watcher in main.js');
+      }
+    } else if (!content.includes('zalo-linux-theme-change')) {
       const anchor = 'Ae=m.createWithMultiWindow(i,o,gn,oe(),t),g(Ae),v(Ae.webContents),et.setMainWindow(Ae)';
       if (content.includes(anchor)) {
         content = content.replace(anchor, `${anchor};\n${THEME_MAIN_INJECTION}\n`);
