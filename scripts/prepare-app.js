@@ -154,6 +154,9 @@ async function extractAppAsar() {
   const { main: patchTitlebar } = require('./patches/patch-titlebar');
   await patchTitlebar();
 
+  const { main: patchWaylandTitlebar } = require('./patches/patch-wayland-titlebar');
+  await patchWaylandTitlebar();
+
   const { main: patchPastingImg } = require('./patches/patch-pasting-img');
   await patchPastingImg();
 
