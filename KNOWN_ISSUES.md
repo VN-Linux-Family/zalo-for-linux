@@ -65,7 +65,7 @@ This document tracks current limitations and historical issues that have been ad
 - **Unread Count On The Tray Icon:**
   - **Issue:** The launcher/taskbar badge showed the unread count, but the system tray icon did not, since the StatusNotifierItem protocol used by KDE/GNOME trays has no numeric-badge API.
   - **Solution:** Draw the unread count onto the tray icon itself. A dependency-free helper composes the number over the Zalo logo (no canvas or GPU), and the count is mirrored from `app.setBadgeCount` onto Zalo's own tray instance.
-  - **Credits:** Thanks to [@namtao](https://github.com/namtao).
+  - **Credits:** Thanks to [@namtao](https://github.com/namtao). See [PR #151](https://github.com/VN-Linux-Family/zalo-for-linux/pull/151).
 
 - **In-App Screenshot Tool:**
   - **Issue:** The built-in screenshot feature failed on Linux.
