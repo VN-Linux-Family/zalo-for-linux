@@ -295,6 +295,9 @@ async function extractAppAsar() {
   const { main: patchNotificationBadge } = require('./patches/patch-notification-badge');
   await patchNotificationBadge();
 
+  const { main: patchTrayBadge } = require('./patches/patch-tray-badge');
+  await patchTrayBadge();
+
   const { main: patchXdgUserDirs } = require('./patches/patch-xdg-user-dirs');
   await patchXdgUserDirs();
 
