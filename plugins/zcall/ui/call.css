@@ -47,7 +47,7 @@ body.has-video #bg, body.has-tiles #bg { display: none; }
 #video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; display: none; }
 body.has-video:not(.has-tiles) #video { display: block; }
 
-#center { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; }
+#center { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; z-index: 3; }
 /* Voice, ringing: avatar 125 centred 328 below the top of the content (672). */
 #center { top: 265px; }
 .avatar {
@@ -68,8 +68,8 @@ body.phase-connected:not(.is-video) .avatar::after { box-shadow: inset 0 0 0 2px
 body.phase-connected #status:empty { display: none; }
 /* Video before the picture: avatar 84 centred 106 below the top, its text centred at 171. */
 body.is-video #center { top: 64px; }
-body.is-video .avatar { width: 84px; height: 84px; font-size: 32px; }
-body.is-video #status { margin-top: 13px; }
+body.is-video .avatar { width: 84px; height: 84px; font-size: 32px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+body.is-video #status { margin-top: 13px; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85); }
 body.has-video #center, body.has-tiles #center { display: none; }
 
 /* Timer: green, top left (voice: digits 18 from the left, 12 from the top, 9 high; video: a 70x33 black box in the corner). */
@@ -90,9 +90,37 @@ body.has-video:not(.has-tiles) #peerName { display: block; }
 #pip { position: absolute; top: 0; right: 0; width: clamp(170px, 26.5625vw, 320px); height: clamp(96px, 15vw, 180px); background: #000; z-index: 2; display: none; overflow: hidden; }
 body.has-self:not(.has-tiles) #pip { display: block; }
 #pip canvas, .tile canvas { width: 100%; height: 100%; display: block; object-fit: cover; background: #000; }
+body.is-sharing #pip canvas,
+body.is-sharing #stage .tile[data-src="self"] canvas {
+  object-fit: contain;
+}
 /* A member's picture whole: the phone's 180x320 portrait covering a 622 px wide tile
    was cut to a band and blown up 3.5 times (2026-10-09), unrecognizable. */
 #pip .label { height: 24px; line-height: 24px; font-size: 14px; background: none; text-shadow: 0 1px 3px #000; }
+
+/* 1-1 video call before connected: camera preview as the full background if cam is on */
+body.is-video:not(.phase-connected):not(.has-tiles) #pip {
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+body.is-video:not(.phase-connected):not(.has-tiles) #pip .label {
+  display: none;
+}
+body.is-video:not(.phase-connected):not(.has-tiles) #pip::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+body.is-video.has-self:not(.phase-connected):not(.has-tiles) #bg {
+  display: none;
+}
 
 /* 1-1 split layout (the grid button): the peer and us side by side. */
 body.split.has-video:not(.has-tiles) #video { width: 50%; }
@@ -111,11 +139,28 @@ body.has-tiles #stage { display: block; }
   border-radius: 11px; background: rgba(0, 0, 0, 0.55); pointer-events: none; z-index: 3; }
 .tile.pinned .pinMark { display: block; }
 /* No video (not yet, or camera off): the avatar circle on its blurred picture. */
-.tile .tavbg, .tile .tav { display: none; }
+.tile .tavbg, .tile .tav, .tile .tstatus { display: none; }
 .tile.novideo canvas { visibility: hidden; }
 .tile.novideo .tavbg { display: block; position: absolute; inset: -30px; background: center / cover no-repeat #222; filter: blur(22px) brightness(0.3); }
 .tile.novideo .tav { display: flex; align-items: center; justify-content: center; position: absolute; left: 50%; top: 50%;
   transform: translate(-50%, -50%); border-radius: 50%; background: center / cover no-repeat #555; box-shadow: 0 0 0 2px #fff; color: #fff; }
+.tile.novideo .tstatus {
+  display: block;
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  text-align: center;
+  font-size: 13.5px;
+  line-height: 18px;
+  color: #cfd3d8;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+}
+.tile.novideo .tstatus:empty { display: none; }
 /* Name and muted micro, bottom left (macOS: 42 px box, 2x). */
 #stage .tile .label { display: flex; align-items: center; gap: 4px; height: 21px; line-height: 21px; padding: 0 5px;
   font-size: 13.5px; background: rgba(0, 0, 0, 0.5); }
@@ -134,11 +179,15 @@ body.has-tiles #stage { display: block; }
 /* --- the bottom bar --- */
 #bar { position: absolute; left: 0; right: 0; bottom: 0; height: var(--bar-h); background: var(--bar-bg); }
 #bar .mid { position: absolute; left: 50%; top: 5px; transform: translateX(-50%); display: flex; gap: 20px; align-items: center; }
-.pill { display: flex; width: 80px; height: 40px; border-radius: 20px; background: var(--pill-bg); box-shadow: inset 0 0 0 1px var(--pill-border); }
-.pill > button { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 20px; }
+.pill { display: flex; width: 80px; height: 40px; border-radius: 20px; background: var(--pill-bg); box-shadow: inset 0 0 0 1px var(--pill-border); transition: background 0.15s ease, box-shadow 0.15s ease; }
+.pill:has(> button:first-child:not(:disabled):hover) { background: #2c2c2c; box-shadow: inset 0 0 0 1px #484848; }
+.pill:has(> button:first-child:not(:disabled):hover) > .caret:not(:disabled) img { filter: brightness(1.15); }
+.pill > button { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 20px; transition: background 0.15s ease, filter 0.15s ease; }
 .pill > button > img { width: 44px; height: 44px; }
 .pill > .caret > img { width: 38px; height: 38px; }
+.pill > .caret:not(:disabled):hover { background: rgba(255, 255, 255, 0.16); }
 .pill > .caret.open { background: rgba(255, 255, 255, 0.28); }
+.pill > .caret.open:hover { background: rgba(255, 255, 255, 0.32); }
 #end { width: 40px; height: 40px; border-radius: 50%; }
 #end img { width: 40px; height: 40px; }
 #end:hover img, .pill > button:not(:disabled):hover { filter: brightness(1.15); }
@@ -168,9 +217,13 @@ body:not(.phase-connected) #full, body.is-video:not(.has-video):not(.has-tiles) 
 #menu .h, #menu .it { position: relative; height: 30px; line-height: 30px; padding: 0 16px 0 45px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #menu .h { color: var(--menu-muted); cursor: default; }
 #menu .h img { position: absolute; left: 16px; top: 5px; width: 20px; height: 20px; opacity: 0.6; }
+#menu .h[data-kind="mic"] img { left: 15px; top: 5px; width: 22px; height: 22px; }
+#menu .h[data-kind="speaker"] img { left: 16px; top: 5px; width: 20px; height: 20px; }
+#menu .h[data-kind="camera"] img { left: 17px; top: 6px; width: 18px; height: 18px; }
 #menu .it { cursor: pointer; }
 #menu .it:hover { background: var(--menu-hover); }
 #menu .it img { position: absolute; left: 18px; top: 8px; width: 14px; height: 14px; }
+#menu[data-kind="share"] .it { padding: 0 16px; }
 #menu .sep { height: 1px; margin: 4px 0; background: var(--menu-line); }
 /* Microphone level under "Chọn micro": slider, meter of what we send, hint. */
 #menu .vol { padding: 6px 16px 8px 45px; cursor: default; }
@@ -183,5 +236,22 @@ body:not(.phase-connected) #full, body.is-video:not(.has-video):not(.has-tiles) 
 #menu .volHint { margin-top: 4px; color: var(--menu-muted); font-size: 12px; line-height: 16px; white-space: normal; }
 
 /* --- compact: a small tile with the picture, end call and expand --- */
-body.compact #pip, body.compact .notes, body.compact #menu, body.compact .tool, body.compact #camPill, body.compact #peerName { display: none !important; }
+body.compact #pip, body.compact .notes, body.compact .tool, body.compact #camPill, body.compact #peerName { display: none !important; }
+body.compact.is-sharing #screen { display: flex !important; }
 body.compact #bar .mid { gap: 12px; }
+body.compact #menu {
+  left: 6px !important;
+  width: calc(100% - 12px);
+  bottom: calc(var(--bar-h) + 6px);
+  max-height: calc(100% - var(--bar-h) - 12px);
+  font-size: 13px;
+  padding: 6px 0;
+}
+body.compact #menu .h, body.compact #menu .it { height: 26px; line-height: 26px; padding-left: 36px; }
+body.compact #menu .h img { left: 10px; top: 4px; width: 18px; height: 18px; }
+body.compact #menu .h[data-kind="mic"] img { left: 9px; top: 4px; width: 20px; height: 20px; }
+body.compact #menu .h[data-kind="speaker"] img { left: 10px; top: 4px; width: 18px; height: 18px; }
+body.compact #menu .h[data-kind="camera"] img { left: 11px; top: 5px; width: 16px; height: 16px; }
+body.compact #menu .it img { left: 12px; top: 7px; width: 12px; height: 12px; }
+body.compact #menu .vol { padding: 4px 12px 6px 36px; }
+body.compact #menu .volHint { display: none; }

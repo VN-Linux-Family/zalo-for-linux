@@ -135,7 +135,8 @@ function prepare() {
  * merge with Zalo's own (JXL).
  */
 function configure(app) {
-  if (process.env.XDG_SESSION_TYPE !== 'wayland') return;
+  const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY;
+  if (!isWayland) return;
   const features = app.commandLine.getSwitchValue('enable-features').split(',').filter(Boolean);
   if (!features.includes('WebRTCPipeWireCapturer')) features.push('WebRTCPipeWireCapturer');
   app.commandLine.appendSwitch('enable-features', features.join(','));

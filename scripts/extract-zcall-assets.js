@@ -42,6 +42,8 @@ const REQUIRED = [
   'icon2/resources/offical-v2/mic_disabled1.png',
   'icon2/resources/offical-v2/mic3.png',
   'icon2/resources/offical-v2/speak.png',
+  'icon2/resources/offical-v2/video.png',
+  'icon2/resources/offical-v2/voice.png',
   'icon/resources/svg/dropup.svg',
   'icon/resources/svg/dropupdisable.svg',
   'icon/resources/svg/setting.svg',

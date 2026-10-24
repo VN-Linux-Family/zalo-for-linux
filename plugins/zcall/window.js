@@ -86,6 +86,8 @@ let closeTimer = null;
 let videoMode = false;
 let compact = null; // the normal bounds while the window is compact
 let camStartOff = false; // "Trả lời không mở camera": the call window starts with the camera off
+let sharingScreen = false;
+let expandedAt = 0;
 
 // --- devices: { mic, speaker } PulseAudio names, camera { id, label }; '' / null = default ---
 let prefsFile = null;
@@ -281,7 +283,19 @@ function ensureWindow() {
   });
   win.on('enter-full-screen', sendFullScreen);
   win.on('leave-full-screen', sendFullScreen);
-  win.on('closed', () => { win = null; winReady = false; videoMode = false; compact = null; compacting = false; });
+  let blurTimer = null;
+  win.on('blur', () => {
+    clearTimeout(blurTimer);
+    if (!sharingScreen || compact !== null || compacting || Date.now() - expandedAt < 500) return;
+    blurTimer = setTimeout(() => {
+      if (!win || win.isDestroyed() || !sharingScreen || compact !== null || compacting) return;
+      setCompact(true).catch((e) => console.error('[zcall-window] compact on blur:', e.message));
+    }, 50);
+  });
+  win.on('focus', () => {
+    clearTimeout(blurTimer);
+  });
+  win.on('closed', () => { win = null; winReady = false; videoMode = false; compact = null; compacting = false; sharingScreen = false; clearTimeout(blurTimer); });
   // From a file, not a data: URL: WebCodecs (video) needs a secure context.
   win.loadFile(path.join(__dirname, 'ui', 'call.html'), {
     query: { assets: ASSETS_DIR, test: process.env.ZCALL_TEST_VIDEO === '1' ? '1' : '0' },
@@ -366,33 +380,36 @@ let compacting = false;
 let compactJob = Promise.resolve(); // the last compact / expand, awaited before the screen picker
 async function setCompact(on) {
   if (!win || win.isDestroyed() || compacting || !!compact === on) return;
-  if (on) {
-    compacting = true;
-    const full = win.isFullScreen();
-    const max = win.isMaximized();
-    try {
+  compacting = true;
+  try {
+    if (on) {
+      const full = win.isFullScreen();
+      const max = win.isMaximized();
       await leaveState(() => win.isFullScreen(), 'leave-full-screen', () => win.setFullScreen(false));
       if (win.isDestroyed()) return;
       await leaveState(() => win.isMaximized(), 'unmaximize', () => win.unmaximize());
       if (win.isDestroyed()) return;
-    } finally { compacting = false; }
-    const [x, y] = win.getPosition();
-    const [width, height] = win.getContentSize();
-    compact = { x, y, width, height, full, max };
-    applySizing();
-    const wa = require('electron').screen.getDisplayMatching(win.getBounds()).workArea;
-    win.setResizable(true);
-    win.setContentSize(COMPACT_WIDTH, COMPACT_HEIGHT);
-    win.setResizable(false);
-    const [ow, oh] = win.getSize();
-    win.setPosition(wa.x + wa.width - ow - COMPACT_MARGIN, wa.y + wa.height - oh - COMPACT_MARGIN);
-  } else {
-    const before = compact;
-    compact = null;
-    setBounds(before);
-    applySizing();
-    if (before.max) win.maximize();
-    if (before.full) win.setFullScreen(true);
+      const [x, y] = win.getPosition();
+      const [width, height] = win.getContentSize();
+      compact = { x, y, width, height, full, max };
+      applySizing();
+      const wa = require('electron').screen.getDisplayMatching(win.getBounds()).workArea;
+      win.setResizable(true);
+      win.setContentSize(COMPACT_WIDTH, COMPACT_HEIGHT);
+      win.setResizable(false);
+      const [ow, oh] = win.getSize();
+      win.setPosition(wa.x + wa.width - ow - COMPACT_MARGIN, wa.y + wa.height - oh - COMPACT_MARGIN);
+    } else {
+      const before = compact;
+      compact = null;
+      setBounds(before);
+      applySizing();
+      if (before.max) win.maximize();
+      if (before.full) win.setFullScreen(true);
+      expandedAt = Date.now();
+    }
+  } finally {
+    compacting = false;
   }
   win.webContents.send('zcall-ui-compact', on);
   win.focus();
@@ -407,22 +424,22 @@ async function onEngineMessage(m) {
         return;
       }
       lastState = m;
-      camStartOff = false;
+      if (!incoming.isOpen()) camStartOff = false;
       incoming.show(m, ASSETS_DIR);
       return;
     }
     if (incoming.isOpen()) {
       incoming.close();
       // Missed or declined before answering: nothing else to show.
-      if (m.phase === 'ended') { lastState = null; return; }
+      if (m.phase === 'ended') { lastState = null; camStartOff = false; return; }
     }
-    if (m.phase === 'outgoing') camStartOff = false;
+    if (m.phase === 'outgoing' || m.phase === 'ended') { camStartOff = false; sharingScreen = false; }
     const state = camStartOff ? { ...m, camStartOff: true } : m;
     const first = !lastState || lastState.phase === 'ended' || lastState.phase === 'incoming';
     const w = ensureWindow();
     pushState(state);
     w.setTitle('Zalo Call - ' + (m.name || 'Zalo'));
-    if (m.video) enterVideoMode();
+    if (m.video || m.group) enterVideoMode();
     if (first) {
       w.show();
       w.focus();
@@ -438,6 +455,7 @@ async function onEngineMessage(m) {
     enterVideoMode();
     win.webContents.send('zcall-ui-video', m);
   } else if (m.type === 'close') {
+    camStartOff = false;
     if (incoming.isOpen()) incoming.close();
     if (!win || win.isDestroyed()) { lastState = null; return; }
     pushState({ ...(lastState || {}), phase: 'ended', text: m.text || 'Đã kết thúc' });
@@ -547,14 +565,20 @@ function start() {
       updateAdvancedOptionsFromZalo(msg.data);
     }
   });
-  // The screen to share. With PipeWire capture (Wayland, see zcall.configure)
+  // The screen / window to share. With PipeWire capture (Wayland, see zcall.configure)
   // this asks the desktop's portal, which lets the user pick one.
-  ipcMain.handle('zcall-ui-screen-source', async () => {
+  ipcMain.handle('zcall-ui-screen-source', async (_e, preferredId) => {
+    sharingScreen = true;
     await compactJob; // out of full screen and compact before the portal's dialog opens
     const { desktopCapturer } = require('electron');
-    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } });
+    if (preferredId === 'window:select') {
+      const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
+      const s = sources.find((x) => x.id.startsWith('window:')) || sources[0];
+      return s ? s.id : 'window:0:0';
+    }
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
     const s = sources.find((x) => x.id.startsWith('screen:')) || sources[0];
-    return s ? s.id : null;
+    return s ? s.id : (preferredId || 'screen:0:0');
   });
   // Compact / expand, from the page. Picking the screen to share happens with
   // the window compact and focused: GNOME puts the portal's dialog right under
@@ -574,11 +598,12 @@ function start() {
   // The notice's answer: accept, maybe with the camera off; the call window opens with the next state.
   ipcMain.on('zcall-incoming-answer', (_e, opts) => {
     camStartOff = !!(opts && opts.camStartOff);
-    send({ action: 'accept' });
+    send({ action: 'accept', camStartOff });
   });
   ipcMain.on('zcall-ui-action', (_e, action) => {
     if (!action || typeof action.action !== 'string') return;
     if (action.action === 'videoFrame') { send(action); return; } // hot path
+    if (action.action === 'screen') sharingScreen = !!action.on;
     if (action.action === 'device') {
       const p = loadPrefs();
       if (action.kind === 'camera') { p.camera = action.id ? { id: String(action.id), label: String(action.label || '') } : null; savePrefs(); return; }

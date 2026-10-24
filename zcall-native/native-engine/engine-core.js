@@ -30,6 +30,12 @@ const { VideoAssembler, avcCodecString } = require('./video');
 // A group ping error ends the call only after this long without media.
 const GROUP_MEDIA_IDLE_MS = 10000;
 
+// Outgoing 1-1 call setup timeouts (ZCallConstParam):
+// - kDefaultToRingingTimeOut: 15000 ms (if peer does not reach 'ringing' / no network)
+// - kDefaultHandshakeTimeOut: 45000 ms (maximum ringing duration without answer)
+const CALL_SETUP_TIMEOUT_MS = Number(process.env.ZCALL_SETUP_TIMEOUT_MS) || 15000;
+const RING_TIMEOUT_MS = Number(process.env.ZCALL_RING_TIMEOUT_MS) || 45000;
+
 // Zalo drops control events older than a minute. Within that window a cancel
 // can overtake its request, or polling can deliver the request again.
 const ENDED_CALL_TTL_MS = 60000;
@@ -202,9 +208,30 @@ class EngineCore {
     this.emit({ type: 'response', command: 'show', data: { error: 0, extendData: 'success' } });
     this.emit({ type: 'sendSignal', command: 401, data: { callId: c.callId, calleeId: c.peerId, codec: '[]\n', type: c.type } });
     if (c.type === 3) this._camMic();
-    this.ui.open({ title: c.peerName || 'Zalo', text: 'Đang gọi…', avatar: c.avatar, video: c.type === 3 });
+    this.ui.open({
+      title: c.peerName || 'Zalo',
+      text: 'Đang gọi…',
+      avatar: c.avatar,
+      video: c.type === 3,
+      selfAvatar: (this.local && this.local.avatar) || '',
+    });
     // The name the user saved for this contact (makeCall gives the real name).
     if (c.peerId) this.emit({ type: 'request', command: 'getAliasName', data: { noisedId: c.peerId } });
+    this._setCallTimeout(c, CALL_SETUP_TIMEOUT_MS);
+  }
+
+  _setCallTimeout(c, ms) {
+    if (c.ringTimer) clearTimeout(c.ringTimer);
+    c.ringTimer = setTimeout(() => {
+      if (this.call !== c || c.state === 'connected' || c.state === 'ended') return;
+      const unreachable = c.state === 'calling';
+      this.log(`outgoing call: ${unreachable ? 'unreachable / no network' : 'no answer'} (timeout)`);
+      const closeText = unreachable ? 'Người nhận không liên lạc được' : 'Người nhận không trả lời';
+      this.ui.status(closeText);
+      this.emit({ type: 'sendSignal', command: 405, data: { callId: c.callId, callType: c.type === 3 ? 1 : 0, status: 0, toId: c.peerId } });
+      this._finish(103, closeText);
+    }, ms);
+    if (c.ringTimer.unref) c.ringTimer.unref();
   }
 
   // Zalo's answer to getAliasName {noisedId, aliasName}: the contact's alias ("tên gợi
@@ -331,7 +358,11 @@ class EngineCore {
       case 'request': // incoming 1-1 call
         return this._incoming(d);
       case 'ring_ring':
-        if (c && c.state === 'calling') { c.state = 'ringing'; this.ui.status('Đang đổ chuông…'); }
+        if (c && c.state === 'calling') {
+          c.state = 'ringing';
+          this.ui.status('Đang đổ chuông…');
+          this._setCallTimeout(c, RING_TIMEOUT_MS);
+        }
         return;
       case 'answer': {
         if (callId !== undefined) this._rememberEndedCall(callId);
@@ -439,15 +470,21 @@ class EngineCore {
     this.emit({ type: 'request', command: 'getAliasName', data: { noisedId: c.peerId } });
     this.emit({ type: 'sendSignal', command: 407, data: { callId: c.callId, callerId: c.peerId } });
     const kind = c.type === 3 ? 'Cuộc gọi video đến' : 'Cuộc gọi thoại đến';
-    this.ui.incoming({ title: c.peerName || 'Zalo', text: kind, avatar: c.avatar, video: c.type === 3 },
-      () => this.answer(), (why) => this.reject(why));
+    this.ui.incoming({
+      title: c.peerName || 'Zalo',
+      text: kind,
+      avatar: c.avatar,
+      video: c.type === 3,
+      selfAvatar: (this.local && this.local.avatar) || '',
+    }, (camStartOff) => this.answer(camStartOff), (why) => this.reject(why));
   }
 
   // Callee picks up: InitZRTP to the caller's server first, so that 402 can
   // carry our P2P candidates (the phone ignores our P2P binding without them).
-  answer() {
+  answer(camStartOff = false) {
     const c = this.call;
     if (!c || c.role !== 'callee' || c.state !== 'incoming') return;
+    if (camStartOff) c.cameraOff = true;
     c.state = 'connected';
     c.startedAt = Date.now();
     this.emit({ type: 'request', command: 'action', data: { id: 5 } });
@@ -485,6 +522,7 @@ class EngineCore {
       if (!best && this.media.sendUdp) { this.ui.status('Không kết nối được máy chủ'); this.hangup('no-server'); return; }
       this.media.start('callee', c.server.rtpaddr);
       this.ui.status('Đã kết nối', c.startedAt);
+      if (c.cameraOff) this._camMic(false);
     });
   }
 
@@ -563,6 +601,7 @@ class EngineCore {
     const c = this.call;
     if (!c || c.state !== 'connected' || typeof this.ui.video !== 'function') return;
     if (c.group) {
+      if (pkt.ssrc === c.localUid || (c.shareScreenId && pkt.ssrc === c.shareScreenId)) return;
       // One stream per member: the window shows one tile per src (UID).
       if (!c.videos) c.videos = new Map();
       let v = c.videos.get(pkt.ssrc);
@@ -594,6 +633,7 @@ class EngineCore {
   _connectCaller(rtpSerIp) {
     const c = this.call;
     if (!c || c.role !== 'caller' || c.state === 'connected' || c.state === 'ended') return;
+    if (c.ringTimer) { clearTimeout(c.ringTimer); c.ringTimer = null; }
     c.state = 'connected';
     c.startedAt = Date.now();
     this.media.start(c.role, rtpSerIp || null);
@@ -612,6 +652,7 @@ class EngineCore {
       c.state = 'ringing';
       this.ui.status('Đang đổ chuông…');
       this.log('peer audio during setup, no ring signal yet');
+      this._setCallTimeout(c, RING_TIMEOUT_MS);
       return;
     }
     if (phase === 'stream') {
@@ -738,6 +779,9 @@ class EngineCore {
         if (!(id > 0)) return;
         const prev = c.shareScreenId || 0;
         c.shareScreenId = id;
+        c.members.delete(id);
+        if (c.videos) c.videos.delete(id);
+        this._groupStatus();
         if (c.sharing && prev !== id) this._screenShare(true);
         return;
       }
@@ -841,7 +885,7 @@ class EngineCore {
         return;
       // fromId = the member being rung, receiverId = us (log 2026-10-01).
       case 'group_ring_ring':
-        if (who && who !== c.localUid && !(c.members.get(who) || {}).state) this._groupMember(who, { state: 'ringing' });
+        if (who && who !== c.localUid && (c.members.get(who) || {}).state !== 'incall') this._groupMember(who, { state: 'ringing' });
         return;
       case 'group_end_call':
       case 'group_cancel':
@@ -873,7 +917,20 @@ class EngineCore {
   //   nobody answers in RING_TIMEOUT -> 12437 cancel; hang up -> 12438 + 12446
   _groupOutgoing(data) {
     const g = data.groupInfo || {};
-    const ids = (Array.isArray(data.partner) ? data.partner : []).map((p) => String(p.id || '')).filter(Boolean);
+    const partners = Array.isArray(data.partner) ? data.partner : (data.partner ? [data.partner] : []);
+    const ids = partners.map((p) => String(p.id || '')).filter(Boolean);
+    const members = new Map();
+    for (let i = 0; i < partners.length; i++) {
+      const p = partners[i];
+      const key = p.id ? String(p.id) : String(i + 1);
+      members.set(key, {
+        name: p.name || '',
+        avatar: p.avatar || '',
+        state: 'calling',
+        muted: false,
+        camOff: true,
+      });
+    }
     this.call = {
       group: true,
       role: 'caller',
@@ -891,11 +948,11 @@ class EngineCore {
       avatar: g.avatar || '',
       maxUsers: Number(g.maxUsers) || 8,
       invited: ids,
-      inviteNames: (data.partner || []).map((p) => p.name || ''),
+      inviteNames: partners.map((p) => p.name || ''),
       // Name / avatar of the invited (Zalo ids, not UIDs): only a single invitee can be told
       // apart when its UID shows up (_groupMember).
-      invitePartners: (data.partner || []).map((p) => ({ name: p.name || '', avatar: p.avatar || '' })),
-      members: new Map(),
+      invitePartners: partners.map((p) => ({ name: p.name || '', avatar: p.avatar || '', id: String(p.id || '') })),
+      members,
       pingMs: 9000,
       startedAt: 0,
       muted: false,
@@ -920,7 +977,24 @@ class EngineCore {
     // video: the call window only opens the camera (and shows its button) when
     // this is set. Group calls were leaving it off, so getUserMedia never ran
     // and a virtual camera that works for 1-1 was never captured.
-    this.ui.open({ title: c.title, text: 'Đang gọi nhóm…', avatar: c.avatar, video: true });
+    const initialMembers = [...c.members.entries()].map(([uid, m]) => ({
+      src: uid,
+      name: m.name || '',
+      avatar: m.avatar || '',
+      muted: !!m.muted,
+      camOff: !!m.camOff,
+      state: m.state,
+    }));
+    this.ui.open({
+      title: c.title,
+      text: 'Đang gọi nhóm…',
+      avatar: c.avatar,
+      video: true,
+      group: true,
+      selfAvatar: (this.local && this.local.avatar) || '',
+      members: initialMembers,
+    });
+    this._groupMembersToUi();
     c.ringTimer = setTimeout(() => {
       if (this.call === c && !c.answered && c.state !== 'ended') { this.log('group call: nobody answered'); this._groupHangup('no-answer'); }
     }, Number(process.env.ZCALL_GROUP_RING_MS) || 60000);
@@ -1004,7 +1078,7 @@ class EngineCore {
       this._groupBroadcast();
       c.pingTimer = setInterval(() => this._groupPing(), c.pingMs);
       if (c.pingTimer.unref) c.pingTimer.unref();
-      this.ui.status('Đang đổ chuông…', 0);
+      this._groupStatus();
     });
   }
 
@@ -1052,13 +1126,15 @@ class EngineCore {
     this.emit({ type: 'update', command: 'callState', data: { state: 'incall' } });
     this.emit({ type: 'sendSignal', command: 12439, data: { callId: c.callId, data: jsonCpp({ callType: 1, extraData: '', status: 1 }), hostCall: c.hostCall, session: c.sessId, status: 1 } });
     const host = (c.members.get(c.hostCall) || {}).name || d.Dname || 'Ai đó';
-    this.ui.incoming({ title: c.title, text: `${host} mời bạn vào cuộc gọi nhóm`, inviter: host, avatar: c.avatar, video: true },
-      () => this._groupAnswer(), (why) => this._groupReject(why));
+    this.ui.incoming({ title: c.title, text: `${host} mời bạn vào cuộc gọi nhóm`, inviter: host, avatar: c.avatar, video: true, group: true, selfAvatar: (this.local && this.local.avatar) || '' },
+      (camStartOff) => this._groupAnswer(camStartOff), (why) => this._groupReject(why));
   }
 
-  _groupAnswer() {
+  _groupAnswer(camStartOff = false) {
     const c = this.call;
     if (!c || !c.group || c.state !== 'incoming') return;
+    c.cameraOn = !camStartOff;
+    if (this.media.setGroupCamera) this.media.setGroupCamera(!camStartOff);
     c.state = 'connecting';
     this.media.onNegotiated({
       muted: !!c.muted,
@@ -1074,8 +1150,8 @@ class EngineCore {
       localUid: c.localUid,
       hostCall: c.hostCall,
     });
-    this._groupCameraProfile();
     this.ui.status('Đang kết nối…');
+    this._groupCameraProfile();
     this.media.prepare('callee').then((best) => {
       if (this.call !== c || c.state !== 'connecting') return;
       if (!best && this.media.sendUdp) {
@@ -1171,12 +1247,29 @@ class EngineCore {
 
   _groupMember(uid, info) {
     const c = this.call;
-    if (!c || !c.group || uid === c.localUid) return;
-    const m = c.members.get(uid) || { name: '' };
-    const next = { ...m, ...info };
+    if (!c || !c.group || uid === c.localUid || (c.shareScreenId && uid === c.shareScreenId)) return;
+    let m = c.members.get(uid);
+    if (!m) {
+      if (c.members.has(String(uid))) {
+        m = c.members.get(String(uid));
+        c.members.delete(String(uid));
+      } else if (c.invitePartners && c.invitePartners.length === 1) {
+        for (const [k, v] of c.members) {
+          if (v.state === 'calling' || v.state === 'ringing') {
+            m = v;
+            c.members.delete(k);
+            break;
+          }
+        }
+      }
+    }
+    const next = { ...(m || { name: '' }), ...info };
     if (!next.name && c.invitePartners && c.invitePartners.length === 1) Object.assign(next, c.invitePartners[0]);
     c.members.set(uid, next);
-    if (info.state === 'incall') c.answered = true;
+    if (info.state === 'incall') {
+      c.answered = true;
+      if (c.ringTimer) { clearTimeout(c.ringTimer); c.ringTimer = null; }
+    }
     this._groupStatus();
   }
 
@@ -1187,7 +1280,7 @@ class EngineCore {
     const c = this.call;
     if (!c || !c.group || typeof this.ui.members !== 'function') return;
     const list = [...c.members.entries()]
-      .filter(([, m]) => m.state === 'incall' || m.state === 'ringing')
+      .filter(([uid, m]) => (m.state === 'incall' || m.state === 'ringing' || m.state === 'calling') && (!c.shareScreenId || uid !== c.shareScreenId))
       .map(([uid, m]) => ({ src: uid, name: m.name || '', avatar: m.avatar || '', muted: !!m.muted, camOff: !!m.camOff, state: m.state }));
     const key = JSON.stringify(list);
     if (key === c.membersKey) return;
@@ -1197,7 +1290,7 @@ class EngineCore {
 
   _groupMemberIn(uid) {
     const c = this.call;
-    if (c && c.group && uid !== c.localUid && (c.members.get(uid) || {}).state !== 'incall') this._groupMember(uid, { state: 'incall' });
+    if (c && c.group && uid !== c.localUid && (!c.shareScreenId || uid !== c.shareScreenId) && (c.members.get(uid) || {}).state !== 'incall') this._groupMember(uid, { state: 'incall' });
   }
 
   // The server's list of who is in the room (cmd 50).
@@ -1206,7 +1299,7 @@ class EngineCore {
     if (!c || !c.group) return;
     const inRoom = new Set(uids);
     for (const uid of inRoom) {
-      if (uid === c.localUid) continue;
+      if (uid === c.localUid || (c.shareScreenId && uid === c.shareScreenId)) continue;
       if ((c.members.get(uid) || {}).state !== 'incall') this._groupGreet(uid);
       this._groupMember(uid, { state: 'incall' });
     }
@@ -1217,8 +1310,9 @@ class EngineCore {
 
   _groupMemberLeft(uid, why) {
     const c = this.call;
-    if (!c || !c.group || uid === c.localUid) return;
-    const m = c.members.get(uid);
+    if (!c || !c.group || uid === c.localUid || (c.shareScreenId && uid === c.shareScreenId)) return;
+    let m = c.members.get(uid);
+    if (!m && c.members.has(String(uid))) m = c.members.get(String(uid));
     if (!m || m.state === 'left') return;
     this.log('group member left:', uid, why);
     c.members.set(uid, { ...m, state: 'left' });
@@ -1230,18 +1324,25 @@ class EngineCore {
   _groupCheckEmpty(why) {
     const c = this.call;
     if (!c || !c.group || c.state !== 'connected') return;
-    const others = [...c.members.values()].filter((m) => m.state === 'incall' || m.state === 'ringing');
+    const others = [...c.members.entries()].filter(([uid, m]) => (m.state === 'incall' || m.state === 'ringing' || m.state === 'calling') && (!c.shareScreenId || uid !== c.shareScreenId));
     if (!others.length) { this.log('group call: nobody left', why); this._groupHangup('alone'); }
   }
 
   _groupStatus() {
     const c = this.call;
-    if (!c || !c.group || c.state !== 'connected') return;
+    if (!c || !c.group || (c.state !== 'connected' && c.state !== 'calling')) return;
     this._groupMembersToUi();
-    const names = [...c.members.values()].filter((m) => m.state === 'incall').map((m) => m.name || 'Thành viên');
-    const waiting = c.role === 'caller' && !c.answered ? 'Đang đổ chuông…' : 'Đang chờ người khác…';
+    const names = [...c.members.entries()].filter(([uid, m]) => m.state === 'incall' && (!c.shareScreenId || uid !== c.shareScreenId)).map(([, m]) => m.name || 'Thành viên');
+    const hasRinging = [...c.members.values()].some((m) => m.state === 'ringing');
+    const waiting = c.role === 'caller' && !c.answered
+      ? (hasRinging ? 'Đang đổ chuông…' : 'Đang gọi nhóm…')
+      : 'Đang chờ người khác…';
     const text = names.length ? `${names.length + 1} người: Bạn, ${names.join(', ')}` : waiting;
-    if (text !== c.statusText) { c.statusText = text; this.ui.status(text, c.startedAt); }
+    if (text !== c.statusText) {
+      c.statusText = text;
+      const since = c.answered && names.length ? c.startedAt : 0;
+      this.ui.status(text, since);
+    }
   }
 
   // The server removed us (host ended the meeting, or kicked us).
@@ -1318,6 +1419,7 @@ class EngineCore {
     this._rememberEndedCall(c.callId);
     const connected = c.state === 'connected';
     c.state = 'ended';
+    if (c.ringTimer) { clearTimeout(c.ringTimer); c.ringTimer = null; }
     const stats = (c.sessId && this.media.stats()) || {}; // no media before recvSignal 401
     this.media.stop();
     const duration = connected ? Math.round((Date.now() - c.startedAt) / 1000) : 0;

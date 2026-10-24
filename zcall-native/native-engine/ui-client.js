@@ -46,15 +46,19 @@ class ElectronCallUi {
   onNeedKey(cb) { this.cb.needKey = cb; }
   onTile(cb) { this.cb.tile = cb; }
 
-  open({ title, text, avatar, video = false }) {
+  open({ title, text, avatar, video = false, group = false, selfAvatar = '', members = null }) {
     this.incomingCb = null;
-    this._state({ phase: 'outgoing', name: title, avatar, text, since: 0, video, muted: false, speakerOff: false });
+    const s = { phase: 'outgoing', name: title, avatar, text, since: 0, video, group, selfAvatar, muted: false, speakerOff: false };
+    if (members) s.members = members;
+    this._state(s);
   }
 
   // noAnswer: only a dismiss button (a call we cannot take).
-  incoming({ title, text, avatar, video = false, noAnswer = false, inviter = '' }, onAccept, onReject) {
+  incoming({ title, text, avatar, video = false, noAnswer = false, inviter = '', group = false, selfAvatar = '', members = null }, onAccept, onReject) {
     this.incomingCb = { onAccept, onReject };
-    this._state({ phase: 'incoming', name: title, avatar, text, since: 0, video, muted: false, speakerOff: false, noAnswer, inviter });
+    const s = { phase: 'incoming', name: title, avatar, text, since: 0, video, group, selfAvatar, muted: false, speakerOff: false, noAnswer, inviter };
+    if (members) s.members = members;
+    this._state(s);
     if (this.fallback) this._fallbackIncoming();
   }
 
@@ -176,7 +180,7 @@ class ElectronCallUi {
   _onAction(m) {
     switch (m.action) {
       case 'accept':
-        if (this.incomingCb) { const c = this.incomingCb; this.incomingCb = null; c.onAccept(); }
+        if (this.incomingCb) { const c = this.incomingCb; this.incomingCb = null; c.onAccept(!!m.camStartOff); }
         return;
       case 'reject':
         if (this.incomingCb) { const c = this.incomingCb; this.incomingCb = null; c.onReject(m.why || 'reject'); }

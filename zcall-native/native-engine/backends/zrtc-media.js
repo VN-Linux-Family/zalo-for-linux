@@ -1044,6 +1044,7 @@ class ZrtcMediaBackend extends EventEmitter {
   _noteVideoMember(ssrc) {
     const uid = ssrc >>> 0;
     if (!uid || uid === ((this.params && this.params.localUid) >>> 0)) return;
+    if (this.share && uid === (this.share.uid >>> 0)) return;
     if (this.vidWanted.has(uid)) return;
     this.vidWanted.add(uid);
     this._sendVidQual();
@@ -1093,7 +1094,7 @@ class ZrtcMediaBackend extends EventEmitter {
   // member's video for good when the first frame arrived while the window was
   // still connecting.
   qualityIdFor(uid) {
-    if (this.share && (uid >>> 0) === this.share.uid) return 0; // our own screen, loopback check
+    if (this.share && (uid >>> 0) === this.share.uid) return process.env.ZCALL_SHARE_LOOPBACK === '1' ? 0 : 0xff;
     if (process.env.ZCALL_CAM_LOOPBACK === '1' && (uid >>> 0) === ((this.params && this.params.localUid) >>> 0)) return 0; // our own camera, loopback check
     const plan = this.videoPlan;
     if (process.env.ZCALL_GROUP_QUALITY === '0' || !plan || !plan.layers.length) return 0xff;
@@ -1235,6 +1236,9 @@ class ZrtcMediaBackend extends EventEmitter {
     let tracker = this.videoRoc;
     if (this.group) {
       const ssrc = rtp.readUInt32BE(8);
+      const ours = (this.params && this.params.localUid) ? (this.params.localUid >>> 0) : 0;
+      if (ours && ssrc === ours && process.env.ZCALL_CAM_LOOPBACK !== '1') return;
+      if (this.share && ssrc === (this.share.uid >>> 0) && process.env.ZCALL_SHARE_LOOPBACK !== '1') return;
       tracker = this.videoRocs.get(ssrc);
       if (!tracker) { tracker = new RocTracker(); this.videoRocs.set(ssrc, tracker); }
     }
@@ -1399,7 +1403,8 @@ class ZrtcMediaBackend extends EventEmitter {
       const uids = parseRoomUpdated(p.data);
       if (!uids) return;
       this.log('media: room', uids.join(','));
-      this.emit('roster', uids.filter((u) => u && u !== ours));
+      const shareUid = this.share ? (this.share.uid >>> 0) : 0;
+      this.emit('roster', uids.filter((u) => u && u !== ours && (!shareUid || u !== shareUid)));
       return;
     }
     if (p.uid === ours) {
@@ -1420,6 +1425,9 @@ class ZrtcMediaBackend extends EventEmitter {
     let tracker = this.rxRoc;
     if (this.group) {
       const ssrc = rtp.readUInt32BE(8);
+      const ours = (this.params && this.params.localUid) ? (this.params.localUid >>> 0) : 0;
+      if (ours && ssrc === ours) return;
+      if (this.share && ssrc === (this.share.uid >>> 0)) return;
       tracker = this.rxRocs.get(ssrc);
       if (!tracker) { tracker = new RocTracker(); this.rxRocs.set(ssrc, tracker); }
     }
