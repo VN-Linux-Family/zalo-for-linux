@@ -63,6 +63,11 @@ Tài liệu này ghi lại những hạn chế hiện tại và các lỗi trư�
   - **Cách giải quyết:** Bổ sung huy hiệu đếm tin nhắn chưa đọc cho các môi trường desktop hỗ trợ giao thức huy hiệu của Unity/KDE/GNOME.
   - **Ghi nhận:** Cảm ơn [@akimiya7742](https://github.com/akimiya7742). Xem [PR #43](https://github.com/VN-Linux-Family/zalo-for-linux/pull/43).
 
+- **Số tin nhắn chưa đọc trên biểu tượng khay hệ thống:**
+  - **Lỗi:** Huy hiệu trên dock/thanh tác vụ đã hiện số tin nhắn chưa đọc, nhưng biểu tượng ở khay hệ thống thì không, vì giao thức StatusNotifierItem mà khay của KDE/GNOME dùng không có API hiển thị số.
+  - **Cách giải quyết:** Vẽ số tin nhắn chưa đọc trực tiếp lên biểu tượng khay. Một hàm tiện ích không cần thư viện ngoài vẽ con số lên logo Zalo (không dùng canvas hay GPU), và plugin `tray-badge` lấy số từ `app.setBadgeCount` để cập nhật lên biểu tượng khay do `main.js` tạo (Zalo chỉ tự tạo khay trên Windows).
+  - **Ghi nhận:** Cảm ơn [@namtao](https://github.com/namtao). Xem [PR #151](https://github.com/VN-Linux-Family/zalo-for-linux/pull/151).
+
 - **Công cụ chụp màn hình trong ứng dụng:**
   - **Lỗi:** Tính năng chụp màn hình có sẵn không hoạt động trên Linux.
   - **Cách giải quyết:** Tích hợp với các công cụ chụp màn hình sẵn có trên Linux (`deepin-screen-recorder`, `spectacle`, `flameshot`, `gnome-screenshot`, `xfce4-screenshooter`, `mate-screenshot`, `ksnapshot`, `scrot`).

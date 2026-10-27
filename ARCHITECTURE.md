@@ -39,6 +39,7 @@ zalo-for-linux/
 │   ├── launcher-badge # Displays the unread messages
 │   ├── screenshot # Calls the native screenshots module to capture the screen
 │   ├── start-hidden # Allows the app to start hidden in the tray
+│   ├── tray-badge # Draws the unread count onto the tray icon
 │   ├── tray-host # Check if the host have a system tray, if it doesn't have, quit the app immediately
 │   ├── advanced-settings # Linux settings window, call sounds and navigation
 │   ├── userscripts # Userscript storage, injection and editor

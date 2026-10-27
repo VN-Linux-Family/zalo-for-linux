@@ -39,6 +39,7 @@ zalo-for-linux/
 │   ├── launcher-badge # Hiển thị số tin nhắn chưa đọc
 │   ├── screenshot # Gọi module chụp màn hình native để chụp màn hình
 │   ├── start-hidden # Cho phép ứng dụng khởi động ẩn trong khay hệ thống
+│   ├── tray-badge # Vẽ số tin nhắn chưa đọc lên biểu tượng khay hệ thống
 │   ├── tray-host # Kiểm tra máy có khay hệ thống hay không, nếu không có thì thoát ứng dụng ngay
 │   ├── userscripts # Trình quản lý userscript
 │   ├── window-state # Kiểm tra trạng thái cửa sổ để tránh cửa sổ bị biến mất
