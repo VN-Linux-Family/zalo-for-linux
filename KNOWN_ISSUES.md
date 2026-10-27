@@ -62,6 +62,11 @@ This document tracks current limitations and historical issues that have been ad
   - **Solution:** Implemented unread message count badge integration for desktop environments supporting Unity/KDE/GNOME badge protocols.
   - **Credits:** Thanks to [@akimiya7742](https://github.com/akimiya7742). See [PR #43](https://github.com/VN-Linux-Family/zalo-for-linux/pull/43).
 
+- **Unread Count On The Tray Icon:**
+  - **Issue:** The launcher/taskbar badge showed the unread count, but the system tray icon did not, since the StatusNotifierItem protocol used by KDE/GNOME trays has no numeric-badge API.
+  - **Solution:** Draw the unread count onto the tray icon itself. A dependency-free helper composes the number over the Zalo logo (no canvas or GPU), and the `tray-badge` plugin mirrors the count from `app.setBadgeCount` onto the tray that `main.js` creates (Zalo builds its own tray only on Windows).
+  - **Credits:** Thanks to [@namtao](https://github.com/namtao). See [PR #151](https://github.com/VN-Linux-Family/zalo-for-linux/pull/151).
+
 - **In-App Screenshot Tool:**
   - **Issue:** The built-in screenshot feature failed on Linux.
   - **Solution:** Integrated with native Linux screenshot utilities (`deepin-screen-recorder`, `spectacle`, `flameshot`, `gnome-screenshot`, `xfce4-screenshooter`, `mate-screenshot`, `ksnapshot`, `scrot`).

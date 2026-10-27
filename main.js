@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, screen, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -43,6 +43,7 @@ if (process.platform === 'linux') {
 
 const screenshotPlugin = require('./plugins/screenshot');
 const launcherBadgePlugin = require('./plugins/launcher-badge');
+const trayBadgePlugin = require('./plugins/tray-badge');
 const userscriptsPlugin = require('./plugins/userscripts');
 const advancedSettingsPlugin = require('./plugins/advanced-settings');
 const zcall = require('./plugins/zcall');
@@ -242,6 +243,7 @@ app.once('ready', () => {
   }
 
 // Register plugins
+  trayBadgePlugin.register({ app, tray, nativeImage, appDir, iconPath });
   launcherBadgePlugin.register({ app, ipcMain });
   screenshotPlugin.register({ ipcMain });
   const advancedSettings = advancedSettingsPlugin.register({ app, ipcMain, BrowserWindow, dialog });
