@@ -83,7 +83,7 @@
       "category": "Network",
       "desktop": {
         "entry": {
-          "StartupWMClass": "zalo"
+          "StartupWMClass": "Zalo"
         }
       },
       "synopsis": "Zalo messaging app for Linux",
