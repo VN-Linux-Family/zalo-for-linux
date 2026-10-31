@@ -316,10 +316,14 @@ class EngineCore {
   // the real engine sends isOnCam 0, isOnMic -1; the call window reports ours
   // when it starts. A group call does not use 12006: UiOnOffCameraEvent only
   // sendBroadcast, and the wire videoState is the inverse of "camera on".
+  // Without camOn (call start, caller connected) it repeats what the window
+  // last reported: a 0 there after the window's 1 left the phone showing our
+  // camera as off for the whole call.
   _camMic(camOn) {
     const c = this.call;
     if (!c) return;
-    const cam = camOn === undefined ? 0 : camOn ? 1 : 0;
+    if (camOn !== undefined) c.camReported = !!camOn;
+    const cam = c.camReported ? 1 : 0;
     if (c.group) {
       c.cameraOn = cam === 1;
       if (this.media.setGroupCamera) this.media.setGroupCamera(cam === 1);
@@ -638,7 +642,12 @@ class EngineCore {
     c.startedAt = Date.now();
     this.media.start(c.role, rtpSerIp || null);
     this.emit({ type: 'sendSignal', command: 408, data: { callId: c.callId, calleeId: c.peerId } });
-    if (c.type === 3) this._camMic();
+    if (c.type === 3) {
+      this._camMic();
+      // The phone missed the state sent with 408 and showed our camera as off
+      // until the next 12006 (after a screen share); say it again once it is up.
+      setTimeout(() => { if (this.call === c && c.state === 'connected') this._camMic(); }, 2000).unref();
+    }
     this.ui.status('Đã kết nối', c.startedAt);
   }
 
