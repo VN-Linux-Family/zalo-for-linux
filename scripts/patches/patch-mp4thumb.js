@@ -16,18 +16,25 @@ async function main() {
     return;
   }
 
-  try {
-    execSync(`node "${BUILDER_SCRIPT}" "${MP4THUMB_DIR}"`, {
-      cwd: path.join(__dirname, '..', '..'),
-      stdio: 'pipe'
-    });
-  } catch (error) {
-    logger.error('Failed to build mp4thumb', error.message);
-    if (error.stdout) logger.dim(error.stdout.toString());
-    throw new Error(`Failed to build mp4thumb`);
+  const releaseDir = path.join(MP4THUMB_DIR, 'target', 'release');
+  const alreadyBuilt = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'));
+
+  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
+    try {
+      execSync(`node "${BUILDER_SCRIPT}" "${MP4THUMB_DIR}"`, {
+        cwd: path.join(__dirname, '..', '..'),
+        stdio: 'pipe'
+      });
+    } catch (error) {
+      logger.error('Failed to build mp4thumb', error.message);
+      if (error.stdout) logger.dim(error.stdout.toString());
+      throw new Error(`Failed to build mp4thumb`);
+    }
+  } else {
+    logger.dim('mp4thumb already built, skipping compilation');
   }
 
-  const releaseDir = path.join(MP4THUMB_DIR, 'target', 'release');
+  // releaseDir already defined above
   const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
 
   const destDir = path.join(APP_DIR, 'native', 'nativelibs', 'mp4thumb', 'linux');

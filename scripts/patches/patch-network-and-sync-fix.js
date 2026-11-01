@@ -53,13 +53,14 @@ async function main() {
     for (const [from, to] of replacements) {
       if (typeof from === 'string') {
         if (content.includes(from)) {
-          content = content.split(from).join(to);
+          content = content.replaceAll(from, to);
           changed = true;
         }
       } else if (from instanceof RegExp) {
-        const nextContent = content.replace(from, to);
-        if (nextContent !== content) {
-          content = nextContent;
+        from.lastIndex = 0;
+        if (from.test(content)) {
+          from.lastIndex = 0;
+          content = content.replace(from, to);
           changed = true;
         }
       }

@@ -16,18 +16,25 @@ async function main() {
     return;
   }
 
-  try {
-    execSync(`node "${BUILDER_SCRIPT}" "${FILE_UTILS_DIR}"`, {
-      cwd: path.join(__dirname, '..', '..'),
-      stdio: 'pipe'
-    });
-  } catch (error) {
-    logger.error('Failed to build file-utils', error.message);
-    if (error.stdout) logger.dim(error.stdout.toString());
-    throw new Error(`Failed to build file-utils`);
+  const releaseDir = path.join(FILE_UTILS_DIR, 'target', 'release');
+  const alreadyBuilt = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'));
+
+  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
+    try {
+      execSync(`node "${BUILDER_SCRIPT}" "${FILE_UTILS_DIR}"`, {
+        cwd: path.join(__dirname, '..', '..'),
+        stdio: 'pipe'
+      });
+    } catch (error) {
+      logger.error('Failed to build file-utils', error.message);
+      if (error.stdout) logger.dim(error.stdout.toString());
+      throw new Error(`Failed to build file-utils`);
+    }
+  } else {
+    logger.dim('file-utils already built, skipping compilation');
   }
 
-  const releaseDir = path.join(FILE_UTILS_DIR, 'target', 'release');
+  // releaseDir already defined above
   const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
 
   const destDir = path.join(APP_DIR, 'native', 'nativelibs', 'file-utils', 'linux');
