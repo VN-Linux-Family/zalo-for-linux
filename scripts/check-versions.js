@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const logger = require('./utils/logger');
+const { buildCommit } = require('./utils/build-commit');
 
 const ZADARK_DIR = path.join(__dirname, '..', 'plugins', 'zadark');
 
@@ -19,9 +20,7 @@ async function main() {
     if (process.env.GITHUB_ACTIONS) {
       logger.info('GitHub Actions detected - checking existing combinations');
 
-      const targetCommit = execSync('git rev-parse --short HEAD', {
-        encoding: 'utf8'
-      }).trim();
+      const targetCommit = buildCommit();
       fs.appendFileSync(process.env.GITHUB_ENV, `COMMIT_HASH=${targetCommit}\n`);
 
       // Check existing combinations in releases
