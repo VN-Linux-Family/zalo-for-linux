@@ -12,6 +12,9 @@ on:
       - '**/LICENSE'
       - '**/LICENSE.*'
       - 'readme/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'nix/**'
   pull_request:
     branches:
       - main
@@ -21,6 +24,9 @@ on:
       - '**/LICENSE'
       - '**/LICENSE.*'
       - 'readme/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'nix/**'
   workflow_dispatch:
     inputs:
       zalo_version:
@@ -239,3 +245,33 @@ jobs:
             gh release delete-asset "$RELEASE_TAG" "$name" --yes
           fi
         done
+
+    # The flake pins the AppImages by name and hash, and the step above has just
+    # deleted the ones it pointed to. A push made with GITHUB_TOKEN does not
+    # start another run, so this does not rebuild the release.
+    - name: Update Nix sources
+      if: github.ref == 'refs/heads/main'
+      env:
+        RELEASE_TAG: ${{ needs.build.outputs.zalo_version }}
+        CURRENT_COMMIT: ${{ env.COMMIT_HASH }}
+      run: |
+        set -euo pipefail
+
+        scripts/update-nix-sources.sh "$RELEASE_TAG" dist nix/sources.json
+
+        if git diff --quiet -- nix/sources.json; then
+          echo "nix/sources.json is up to date"
+          exit 0
+        fi
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add nix/sources.json
+        git commit -m "chore(nix): update sources for $RELEASE_TAG ($CURRENT_COMMIT)"
+
+        git fetch origin main
+        if git rebase FETCH_HEAD && git push origin HEAD:main; then
+          echo "Pushed nix/sources.json"
+        else
+          echo "::warning::Could not push nix/sources.json; the flake still points to the deleted assets"
+        fi

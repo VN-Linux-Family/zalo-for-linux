@@ -1,0 +1,25 @@
+{
+  "version": "26.10.20",
+  "assets": {
+    "zadark": {
+      "x86_64-linux": {
+        "name": "Zalo-26.10.20+ZaDark-26.3-e9f3dc1-x86_64.AppImage",
+        "hash": "sha256-CKyi0W5+fR9WSXwTf0zd72bMlf27A9QcFiOSQrUOQBU="
+      },
+      "aarch64-linux": {
+        "name": "Zalo-26.10.20+ZaDark-26.3-e9f3dc1-aarch64.AppImage",
+        "hash": "sha256-8bW8HYylV5J93t7vCqQmM6OvLXHNSlxrPiWG4iGW7po="
+      }
+    },
+    "original": {
+      "x86_64-linux": {
+        "name": "Zalo-26.10.20-Original-e9f3dc1-x86_64.AppImage",
+        "hash": "sha256-hAZ/B42YSIxE9Ffnq9+qJz//GQH+/tgK3sp2QqX70cw="
+      },
+      "aarch64-linux": {
+        "name": "Zalo-26.10.20-Original-e9f3dc1-aarch64.AppImage",
+        "hash": "sha256-LCRja+BnW09Tr8oaIaQjgWOHmBVGtUUscLr9LiqDif8="
+      }
+    }
+  }
+}

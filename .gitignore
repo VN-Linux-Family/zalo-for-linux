@@ -131,3 +131,7 @@ tmp/
 temp/ 
 # Python bytecode (py_compile, a local run of audio-io.py)
 __pycache__/
+
+# Nix build output
+/result
+/result-*
