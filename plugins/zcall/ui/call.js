@@ -658,11 +658,11 @@ function runTrack(track, cap, onFirst, onEnd) {
     finish();
   };
   track.onmute = () => {
-    if (!cap || !cap.isWindow || first) return;
+    if (!cap || cap.kind !== 'screen' || first) return;
     clearTimeout(muteTimer);
     muteTimer = setTimeout(() => {
       if (alive && track.muted) {
-        act('log', { text: 'capture window closed (track muted)' });
+        act('log', { text: (cap.isWindow ? 'capture window closed' : 'capture portal stopped') + ' (track muted)' });
         finish();
       }
     }, 50);
@@ -730,30 +730,56 @@ async function startLocal() {
     act('camera', { on: true });
   }
 }
-// Our screen in place of the camera. On Wayland the desktop's portal asks
-// which screen only once the capture runs. GNOME denies the portal's dialog
-// the focus and puts it right under the focused window: with this window
-// minimized that was Zalo's main window, which hid the dialog. So the window
-// goes compact in the screen's corner and keeps the focus: the dialog comes
-// right under it, above Zalo's main window. The camera stays on until the first screen frame;
-// cancelling, or 60 s without a pick, gives up. Stopping it from the
-// desktop's indicator ends the share.
-// A failure within 3 s of the click is not the user cancelling: the first
-// capture after a launch sometimes fails at once, the second works. So
-// that one is retried, once. While sharing, the window is compact.
+// Our screen in place of the camera. The desktop portal (xdg-desktop-portal
+// via PipeWire) asks which screen/window to share.
+// GNOME denies the portal's dialog the focus and puts it right under the
+// focused window: with this window minimized that was Zalo's main window,
+// which hid the dialog. So the window goes compact in the screen's corner and
+// keeps the focus: the dialog comes right under it, above Zalo's main window.
+// The camera stays on until the first screen frame; cancelling, or 60 s
+// without a pick, gives up. Stopping it from the desktop's indicator ends the
+// share. While sharing, the window is compact.
 // pendingScreen declared at top
-async function startScreen(attempt = 1, targetSourceId = null) {
-  if (sharing || (pendingScreen && attempt === 1)) return;
+async function startScreen(attempt = 1, targetSourceId = null, directFallback = false) {
+  if (sharing || (pendingScreen && attempt === 1 && !directFallback)) return;
   const isWindow = targetSourceId === 'window:select' || (typeof targetSourceId === 'string' && targetSourceId.startsWith('window:'));
   const cap = pendingScreen = { kind: 'screen', stop: () => {}, sourceId: targetSourceId, isWindow };
   const t0 = performance.now();
+
+  const isCancelReason = (reason) => {
+    if (!reason) return false;
+    const str = String(reason).toLowerCase();
+    return str === 'ended before a frame' ||
+           str.includes('notallowederror') ||
+           str.includes('aborterror') ||
+           str.includes('permission denied') ||
+           str.includes('cancelled') ||
+           str.includes('canceled');
+  };
+
   const giveUp = (why) => {
     if (pendingScreen !== cap) return;
     pendingScreen = null;
     cap.stop();
-    act('log', { text: 'screen share attempt ' + attempt + ': ' + why });
+    act('log', { text: 'screen share attempt ' + attempt + (directFallback ? ' (direct)' : '') + ': ' + why });
+
+    // User cancelled in the portal dialog (or dismissed / denied permission): abort cleanly, no fallback, no retry.
+    if (isCancelReason(why)) {
+      act('screen', { on: false });
+      if (autoCompact) { autoCompact = false; ipcRenderer.send('zcall-ui-window', 'expand'); }
+      return;
+    }
+
+    // Portal encountered a technical stream error (e.g. PipeWire daemon died, format negotiation failed):
+    // seamlessly fall back to direct capture if not tried yet.
+    if (!directFallback && (why.includes('NotReadableError') || why.includes('Could not start video source') || why.includes('OverconstrainedError'))) {
+      act('log', { text: 'portal stream error (' + why + '), falling back to direct capture' });
+      startScreen(1, targetSourceId, true);
+      return;
+    }
+
     if (attempt === 1 && why !== 'timeout' && performance.now() - t0 < 3000 && state.phase === 'connected') {
-      setTimeout(() => startScreen(2, targetSourceId), 300);
+      setTimeout(() => startScreen(2, targetSourceId, directFallback), 300);
       return;
     }
     act('screen', { on: false });
@@ -762,14 +788,30 @@ async function startScreen(attempt = 1, targetSourceId = null) {
   if (!compactMode) { autoCompact = true; ipcRenderer.send('zcall-ui-window', 'compact'); }
   let stream;
   try {
-    const id = await ipcRenderer.invoke('zcall-ui-screen-source', targetSourceId);
+    const id = await ipcRenderer.invoke('zcall-ui-screen-source', targetSourceId, directFallback);
     if (!id) throw new Error('no screen source');
     cap.sourceId = id;
     if (typeof id === 'string' && id.startsWith('window:')) cap.isWindow = true;
     stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: {
       chromeMediaSource: 'desktop', chromeMediaSourceId: id, maxWidth: 1920, maxHeight: 1080, maxFrameRate: PROFILES.screen.fps } } });
   } catch (e) {
-    giveUp((e && e.name) + ': ' + (e && e.message)); // cancelled in the portal, or no capture
+    const errText = (e && e.name) + ': ' + (e && e.message);
+
+    // User cancelled in the portal dialog: abort cleanly without fallback.
+    if (isCancelReason(e && e.name) || isCancelReason(e && e.message)) {
+      giveUp(errText);
+      return;
+    }
+
+    // Portal error (technical failure, not user cancellation): fall back to direct capture.
+    if (!directFallback) {
+      act('log', { text: 'portal share error (' + errText + '), falling back to direct capture' });
+      pendingScreen = null;
+      startScreen(1, targetSourceId, true);
+      return;
+    }
+
+    giveUp(errText);
     return;
   }
   if (pendingScreen !== cap || state.phase !== 'connected') { stream.getTracks().forEach((t) => t.stop()); giveUp('call over'); return; }
