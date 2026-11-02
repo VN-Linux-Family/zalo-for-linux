@@ -2,6 +2,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const logger = require('./utils/logger');
+const { buildCommit } = require('./utils/build-commit');
 
 const BASE_DIR = path.join(__dirname, '..');
 const APP_DIR = path.join(BASE_DIR, 'app');
@@ -109,7 +110,7 @@ async function integrateZaDark() {
 async function build(buildName = '', outputSuffix = '') {
   try {
     // Get git commit hash for filename
-    const commitHash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    const commitHash = buildCommit();
     const St2script = path.join(BASE_DIR, 'scripts', 'build-stage2.sh');
 
     // Add the arch suffix for builds

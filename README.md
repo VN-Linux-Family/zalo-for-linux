@@ -65,6 +65,48 @@ We strongly recommend using **Gear Lever** or **AM** to integrate the AppImage p
    - Open **Gear Lever**.
    - If any updates is available, the button **No updates available** will turn to **Update**, just simply click to the button and Zalo is updated.
 
+#### For NixOS users:
+
+The repository is a flake that installs the release AppImage, with what calls need (`python3`, libopus, PulseAudio tools) packaged inside.
+
+1. Add the flake to your system's `flake.nix` and import its module:
+   ```nix
+   {
+     inputs.zalo-for-linux = {
+       url = "github:VN-Linux-Family/zalo-for-linux";
+       inputs.nixpkgs.follows = "nixpkgs";
+     };
+
+     outputs = { nixpkgs, zalo-for-linux, ... }: {
+       nixosConfigurations.<hostname> = nixpkgs.lib.nixosSystem {
+         modules = [
+           zalo-for-linux.nixosModules.default
+           ./configuration.nix
+         ];
+       };
+     };
+   }
+   ```
+2. Enable it in `configuration.nix`. Zalo is proprietary, so allow it as unfree:
+   ```nix
+   nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "zalo";
+
+   programs.zalo = {
+     enable = true;
+     # variant = "original";  # the AppImage without ZaDark
+   };
+   ```
+   Calls need sound through PipeWire (`services.pipewire.pulse.enable = true;`) or PulseAudio.
+3. Apply it with `sudo nixos-rebuild switch`.
+4. How to update:
+   ```bash
+   nix flake update zalo-for-linux
+   sudo nixos-rebuild switch
+   ```
+   *Note: each rebuild deletes the old AppImages from the Releases page. If `nixos-rebuild` fails to download the file (404), run `nix flake update zalo-for-linux` to point the flake to the latest build, then rebuild.*
+
+To try it without installing: `nix run github:VN-Linux-Family/zalo-for-linux`.
+
 #### Run it manually (this is not recommended):
 
 1. Download the latest `.AppImage` file from the [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases) page.

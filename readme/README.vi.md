@@ -65,6 +65,48 @@ Chúng mình khuyên bạn nên dùng **Gear Lever** hoặc **AM** để AppImag
    - Mở **Gear Lever**.
    - Khi có bản cập nhật, nút **No updates available** sẽ chuyển thành **Update**. Bạn chỉ cần bấm vào là Zalo được cập nhật.
 
+#### Nếu bạn dùng NixOS
+
+Repo này là một flake, cài Zalo từ file AppImage của bản phát hành, kèm sẵn những thứ cần cho cuộc gọi (`python3`, libopus, bộ công cụ PulseAudio).
+
+1. Thêm flake vào `flake.nix` của hệ thống và import module của nó:
+   ```nix
+   {
+     inputs.zalo-for-linux = {
+       url = "github:VN-Linux-Family/zalo-for-linux";
+       inputs.nixpkgs.follows = "nixpkgs";
+     };
+
+     outputs = { nixpkgs, zalo-for-linux, ... }: {
+       nixosConfigurations.<hostname> = nixpkgs.lib.nixosSystem {
+         modules = [
+           zalo-for-linux.nixosModules.default
+           ./configuration.nix
+         ];
+       };
+     };
+   }
+   ```
+2. Bật Zalo trong `configuration.nix`. Zalo là phần mềm độc quyền nên cần cho phép gói unfree:
+   ```nix
+   nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "zalo";
+
+   programs.zalo = {
+     enable = true;
+     # variant = "original";  # bản AppImage không có ZaDark
+   };
+   ```
+   Cuộc gọi cần âm thanh qua PipeWire (`services.pipewire.pulse.enable = true;`) hoặc PulseAudio.
+3. Áp dụng bằng lệnh `sudo nixos-rebuild switch`.
+4. Cách cập nhật:
+   ```bash
+   nix flake update zalo-for-linux
+   sudo nixos-rebuild switch
+   ```
+   *Lưu ý: mỗi lần build lại, file AppImage cũ trên trang Releases bị xoá. Nếu `nixos-rebuild` báo lỗi tải file (404), hãy chạy `nix flake update zalo-for-linux` để flake trỏ sang bản mới nhất rồi rebuild lại.*
+
+Muốn chạy thử mà không cài: `nix run github:VN-Linux-Family/zalo-for-linux`.
+
 #### Chạy thủ công (không khuyến khích)
 
 1. Tải file `.AppImage` mới nhất ở trang [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases).
