@@ -9,15 +9,6 @@ on:
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - '**/.gitignore'
-      - '**/LICENSE'
-      - '**/LICENSE.*'
-      - 'readme/**'
-      - 'flake.nix'
-      - 'flake.lock'
-      - 'nix/**'
   workflow_dispatch:
     inputs:
       zalo_version:
