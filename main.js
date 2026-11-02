@@ -250,6 +250,12 @@ app.once('ready', () => {
   userscriptsPlugin.register({ app, ipcMain, advancedSettings });
   require('./plugins/offline').register({ app, ipcMain, appDir });
   waylandTitlebarPlugin.register({ app, ipcMain, BrowserWindow });
+
+  const zadarkSyncPath = path.join(appDir, 'pc-dist', 'zadark', 'sync');
+  if (fs.existsSync(zadarkSyncPath)) {
+    require(zadarkSyncPath).register({ app, ipcMain, appDir });
+  }
+
   zcall.start({ userDataDir: app.getPath('userData') });
 });
 

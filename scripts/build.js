@@ -97,6 +97,15 @@ async function integrateZaDark() {
     zadarkPC.writeIndexFile(BASE_DIR);
     zadarkPC.writeBootstrapFile(BASE_DIR);
     zadarkPC.writePopupViewerFile(BASE_DIR);
+
+    // Copy zadark-sync plugin to app/pc-dist/zadark/sync
+    const syncSrc = path.join(BASE_DIR, 'plugins', 'zadark-sync');
+    const syncDest = path.join(APP_DIR, 'pc-dist', 'zadark', 'sync');
+    if (fs.existsSync(syncSrc)) {
+      fs.cpSync(syncSrc, syncDest, { recursive: true });
+      logger.dim('Copied zadark-sync plugin to pc-dist/zadark/sync');
+    }
+
     // Zalo's dark theme strips ZaDark's CSS/scripts from the page (#66).
     await require('./patches/patch-zadark-keep').main(APP_DIR);
     logger.success('ZaDark patches applied successfully');
