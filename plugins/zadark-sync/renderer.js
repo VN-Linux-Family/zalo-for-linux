@@ -98,7 +98,7 @@
     }
   }
 
-  // 1. Intercept localStorage.setItem to catch any ZaDark or direct Zalo storage theme change
+  // Intercept localStorage.setItem to catch any ZaDark or direct Zalo storage theme change
   localStorage.setItem = function(key, value) {
     origSetItem(key, value);
     if (key === ZADARK_KEY && !isSyncing) {
@@ -113,14 +113,14 @@
     }
   };
 
-  // 2. Listen to change events on radio inputs in ZaDark menu
+  // Listen to change events on radio inputs in ZaDark menu
   document.addEventListener('change', function(e) {
     if (e.target && e.target.name === 'theme' && e.target.closest('#js-radio-input-theme')) {
       if (!isSyncing) syncZaDarkToZalo(e.target.value);
     }
   }, true);
 
-  // 3. Align initial theme
+  // Align initial theme
   function alignInitialTheme() {
     const zadarkTheme = localStorage.getItem(ZADARK_KEY);
     const zaloConfStr = localStorage.getItem(ZALO_KEY);
@@ -149,12 +149,67 @@
     }
   }
 
-  // 4. Hook Webpack to get Zalo theme modules dynamically
+  // Hook Webpack to get Zalo theme modules dynamically via Signature Scanning
+  function findThemeModules(req) {
+    let tm = null;
+    let emitter = null;
+    let constants = null;
+
+    // Scan evaluated module cache (req.c) by method/property signatures
+    if (req && req.c) {
+      for (const id in req.c) {
+        const exp = req.c[id] && req.c[id].exports;
+        if (!exp) continue;
+
+        const candidateTM = exp.a || exp.default || exp;
+        if (!tm && candidateTM && typeof candidateTM.updateThemeSetting === 'function' && typeof candidateTM.getThemeSetting === 'function') {
+          tm = candidateTM;
+        }
+
+        if (!constants && (exp.THEME_LISTENER_EVENTS || exp.THEME_SETTING_OPT)) {
+          constants = exp;
+        }
+
+        const candidateEmitter = exp.b || exp.default || exp;
+        if (!emitter && candidateEmitter && typeof candidateEmitter.on === 'function' && typeof candidateEmitter.emit === 'function') {
+          if (exp.a && (exp.a.SETTING_UPDATED || (constants && exp.a === constants.THEME_LISTENER_EVENTS))) {
+            emitter = candidateEmitter;
+          }
+        }
+      }
+    }
+
+    // Scan module definitions (req.m) if any module is not yet evaluated in cache
+    if (req && req.m && (!tm || !emitter || !constants)) {
+      for (const id in req.m) {
+        try {
+          const src = req.m[id].toString();
+          if (!tm && src.includes('updateThemeSetting') && src.includes('getThemeSetting')) {
+            const mod = req(id);
+            tm = mod?.a || mod?.default || mod;
+          }
+          if (!constants && src.includes('THEME_LISTENER_EVENTS') && src.includes('THEME_SETTING_OPT')) {
+            constants = req(id);
+          }
+          if (!emitter && src.includes('THEME_LISTENER_EVENTS') && src.includes('getInstance') && src.includes('.emitter')) {
+            const mod = req(id);
+            emitter = mod?.b || mod?.default || mod;
+          }
+        } catch (_) {}
+      }
+    }
+
+    return { tm, emitter, constants };
+  }
+
   function setupThemeManager(req) {
     try {
-      themeManagerInstance = req('iwo6').a;
-      themeEmitterInstance = req('vtBH').b;
-      themeConstants = req('TmDO');
+      const { tm, emitter, constants } = findThemeModules(req);
+      if (!tm) return false;
+
+      themeManagerInstance = tm;
+      themeEmitterInstance = emitter;
+      themeConstants = constants;
 
       if (themeEmitterInstance && themeConstants && themeConstants.THEME_LISTENER_EVENTS) {
         themeEmitterInstance.on(themeConstants.THEME_LISTENER_EVENTS.SETTING_UPDATED, function(newConf) {
@@ -214,7 +269,7 @@
 
   hookWebpack();
 
-  // 5. Update ZaDark radio button when ZaDark popup is rendered into DOM
+  // Update ZaDark radio button when ZaDark popup is rendered into DOM
   const observer = new MutationObserver(function() {
     const radioContainer = document.querySelector('#js-radio-input-theme');
     if (radioContainer) {
@@ -229,7 +284,7 @@
   });
   observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
-  // 6. Sync system dark/light changes when in auto/system mode
+  // Sync system dark/light changes when in auto/system mode
   if (window.matchMedia) {
     window.matchMedia('(prefers-color-scheme: dark)').addListener(function(event) {
       const zadarkTheme = localStorage.getItem(ZADARK_KEY);
