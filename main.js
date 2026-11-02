@@ -91,6 +91,45 @@ function showMainWindow() {
   }
 }
 
+function updateTrayVisibilityMenu() {
+  if (!tray) return;
+  const visible = Boolean(
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.isVisible() &&
+    !mainWindow.isMinimized()
+  );
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: visible ? 'Ẩn Zalo' : 'Mở Zalo',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {
+          mainWindow.hide();
+        } else {
+          showMainWindow();
+        }
+        updateTrayVisibilityMenu();
+      }
+    },
+    {
+      label: 'Toggle DevTools',
+      click: toggleDevTools
+    },
+    {
+      label: 'Thoát',
+      click: () => {
+        isAppQuitting = true;
+        if (tray) {
+          tray.destroy();
+          tray = null;
+        }
+        app.quit();
+      }
+    }
+  ]);
+  tray.setContextMenu(contextMenu);
+}
+
 // ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
@@ -148,50 +187,28 @@ app.on('browser-window-created', (_evt, win) => {
           stateFile: path.join(app.getPath('userData'), 'zalo-linux-window-state.json')
         });
       }
+      win.on('ready-to-show', updateTrayVisibilityMenu);
+      win.on('show', updateTrayVisibilityMenu);
+      win.on('hide', updateTrayVisibilityMenu);
+      win.on('minimize', updateTrayVisibilityMenu);
+      win.on('restore', updateTrayVisibilityMenu);
+      win.on('focus', updateTrayVisibilityMenu);
+      win.on('closed', () => {
+        if (mainWindow === win) mainWindow = null;
+        updateTrayVisibilityMenu();
+      });
       windowState.attach(win);
 
       // Only start hidden when the tray exists, otherwise the window
       // would be unreachable.
       if (tray && trayHost.isAvailable()) startHidden.attach(win);
+      updateTrayVisibilityMenu();
 
       mainWindow.webContents.on('before-input-event', (_event, input) => {
         if ((input.control) && input.shift && input.key.toLowerCase() === 'i') {
           toggleDevTools();
         }
       });
-
-      if (tray) {
-        const contextMenu = Menu.buildFromTemplate([
-          {
-            label: 'Mở Zalo',
-            click: showMainWindow
-          },
-          {
-            label: 'Ẩn Zalo',
-            click: () => {
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.hide();
-              }
-            }
-          },
-          {
-            label: 'Toggle DevTools',
-            click: toggleDevTools
-          },
-          {
-            label: 'Thoát',
-            click: () => {
-              isAppQuitting = true;
-              if (tray) {
-                tray.destroy();
-                tray = null;
-              }
-              app.quit();
-            }
-          }
-        ]);
-        tray.setContextMenu(contextMenu);
-      }
     }
 
     // Minimize to tray instead of closing.
@@ -237,6 +254,7 @@ app.once('ready', () => {
       tray.setToolTip('Zalo');
       tray.on('click', showMainWindow);
       tray.on('double-click', showMainWindow);
+      updateTrayVisibilityMenu();
     } catch (e) {
       console.error('Tray init failed:', e);
     }
@@ -246,7 +264,7 @@ app.once('ready', () => {
   trayBadgePlugin.register({ app, tray, nativeImage, appDir, iconPath });
   launcherBadgePlugin.register({ app, ipcMain });
   screenshotPlugin.register({ ipcMain });
-  const advancedSettings = advancedSettingsPlugin.register({ app, ipcMain, BrowserWindow, dialog });
+  const advancedSettings = advancedSettingsPlugin.register({ app, ipcMain, BrowserWindow, dialog, screenshotPlugin });
   userscriptsPlugin.register({ app, ipcMain, advancedSettings });
   require('./plugins/offline').register({ app, ipcMain, appDir });
   waylandTitlebarPlugin.register({ app, ipcMain, BrowserWindow });
