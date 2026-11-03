@@ -738,24 +738,17 @@ async function startLocal() {
 // right under it, above Zalo's main window. The camera stays on until the first screen frame;
 // cancelling, or 60 s without a pick, gives up. Stopping it from the
 // desktop's indicator ends the share.
-// A failure within 3 s of the click is not the user cancelling: the first
-// capture after a launch sometimes fails at once, the second works. So
-// that one is retried, once. While sharing, the window is compact.
+// While sharing, the window is compact.
 // pendingScreen declared at top
 async function startScreen(attempt = 1, targetSourceId = null) {
   if (sharing || (pendingScreen && attempt === 1)) return;
   const isWindow = targetSourceId === 'window:select' || (typeof targetSourceId === 'string' && targetSourceId.startsWith('window:'));
   const cap = pendingScreen = { kind: 'screen', stop: () => {}, sourceId: targetSourceId, isWindow };
-  const t0 = performance.now();
   const giveUp = (why) => {
     if (pendingScreen !== cap) return;
     pendingScreen = null;
     cap.stop();
     act('log', { text: 'screen share attempt ' + attempt + ': ' + why });
-    if (attempt === 1 && why !== 'timeout' && performance.now() - t0 < 3000 && state.phase === 'connected') {
-      setTimeout(() => startScreen(2, targetSourceId), 300);
-      return;
-    }
     act('screen', { on: false });
     if (autoCompact) { autoCompact = false; ipcRenderer.send('zcall-ui-window', 'expand'); }
   };
