@@ -565,85 +565,20 @@ function start() {
       updateAdvancedOptionsFromZalo(msg.data);
     }
   });
-// On X11, WebRTC only routes capture through the PipeWire desktop portal if
-// it detects a Wayland session (IsRunningUnderWayland). Setting these variables
-// temporarily enables the portal dialog on X11, while direct capture restores
-// the original environment for reliable fallback.
-let _origSessionType = undefined;
-let _origWaylandDisplay = undefined;
-
-function setPortalMode(enable) {
-  if (enable) {
-    if (_origSessionType === undefined) {
-      _origSessionType = process.env.XDG_SESSION_TYPE || '';
-      _origWaylandDisplay = process.env.WAYLAND_DISPLAY || '';
-    }
-    process.env.XDG_SESSION_TYPE = 'wayland';
-    if (!process.env.WAYLAND_DISPLAY) process.env.WAYLAND_DISPLAY = 'wayland-0';
-  } else {
-    if (_origSessionType !== undefined) {
-      if (_origSessionType) process.env.XDG_SESSION_TYPE = _origSessionType;
-      else delete process.env.XDG_SESSION_TYPE;
-      if (_origWaylandDisplay) process.env.WAYLAND_DISPLAY = _origWaylandDisplay;
-      else delete process.env.WAYLAND_DISPLAY;
-    }
-  }
-}
-
-  // The screen / window to share. Uses the desktop portal (xdg-desktop-portal
-  // via PipeWire), giving the user a system picker dialog.
-  // If the portal is unavailable or fails, direct capture is used as fallback.
-  ipcMain.handle('zcall-ui-screen-source', async (_e, preferredId, direct = false) => {
+  // The screen / window to share. With PipeWire capture (Wayland, see zcall.configure)
+  // this asks the desktop's portal, which lets the user pick one.
+  ipcMain.handle('zcall-ui-screen-source', async (_e, preferredId) => {
     sharingScreen = true;
     await compactJob; // out of full screen and compact before the portal's dialog opens
     const { desktopCapturer } = require('electron');
-    const isWindow = preferredId === 'window:select';
-
-    // If direct capture is requested (fallback), restore native environment.
-    if (direct) {
-      setPortalMode(false);
-      try {
-        const types = isWindow ? ['window', 'screen'] : ['screen'];
-        const sources = await desktopCapturer.getSources({ types, thumbnailSize: { width: 0, height: 0 } });
-        const prefix = isWindow ? 'window:' : 'screen:';
-        const s = sources.find((x) => x.id.startsWith(prefix)) || sources.find((x) => x.id.startsWith('screen:')) || sources[0];
-        return s ? s.id : (preferredId || 'screen:0:0');
-      } catch (err) {
-        console.error('[zcall-window] direct capture failed:', err.message);
-        return preferredId || 'screen:0:0';
-      }
+    if (preferredId === 'window:select') {
+      const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
+      const s = sources.find((x) => x.id.startsWith('window:')) || sources[0];
+      return s ? s.id : 'window:0:0';
     }
-
-    // Default: try portal capture (even on X11)
-    setPortalMode(true);
-    let portalSources = [];
-    let portalErr = null;
-    try {
-      const types = isWindow ? ['window', 'screen'] : ['screen'];
-      portalSources = await desktopCapturer.getSources({ types, thumbnailSize: { width: 0, height: 0 } });
-    } catch (err) {
-      portalErr = err;
-      console.warn('[zcall-window] portal getSources failed:', err.message);
-    }
-
-    const prefix = isWindow ? 'window:' : 'screen:';
-    const s = portalSources.find((x) => x.id.startsWith(prefix)) || portalSources.find((x) => x.id.startsWith('screen:')) || portalSources[0];
-    if (s && !portalErr) {
-      return s.id;
-    }
-
-    // Portal is unavailable or errored: fall back to direct capture
-    console.warn('[zcall-window] portal unavailable or errored, falling back to direct capture');
-    setPortalMode(false);
-    try {
-      const types = isWindow ? ['window', 'screen'] : ['screen'];
-      const sources = await desktopCapturer.getSources({ types, thumbnailSize: { width: 0, height: 0 } });
-      const ds = sources.find((x) => x.id.startsWith(prefix)) || sources.find((x) => x.id.startsWith('screen:')) || sources[0];
-      return ds ? ds.id : (preferredId || 'screen:0:0');
-    } catch (err) {
-      console.error('[zcall-window] direct fallback failed:', err.message);
-      return preferredId || 'screen:0:0';
-    }
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
+    const s = sources.find((x) => x.id.startsWith('screen:')) || sources[0];
+    return s ? s.id : (preferredId || 'screen:0:0');
   });
   // Compact / expand, from the page. Picking the screen to share happens with
   // the window compact and focused: GNOME puts the portal's dialog right under

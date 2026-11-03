@@ -129,14 +129,14 @@ function prepare() {
 // --- lifecycle -------------------------------------------------------------
 
 /**
- * Before 'ready', after Zalo's bootstrap: screen sharing through the desktop
- * portal (xdg-desktop-portal) needs Chromium's PipeWire capture. On Wayland
- * it is required (X11 capture only sees XWayland windows); on X11 it lets
- * the portal's screen picker work too, so the user sees the same dialog
- * everywhere. Chromium keeps the last --enable-features, so merge with
- * Zalo's own (JXL).
+ * Before 'ready', after Zalo's bootstrap: on Wayland, screen sharing needs
+ * Chromium's PipeWire capture (through the desktop portal); X11 capture
+ * only sees XWayland windows. Chromium keeps the last --enable-features, so
+ * merge with Zalo's own (JXL).
  */
 function configure(app) {
+  const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY;
+  if (!isWayland) return;
   const features = app.commandLine.getSwitchValue('enable-features').split(',').filter(Boolean);
   if (!features.includes('WebRTCPipeWireCapturer')) features.push('WebRTCPipeWireCapturer');
   app.commandLine.appendSwitch('enable-features', features.join(','));
