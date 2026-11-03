@@ -54,11 +54,11 @@ function addLocalizedPathHelpers(content) {
     `zflGetDownloadsDir=async()=>${pathApi}.join(await ${manager}.getPath("downloads"),${pathApi}.sep),` +
     `zflGetDownloadsDirSync=()=>${pathApi}.join(${manager}.getPathSync("downloads"),${pathApi}.sep),` +
     `zflResolveLocalizedUserPath=e=>{` +
-      `if(${pathApi}.isAbsolute(e))return ${pathApi}.resolve(e);` +
-      `const t=e.split(/[\\\\/]+/),n=t[0].toLowerCase();` +
-      `return"documents"===n?${pathApi}.resolve(zflGetDocumentsDirSync(),...t.slice(1)):` +
-      `"downloads"===n?${pathApi}.resolve(zflGetDownloadsDirSync(),...t.slice(1)):` +
-      `${pathApi}.resolve(${manager}.getPathSync("home"),e)` +
+    `if(${pathApi}.isAbsolute(e))return ${pathApi}.resolve(e);` +
+    `const t=e.split(/[\\\\/]+/),n=t[0].toLowerCase();` +
+    `return"documents"===n?${pathApi}.resolve(zflGetDocumentsDirSync(),...t.slice(1)):` +
+    `"downloads"===n?${pathApi}.resolve(zflGetDownloadsDirSync(),...t.slice(1)):` +
+    `${pathApi}.resolve(${manager}.getPathSync("home"),e)` +
     `},`;
 
   return content.replace(anchor, helpers);
@@ -141,19 +141,22 @@ function patchDefaultDocumentsPath(content) {
 }
 
 function patchRendererUserPaths(content) {
-  const syncDocumentsPattern =
-    /([A-Za-z_$][\w$]*)\.join\(Object\(([A-Za-z_$][\w$]*)\.gethomeDirSync\)\(\),"Documents","Zalo Received Files",\1\.sep\)/g;
-  const downloadsPattern =
-    /let ([A-Za-z_$][\w$]*)=await Object\(([A-Za-z_$][\w$]*)\.gethomeDir\)\(\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.join\(\1,"Downloads"\)/g;
-
-  content = content.replace(
-    syncDocumentsPattern,
-    '$1.join(Object($2.getdocumentsDirSync)(),"Zalo Received Files",$1.sep)'
-  );
-  content = content.replace(
-    downloadsPattern,
-    'let $3=await Object($2.getdownloadsDir)()'
-  );
+  if (content.includes('"Documents","Zalo Received Files"')) {
+    const syncDocumentsPattern =
+      /([A-Za-z_$][\w$]*)\.join\(Object\(([A-Za-z_$][\w$]*)\.gethomeDirSync\)\(\),"Documents","Zalo Received Files",\1\.sep\)/g;
+    content = content.replace(
+      syncDocumentsPattern,
+      '$1.join(Object($2.getdocumentsDirSync)(),"Zalo Received Files",$1.sep)'
+    );
+  }
+  if (content.includes('"Downloads"')) {
+    const downloadsPattern =
+      /let ([A-Za-z_$][\w$]*)=await Object\(([A-Za-z_$][\w$]*)\.gethomeDir\)\(\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.join\(\1,"Downloads"\)/g;
+    content = content.replace(
+      downloadsPattern,
+      'let $3=await Object($2.getdownloadsDir)()'
+    );
+  }
   return content;
 }
 
@@ -185,27 +188,27 @@ function findJavaScriptFiles(directory) {
 
 async function main() {
   logger.info('Patching XDG user directories...');
-  const bundlePaths = BUNDLE_DIRS
-    .flatMap(findJavaScriptFiles)
-    .filter((filePath) => {
-      if (filePath.includes('utility-process-media.js')) {
-        logger.dim(`Skipping ${path.relative(APP_DIR, filePath)} (excluded process)`);
-        return false;
-      }
-      const content = fs.readFileSync(filePath, 'utf8');
-      return content.includes('getDefaultZaloReceivedFiles') &&
-        content.includes('createAppPathManager');
-    });
+  const NEEDLE1 = Buffer.from('getDefaultZaloReceivedFiles');
+  const NEEDLE2 = Buffer.from('createAppPathManager');
+  const candidates = BUNDLE_DIRS.flatMap(findJavaScriptFiles);
+  const bundles = [];
 
-  if (bundlePaths.length === 0) {
+  await Promise.all(candidates.map(async (filePath) => {
+    if (filePath.includes('utility-process-media.js')) return;
+    const buf = await fs.promises.readFile(filePath);
+    if (buf.includes(NEEDLE1) && buf.includes(NEEDLE2)) {
+      bundles.push({ filePath, content: buf.toString('utf8') });
+    }
+  }));
+
+  if (bundles.length === 0) {
     throw new Error('No Zalo path bundles found.');
   }
 
   let updatedCount = 0;
-  for (const filePath of bundlePaths) {
-    const original = fs.readFileSync(filePath, 'utf8');
-    const patched = patchXdgUserDirs(original);
-    if (patched !== original) {
+  for (const { filePath, content } of bundles) {
+    const patched = patchXdgUserDirs(content);
+    if (patched !== content) {
       fs.writeFileSync(filePath, patched, 'utf8');
       updatedCount += 1;
       logger.dim(`Patched localized user directories in ${path.relative(APP_DIR, filePath)}`);
@@ -213,7 +216,7 @@ async function main() {
   }
 
   logger.success(
-    `XDG user directory patch applied (${bundlePaths.length} checked, ${updatedCount} updated)`
+    `XDG user directory patch applied (${bundles.length} checked, ${updatedCount} updated)`
   );
 }
 

@@ -135,3 +135,8 @@ __pycache__/
 # Nix build output
 /result
 /result-*
+
+profiles/
+*.cpuprofile
+*.heapprofile
+bun.lock
