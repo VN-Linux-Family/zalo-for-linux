@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./utils/logger');
 const { buildCommit } = require('./utils/build-commit');
+const { buildLinuxPackage, profiles } = require('./build-linux-packages');
+const packageConfig = require('../package.json').build;
 
 const BASE_DIR = path.join(__dirname, '..');
 const APP_DIR = path.join(BASE_DIR, 'app');
@@ -10,6 +12,8 @@ const DIST_DIR = path.join(BASE_DIR, 'dist');
 
 let ZALO_VERSION = null;
 const builtFiles = [];
+// Allow native package managers to upgrade rebuilds of the same Zalo version.
+const PACKAGE_RELEASE = `${Math.floor(Date.now() / 1000)}`;
 
 async function main() {
   try {
@@ -49,7 +53,7 @@ async function main() {
         logger.info(`${type} • ${name} (${sizeStr})`);
       });
     } else {
-      logger.warn('No AppImage files were built in this run');
+      logger.warn('No packages were built in this run');
     }
   } catch (error) {
     logger.error('Main workflow failed:', error.message);
@@ -128,6 +132,7 @@ async function build(buildName = '', outputSuffix = '') {
     // Set artifact name and build command based on build type
     let artifactName;
     let buildCommand;
+    let buildCommandst2;
     let zadarkVersion = null;
 
     if (outputSuffix === '-ZaDark') {
@@ -176,10 +181,24 @@ async function build(buildName = '', outputSuffix = '') {
     // Capture build output to get file information. Between the two stages,
     // check that the unpacked app carries the whole call engine.
     let buildOutput = execSync(buildCommand, { stdio: 'pipe', cwd: path.join(BASE_DIR), encoding: 'utf8' });
-    const unpacked = fs.readdirSync(DIST_DIR).filter((d) => /^linux(-arm64)?-unpacked$/.test(d));
-    if (!unpacked.length) throw new Error('electron-builder output (linux-unpacked) not found in dist/');
-    for (const d of unpacked) checkEnginePackaged(path.join(DIST_DIR, d, 'zcall-native'));
+    const unpackedDir = path.join(DIST_DIR, process.arch === 'arm64' ? 'linux-arm64-unpacked' : 'linux-unpacked');
+    checkEnginePackaged(path.join(unpackedDir, 'zcall-native'));
     logger.success('call engine files are all in the package');
+
+    for (const profile of Object.keys(profiles)) {
+      const packageFile = buildLinuxPackage({
+        baseDir: BASE_DIR, unpackedDir, profile,
+        variant: outputSuffix === '-ZaDark' ? 'zadark' : 'original',
+        artifactStem: artifactName.replace(/\.AppImage$/, ''),
+        version: ZALO_VERSION, release: PACKAGE_RELEASE, arch: process.arch,
+        config: packageConfig
+      });
+      builtFiles.push({
+        type: `${outputSuffix === '-ZaDark' ? 'ZaDark' : 'Original'} ${profile}`,
+        name: path.basename(packageFile),
+        sizeStr: `${Math.round(fs.statSync(packageFile).size / 1024 / 1024)}MB`
+      });
+    }
     buildOutput += execSync(buildCommandst2, { stdio: 'pipe', cwd: path.join(BASE_DIR), encoding: 'utf8' });
 
     // Parse build output to find AppImage file

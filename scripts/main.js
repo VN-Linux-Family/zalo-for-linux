@@ -27,7 +27,7 @@ async function main() {
       await require('./clean-unused.js').main();
     }
     if (process.env.BUILD === 'true') {
-      logger.step('Step 6: Building AppImages');
+      logger.step('Step 6: Building Linux packages');
       await require('./build.js').main();
     }
   } catch (error) {

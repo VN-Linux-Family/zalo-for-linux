@@ -1,0 +1,77 @@
+name: Build signed package repository
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-package-repository
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: Zalo-packages-*
+        merge-multiple: true
+        path: dist
+    - name: Install repository tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y apt-utils createrepo-c rpm gnupg pacman-package-manager libarchive-tools
+    - name: Import package signing key
+      env:
+        REPO_SIGNING_KEY: ${{ secrets.REPO_SIGNING_KEY }}
+        REPO_SIGNING_FINGERPRINT: ${{ vars.REPO_SIGNING_FINGERPRINT }}
+      run: |
+        set -euo pipefail
+        test -n "$REPO_SIGNING_KEY"
+        test -n "$REPO_SIGNING_FINGERPRINT"
+        signing_home="$(mktemp -d)"
+        chmod 700 "$signing_home"
+        export GNUPGHOME="$signing_home"
+        python3 - <<'PY'
+        import os, subprocess
+        subprocess.run(['gpg', '--batch', '--import'], input=os.environ['REPO_SIGNING_KEY'].encode(), check=True)
+        PY
+        printf 'GNUPGHOME=%s\n' "$signing_home" >> "$GITHUB_ENV"
+    - name: Sign packages and generate repository
+      env:
+        REPO_SIGNING_FINGERPRINT: ${{ vars.REPO_SIGNING_FINGERPRINT }}
+      run: |
+        set -euo pipefail
+        repository_name="${GITHUB_REPOSITORY#*/}"
+        repo_url="https://${GITHUB_REPOSITORY_OWNER}.github.io/$repository_name"
+        python3 packaging/repository/build.py \
+          --input dist --output packaging/repository/generated \
+          --repo-url "$repo_url" --github-repository "$GITHUB_REPOSITORY" \
+          --repository-name "$repository_name" \
+          --key "$REPO_SIGNING_FINGERPRINT"
+    - name: Verify generated signatures
+      run: |
+        set -euo pipefail
+        gpg --batch --verify packaging/repository/generated/upload/InRelease
+        rpm --dbpath "$RUNNER_TEMP/repository-rpmdb" --initdb
+        rpm --dbpath "$RUNNER_TEMP/repository-rpmdb" --import packaging/repository/generated/site/key.asc
+        rpmkeys --dbpath "$RUNNER_TEMP/repository-rpmdb" --checksig packaging/repository/generated/upload/*.rpm
+    - uses: actions/upload-artifact@v4
+      with:
+        name: repository-assets
+        path: packaging/repository/generated/upload/*
+        if-no-files-found: error
+        retention-days: 30
+    - uses: actions/upload-pages-artifact@v4
+      with:
+        path: packaging/repository/generated/site
+    - name: Clean signing identity
+      if: always()
+      run: |
+        if [[ -n "${GNUPGHOME:-}" ]]; then
+          gpgconf --kill gpg-agent || true
+          rm -rf -- "$GNUPGHOME"
+        fi

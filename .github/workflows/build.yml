@@ -26,6 +26,11 @@ on:
         required: false
         default: ''
         type: string
+      force_build:
+        description: 'Rebuild even when this version/commit combination already exists'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -57,12 +62,12 @@ jobs:
             runner: ubuntu-latest
             sys_deps: >
               apt update &&
-              apt install -y git curl wget ca-certificates xz-utils python3 build-essential libssl-dev liblzma-dev p7zip-full gcc g++ clang libclang-dev llvm libc6-dev libx11-dev libxcb1-dev libxext-dev zlib1g-dev zsync
+              apt install -y git curl wget ca-certificates xz-utils python3 build-essential libssl-dev liblzma-dev p7zip-full gcc g++ clang libclang-dev llvm libc6-dev libx11-dev libxcb1-dev libxext-dev zlib1g-dev zsync rpm libarchive-tools
           - arch: aarch64
             runner: ubuntu-24.04-arm
             sys_deps: >
               apt update &&
-              apt install -y git curl wget ca-certificates xz-utils python3 build-essential libssl-dev liblzma-dev p7zip-full gcc g++ clang libclang-dev llvm libc6-dev libx11-dev libxcb1-dev libxext-dev zlib1g-dev zsync
+              apt install -y git curl wget ca-certificates xz-utils python3 build-essential libssl-dev liblzma-dev p7zip-full gcc g++ clang libclang-dev llvm libc6-dev libx11-dev libxcb1-dev libxext-dev zlib1g-dev zsync rpm libarchive-tools
     steps:
     - name: Install system build dependencies (${{ matrix.arch }})
       run: ${{ matrix.sys_deps }}
@@ -117,12 +122,16 @@ jobs:
     - name: Install Node.js dependencies
       run: npm ci --prefer-offline --no-audit --build-from-source=sqlite3 --napi_build_version=6
 
+    - name: Check Linux packaging logic
+      run: node --test scripts/build-linux-packages.test.js
+
     - name: Setup and Build
       id: build
       env:
         ZALO_VERSION: ${{ github.event.inputs.zalo_version }}
         ZALO_WIN_VERSION: ${{ github.event.inputs.zalo_win_version }}
         ZADARK_VERSION: ${{ github.event.inputs.zadark_version }}
+        FORCE_BUILD: ${{ github.event.inputs.force_build }}
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: npm run main
@@ -143,11 +152,82 @@ jobs:
         path: ${{ steps.build.outputs.zadark_appimage_file }}*
         retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
+    - name: Upload native packages and archives
+      if: steps.build.outputs.build == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: Zalo-packages-${{ matrix.arch }}
+        path: |
+          dist/*.deb
+          dist/*.rpm
+          dist/*.pkg.tar.xz
+          dist/*-portable-*.tar.xz
+        if-no-files-found: error
+        retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+
+  distro-install:
+    name: Install on ${{ matrix.distro }} (${{ matrix.arch }})
+    needs: build
+    if: needs.build.outputs.build == 'true'
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu
+            image: ubuntu:22.04
+            arch: x86_64
+            runner: ubuntu-latest
+          - distro: ubuntu
+            image: ubuntu:24.04
+            arch: x86_64
+            runner: ubuntu-latest
+          - distro: ubuntu
+            image: ubuntu:22.04
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+          - distro: debian
+            image: debian:bookworm
+            arch: x86_64
+            runner: ubuntu-latest
+          - distro: fedora
+            image: fedora:latest
+            arch: x86_64
+            runner: ubuntu-latest
+          - distro: fedora
+            image: fedora:latest
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+          - distro: opensuse
+            image: opensuse/tumbleweed:latest
+            arch: x86_64
+            runner: ubuntu-latest
+          - distro: opensuse
+            image: opensuse/tumbleweed:latest
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+          - distro: arch
+            image: archlinux:base
+            arch: x86_64
+            runner: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        name: Zalo-packages-${{ matrix.arch }}
+        path: packages
+    - name: Check native installation and portable archive
+      run: bash scripts/check-linux-install.sh "${{ matrix.distro }}" packages
 
   release:
-    name: Release the AppImages
-    needs: build
-    if: github.event_name != 'pull_request' && needs.build.outputs.build == 'true'
+    name: Release the packages
+    needs: [build, distro-install, package-repository]
+    if: >-
+      always() && github.event_name != 'pull_request' &&
+      needs.build.result == 'success' && needs.distro-install.result == 'success' &&
+      (needs.package-repository.result == 'success' || needs.package-repository.result == 'skipped') &&
+      needs.build.outputs.build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -157,12 +237,19 @@ jobs:
         ref: ${{ github.sha }}
         fetch-depth: 0
 
-    - name: Download all AppImage artifacts
+    - name: Download all package artifacts
       uses: actions/download-artifact@v4
       with:
         pattern: Zalo*
         path: dist
         merge-multiple: true
+
+    - name: Add signed repository assets
+      if: needs.package-repository.result == 'success'
+      uses: actions/download-artifact@v4
+      with:
+        name: repository-assets
+        path: dist
 
     - name: Get the commit the build is named after
       run: echo "COMMIT_HASH=$(node scripts/utils/build-commit.js)" >> "$GITHUB_ENV"
@@ -174,6 +261,16 @@ jobs:
         name: ${{ needs.build.outputs.zalo_version }}
         body: |
           ## 🚀 How to use
+
+          Download one package for your architecture (`x86_64` or `aarch64`) and variant (Original or ZaDark):
+
+          - Debian / Ubuntu / Mint: `sudo apt install ./Zalo-*-deb-*.deb`
+          - Fedora: `sudo dnf install ./Zalo-*-fedora-*.rpm`
+          - openSUSE: `sudo zypper install ./Zalo-*-opensuse-*.rpm`
+          - Arch / Manjaro: `sudo pacman -U ./Zalo-*-arch-*.pkg.tar.xz`
+          - Other compatible glibc systems: extract the `*-portable-*.tar.xz` and run `./zalo` in the extracted directory (system libraries are required).
+
+          Keep only your chosen variant/version in the current directory. Native packages add Zalo to the application menu. Quit Zalo and install a newer package with the same command to update. For system updates and variant selection, upstream maintainers can enable the optional signed repository pipeline documented in packaging/repository/README.md. Local downloads alone do not configure an update repository.
 
           It is recommended to use [Gear Lever](https://github.com/mijorus/gearlever) or [AM](https://github.com/ivan-hc/AM) to manage and integrate the AppImage.
 
@@ -202,7 +299,7 @@ jobs:
           ## 🐛 Issues & Support
           Please report issues in the [GitHub Issues](https://github.com/${{ github.repository }}/issues) section.
 
-        files: dist/*.AppImage*
+        files: dist/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -214,7 +311,7 @@ jobs:
       run: |
         set -euo pipefail
 
-        echo "Cleaning up assets for release $RELEASE_TAG (keeping commit $CURRENT_COMMIT)"
+        echo "Cleaning up assets for release $RELEASE_TAG (keeping current build artifacts)"
 
         asset_names=$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' || true)
 
@@ -224,7 +321,7 @@ jobs:
         fi
 
         for name in $asset_names; do
-          if [[ "$name" == Zalo-*.AppImage* ]] && [[ "$name" != *"$CURRENT_COMMIT"* ]]; then
+          if [[ "$name" == Zalo-*.AppImage* || "$name" == Zalo-*.rpm || "$name" == Zalo-*.deb || "$name" == Zalo-*.tar.xz ]] && [[ ! -f "dist/$name" ]]; then
             echo "Removing old asset: $name"
             gh release delete-asset "$RELEASE_TAG" "$name" --yes
           fi
@@ -259,3 +356,26 @@ jobs:
         else
           echo "::warning::Could not push nix/sources.json; the flake still points to the deleted assets"
         fi
+
+  package-repository:
+    needs: [build, distro-install]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.build.outputs.build == 'true' && vars.REPO_ENABLED == 'true'
+    uses: ./.github/workflows/publish-repository.yml
+    secrets: inherit
+
+  deploy-repository-pages:
+    name: Deploy package repository to GitHub Pages
+    needs: [release, package-repository]
+    if: always() && needs.release.result == 'success' && needs.package-repository.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - uses: actions/configure-pages@v5
+    - name: Deploy GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4

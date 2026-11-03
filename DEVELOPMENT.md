@@ -36,7 +36,39 @@ git submodule update --init --recursive
 npm run main
 ```
 
-Output: `dist/Zalo-<version>.AppImage`
+Output: AppImages, DEBs, Fedora/openSUSE RPMs, Arch `.pkg.tar.xz` packages,
+and relocatable `.tar.xz` application archives in `dist/`, for Original and ZaDark
+on both x86_64 and aarch64.
+
+Native profiles are declared in `packaging/linux-profiles.json`. Fedora and
+openSUSE have distinct RPM dependency lists. `scripts/build-linux-packages.js`
+packages isolated copies of the unpacked app before AppImage repacking, so FPM's
+target metadata cannot leak between formats. The package release is a numeric
+build timestamp, allowing upgrades when the upstream version is unchanged.
+
+Build requirements include `rpmbuild` (`rpm` on Debian/Ubuntu, `rpm-build` on
+Fedora), `xz`, `bsdtar` (`libarchive-tools` on Debian/Ubuntu, required by FPM
+for Arch packages), and the existing source-build dependencies. Original uses `zalo-for-linux`; ZaDark uses `zalo-for-linux-zadark`, with mutual
+conflicts over the shared executable. A variant-aware removal hook preserves the
+new executable link when an old variant is removed during a replacement.
+The optional [signed repository pipeline](packaging/repository/README.md) is
+disabled by default and is configured/hosted by upstream maintainers. It creates
+metadata and signed release assets without provisioning a personal repository
+or hosting service.
+
+CI tests installation/removal, dependency resolution, desktop entries, linked
+libraries and archive extraction on Ubuntu 22.04/24.04, Debian 12, Fedora,
+openSUSE Tumbleweed and Arch. ARM installation checks cover Ubuntu, Fedora and
+openSUSE; Arch Linux ARM still needs its own install test. These checks do not
+exercise desktop login, messaging, calls or screen sharing. Derived distros
+and Alpine/musl are not automatically supported by having a package format.
+Flatpak/Snap are not built by this pipeline. NixOS keeps its existing flake.
+
+Run packaging checks locally with:
+
+```bash
+node --test scripts/build-linux-packages.test.js
+```
 
 ## Two-Phase Build
 
@@ -55,9 +87,9 @@ npm run main:build
 | Command | Description |
 |---------|-------------|
 | `npm run main:setup` | `SETUP=true node scripts/main.js` (check + download + prepare) |
-| `npm run main:build` | `BUILD=true node scripts/main.js` (build AppImage) |
+| `npm run main:build` | `BUILD=true node scripts/main.js` (build Linux packages) |
 | `npm run start` | Run the app in development mode (after setup) |
-| `npm run build` | Build AppImage only (calls `scripts/build.js`) |
+| `npm run build` | Build Linux packages (calls `scripts/build.js`) |
 | `npm run download-dmg` | Download Zalo DMG |
 | `npm run prepare-app` | Extract Zalo DMG and apply Linux patches |
 | `npm run prepare-zadark` | Build ZaDark dark-mode assets |

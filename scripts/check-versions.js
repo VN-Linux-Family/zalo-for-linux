@@ -29,13 +29,14 @@ async function main() {
 
       // Check if combination already exists
       const targetCombo = `${targetZaloVersion}+${targetZaDarkVersion}+${targetCommit}`;
-      const isExist = existingCombo.includes(targetCombo);
+      const forceBuild = process.env.FORCE_BUILD === 'true';
+      const isExist = !forceBuild && existingCombo.includes(targetCombo);
 
       if (isExist) {
         logger.info(`Workflow decision: skip (found ${targetCombo})`);
         process.env.BUILD = 'false';
       } else {
-        logger.info(`Workflow decision: build (missing ${targetCombo})`);
+        logger.info(`Workflow decision: build (${forceBuild ? 'forced by workflow input' : `missing ${targetCombo}`})`);
         process.env.BUILD = 'true';
         fs.appendFileSync(process.env.GITHUB_OUTPUT, `build=true\n`);
       }

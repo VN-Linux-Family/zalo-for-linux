@@ -1,0 +1,20 @@
+name: Package repository checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install test tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y apt-utils gnupg
+    - name: Test signed APT repository and installer options
+      run: |
+        python3 -m unittest discover -s packaging/repository -p 'test_*.py' -v
+        bash -n packaging/repository/install.sh.in packaging/repository/setup-maintainer.sh

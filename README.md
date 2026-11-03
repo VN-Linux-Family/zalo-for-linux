@@ -24,9 +24,29 @@ This project added some features in the app, that the official version doesn't h
 
 ### Usage
 
-We strongly recommend using **Gear Lever** or **AM** to integrate the AppImage perfectly into your system menu.
+Download one release matching your architecture (`uname -m`: `x86_64` or `aarch64`) and variant (Original or ZaDark). Native packages install Zalo into the application menu without Gear Lever or AM.
 
-**Note:** Zalo for Linux comes with embed update info. You don't need to setup any update infomations for updating the apps.
+#### Native packages and archive
+
+Run the command for your distro in a directory containing **only the chosen version and variant** of that package:
+
+| Distro family | Release file | Install / update | Remove |
+| --- | --- | --- | --- |
+| Debian 12+, Ubuntu 22.04+, compatible Mint | `*-deb-*.deb` | `sudo apt install ./Zalo-*-deb-*.deb` | `sudo apt remove zalo-for-linux` |
+| Fedora | `*-fedora-*.rpm` | `sudo dnf install ./Zalo-*-fedora-*.rpm` | `sudo dnf remove zalo-for-linux` |
+| openSUSE (glibc 2.35+, e.g. Tumbleweed) | `*-opensuse-*.rpm` | `sudo zypper install ./Zalo-*-opensuse-*.rpm` | `sudo zypper remove zalo-for-linux` |
+| Arch, Manjaro, EndeavourOS | `*-arch-*.pkg.tar.xz` | `sudo pacman -U ./Zalo-*-arch-*.pkg.tar.xz` | `sudo pacman -R zalo-for-linux` |
+| Other compatible glibc systems | `*-portable-*.tar.xz` | Extract and run `./zalo` in the extracted directory | Delete the extracted directory |
+
+All profiles are built for x86_64 and aarch64. Official Arch Linux is x86_64; the aarch64 Arch package targets Arch Linux ARM and still needs installation testing there. Derivatives need compatible package names and libraries; matching the file extension alone is insufficient.
+
+The native package manager resolves dependencies, including Python, Opus and PulseAudio client tools for calls. Open **Zalo** from the application menu or run `zalo` after installing.
+
+**Updates:** local package downloads do not add a repository. Quit Zalo, download the new file and repeat the install command. If the upstream maintainer enables the optional [signed repository](./packaging/repository/README.md), download its installer from `https://vn-linux-family.github.io/zalo-for-linux/install.sh` and choose `--variant original` or `--variant zadark`; subsequent updates come through your normal system update command. AppImages keep their existing embedded update information. Replace extracted files manually to update the archive.
+
+Original uses the package name `zalo-for-linux`; ZaDark uses `zalo-for-linux-zadark`. Both share the executable and user data, and conflict to prevent simultaneous installation. Replace the package name in the removal commands above when using ZaDark. Quit Zalo before switching variants. The optional repository installer handles the switch with the native package manager; for local files, remove the old variant before installing the other. Removing a package preserves user data. Avoid installing different packaging formats of Zalo at the same time.
+
+**Archive limitations:** the `.tar.xz` is a relocatable application directory, not a self-contained runtime. It needs glibc 2.35+ and Electron/native-addon system libraries; see `packaging/linux-profiles.json` for dependency examples. It does not register a menu entry or install dependencies. Alpine/musl systems are not supported by these binaries. Flatpak and Snap are separate runtime-based packaging projects and are not produced by this pipeline. NixOS support remains available below.
 
 #### For AM users:
 
@@ -136,7 +156,7 @@ Prerequisites:
 On Debian/Ubuntu:
 
 ```bash
-sudo apt update && sudo apt install -y build-essential liblzma-dev p7zip-full gcc g++ clang libclang-dev llvm libx11-dev libxcb1-dev libxext-dev zsync
+sudo apt update && sudo apt install -y build-essential liblzma-dev p7zip-full gcc g++ clang libclang-dev llvm libx11-dev libxcb1-dev libxext-dev zsync rpm libarchive-tools
 ```
 
 Steps:
@@ -152,7 +172,7 @@ git submodule update --init --recursive
 npm run main
 ```
 
-The final AppImage will be in the `dist/` directory.
+The final AppImages, DEBs, Fedora/openSUSE RPMs, Arch packages and `.tar.xz` archives for Original and ZaDark will be in `dist/`. RPM packaging requires `rpmbuild` (`rpm` on Debian/Ubuntu; `rpm-build` on Fedora). All native formats are built from the same unpacked Electron app before AppImage repacking.
 
 > For a detailed walkthrough of the build pipeline, scripts, environment variables, and how to add new patches, see [`DEVELOPMENT.md`](./DEVELOPMENT.md).
 

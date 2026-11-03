@@ -22,6 +22,27 @@ Trên Debian/Ubuntu:
 sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev
 ```
 
+## Đóng gói cho nhiều distro
+
+Pipeline tạo AppImage, DEB, RPM riêng cho Fedora/openSUSE, gói Arch `.pkg.tar.xz`
+và bản nén `.tar.xz`, cho Original/ZaDark trên x86_64 và aarch64.
+Danh sách phụ thuộc nằm trong `packaging/linux-profiles.json`.
+Mỗi định dạng dùng bản sao riêng của thư mục Electron đã chuẩn bị để tránh
+lẫn metadata. Original dùng `zalo-for-linux`, ZaDark dùng `zalo-for-linux-zadark`, có khai báo
+xung đột; chỉ cài một biến thể và một định dạng tại một thời điểm.
+
+Ngoài công cụ build hiện có, cần `rpmbuild`, `xz` và `bsdtar`.
+Trên Debian/Ubuntu cài `rpm libarchive-tools xz-utils`; trên Fedora dùng
+`rpm-build libarchive xz`. Số release là timestamp dạng số để có thể cập nhật
+bản build mới dù phiên bản Zalo không đổi. Pipeline kho có chữ ký là tuỳ chọn dành cho maintainer repo gốc, mặc định tắt.
+Xem [hướng dẫn kho](../packaging/repository/README.md) để cấu hình URL và khoá ký.
+
+Chạy kiểm tra bằng `node --test scripts/build-linux-packages.test.js`.
+CI có bước cài/gỡ trên Ubuntu, Debian, Fedora, openSUSE và Arch; vẫn cần
+kiểm tra đăng nhập, nhắn tin và cuộc gọi trong phiên desktop thật.
+Arch Linux ARM cần kiểm tra cài đặt riêng. Binary này không hỗ trợ Alpine/musl;
+pipeline chưa tạo Flatpak/Snap. Xem chi tiết tại [DEVELOPMENT.md](../DEVELOPMENT.md).
+
 ## Bắt đầu nhanh
 
 ```bash

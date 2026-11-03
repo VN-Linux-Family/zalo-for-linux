@@ -24,9 +24,29 @@ Dự án có thêm một số tính năng mà bản Zalo chính thức không c�
 
 ### Cài đặt và sử dụng
 
-Chúng mình khuyên bạn nên dùng **Gear Lever** hoặc **AM** để AppImage được tích hợp gọn gàng vào menu ứng dụng của hệ thống.
+Tải một bản phát hành đúng kiến trúc (`uname -m`: `x86_64` hoặc `aarch64`) và biến thể Original hoặc ZaDark. Gói native tự thêm Zalo vào menu ứng dụng, không cần Gear Lever hay AM.
 
-**Lưu ý:** Zalo for Linux đã có sẵn thông tin cập nhật bên trong, bạn không cần tự cấu hình gì thêm để cập nhật ứng dụng.
+#### Gói cài trực tiếp theo distro
+
+Chạy lệnh phù hợp trong thư mục **chỉ chứa phiên bản và biến thể bạn muốn cài** của định dạng đó:
+
+| Nhóm distro | File phát hành | Cài / cập nhật | Gỡ cài đặt |
+| --- | --- | --- | --- |
+| Debian 12+, Ubuntu 22.04+, Mint tương thích | `*-deb-*.deb` | `sudo apt install ./Zalo-*-deb-*.deb` | `sudo apt remove zalo-for-linux` |
+| Fedora | `*-fedora-*.rpm` | `sudo dnf install ./Zalo-*-fedora-*.rpm` | `sudo dnf remove zalo-for-linux` |
+| openSUSE có glibc 2.35+, ví dụ Tumbleweed | `*-opensuse-*.rpm` | `sudo zypper install ./Zalo-*-opensuse-*.rpm` | `sudo zypper remove zalo-for-linux` |
+| Arch, Manjaro, EndeavourOS | `*-arch-*.pkg.tar.xz` | `sudo pacman -U ./Zalo-*-arch-*.pkg.tar.xz` | `sudo pacman -R zalo-for-linux` |
+| Distro glibc tương thích khác | `*-portable-*.tar.xz` | Giải nén, chạy `./zalo` trong thư mục đã giải nén | Xoá thư mục đã giải nén |
+
+Các loại gói đều được build cho x86_64 và aarch64. Arch Linux chính thức dùng x86_64; gói Arch aarch64 dành cho Arch Linux ARM và vẫn cần kiểm tra cài đặt ở đó. Distro dẫn xuất phải có tên gói phụ thuộc và thư viện tương thích, không chỉ cùng đuôi file.
+
+Trình quản lý gói tự cài phụ thuộc, gồm Python, Opus và công cụ PulseAudio cho cuộc gọi. Sau khi cài, mở **Zalo** từ menu hoặc chạy `zalo`.
+
+**Cập nhật:** nếu tải file cài cục bộ, thoát Zalo, tải gói mới rồi cài lại. Nếu maintainer repo gốc bật [kho có chữ ký](../packaging/repository/README.md), script cài hỗ trợ `--variant original` / `--variant zadark`; sau đó Zalo cập nhật cùng hệ thống qua APT/DNF/Zypper/Pacman. Mã nguồn này chưa mặc định một URL kho công khai. AppImage giữ cơ chế cập nhật hiện có; bản nén cần thay thư mục bằng bản mới.
+
+Original dùng tên gói `zalo-for-linux`; ZaDark dùng `zalo-for-linux-zadark`. Hai bản chung lệnh chạy và dữ liệu, có khai báo xung đột để không cài chồng. Nếu dùng ZaDark, thay tên gói trong lệnh gỡ ở bảng trên. Thoát Zalo trước khi đổi bản; script cài từ kho sẽ xử lý đổi biến thể bằng trình quản lý gói. Với file cài cục bộ, gỡ bản cũ rồi cài bản kia. Gỡ gói không xoá dữ liệu người dùng. Tránh cài đồng thời nhiều định dạng Zalo.
+
+**Giới hạn bản nén:** `.tar.xz` là thư mục ứng dụng có thể di chuyển, không kèm toàn bộ runtime. Cần glibc 2.35+ và thư viện hệ thống cho Electron/native addon; xem ví dụ phụ thuộc trong `packaging/linux-profiles.json`. Bản nén không tự thêm menu hoặc cài phụ thuộc. Binary này không hỗ trợ Alpine/musl. Flatpak và Snap cần quy trình đóng gói runtime riêng, chưa được tạo bởi pipeline này. Hướng dẫn NixOS vẫn có bên dưới.
 
 #### Nếu bạn dùng AM
 

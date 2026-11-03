@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_URL='@REPO_URL@'
+RELEASE_URL='@RELEASE_URL@'
+KEY_FINGERPRINT='@KEY_FINGERPRINT@'
+variant=original
+assume_yes=false
+print_plan=false
+usage() {
+  cat <<'EOF'
+Usage: bash install.sh [--variant original|zadark] [--yes] [--print-plan]
+  --original / --zadark  Shortcuts for --variant.
+  --yes                  Accept package-manager prompts (also permits variant switching).
+  --print-plan           Show detection and commands without changing the system.
+
+After setup, use your normal system update command. Re-run this installer with
+another --variant to switch. User data is shared and is not purged.
+EOF
+}
+while (($#)); do
+  case "$1" in
+    --variant) [[ $# -ge 2 ]] || { usage >&2; exit 2; }; variant="$2"; shift 2 ;;
+    --original) variant=original; shift ;;
+    --zadark) variant=zadark; shift ;;
+    --yes) assume_yes=true; shift ;;
+    --print-plan) print_plan=true; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+case "$variant" in
+  original) package=zalo-for-linux; other=zalo-for-linux-zadark ;;
+  zadark) package=zalo-for-linux-zadark; other=zalo-for-linux ;;
+  *) echo 'Variant must be original or zadark' >&2; exit 2 ;;
+esac
+[[ "$REPO_URL" == https://* ]] || { echo 'This installer has not been published/configured.' >&2; exit 1; }
+[[ "$RELEASE_URL" == https://github.com/*/releases/latest/download ]] || { echo 'Missing latest Release URL' >&2; exit 1; }
+[[ "$KEY_FINGERPRINT" =~ ^[0-9A-F]{40}$|^[0-9A-F]{64}$ ]] || { echo 'Missing repository key fingerprint' >&2; exit 1; }
+[[ -r /etc/os-release ]] || { echo 'Cannot detect Linux distribution' >&2; exit 1; }
+# shellcheck disable=SC1091
+source /etc/os-release
+identity=" ${ID:-} ${ID_LIKE:-} "
+if [[ "$identity" == *' opensuse'* || "$identity" == *' suse '* ]]; then family=opensuse
+elif [[ "$identity" == *' fedora '* ]]; then family=fedora
+elif [[ "$identity" == *' debian '* || "$identity" == *' ubuntu '* ]]; then family=deb
+elif [[ "$identity" == *' arch '* ]]; then family=arch
+else echo "Unsupported distro: ${ID:-unknown}. Supported: Debian/Ubuntu, Fedora, openSUSE, Arch." >&2; exit 1
+fi
+arch="$(uname -m)"
+[[ "$arch" != arm64 ]] || arch=aarch64
+case "$arch" in x86_64|aarch64) ;; *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; esac
+libc="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
+[[ "$libc" == 'glibc '* ]] || { echo 'glibc is required; Alpine/musl is unsupported.' >&2; exit 1; }
+version="${libc#glibc }"
+[[ "$(printf '%s\n' 2.35 "$version" | sort -V | head -n 1)" == 2.35 ]] || { echo 'glibc 2.35 or newer is required.' >&2; exit 1; }
+apt_yes=(); dnf_yes=(); zypper_yes=(); pacman_yes=()
+if $assume_yes; then apt_yes=(-y); dnf_yes=(-y); zypper_yes=(--non-interactive); pacman_yes=(--noconfirm); fi
+run_root() {
+  if [[ "$EUID" -eq 0 ]]; then "$@"; else sudo -- "$@"; fi
+}
+if $print_plan; then
+  printf 'Repository: %s\nDistro: %s\nArchitecture: %s\nVariant: %s\nPackage: %s\n' "$REPO_URL" "$family" "$arch" "$variant" "$package"
+  case "$family" in
+    deb) printf 'Install: apt-get install %s %s-\nUpdate: apt-get update && apt-get upgrade\n' "$package" "$other" ;;
+    fedora) printf 'Install: dnf --refresh install --allowerasing %s\nUpdate: dnf upgrade\n' "$package" ;;
+    opensuse) printf 'Install: zypper install --force-resolution %s\nUpdate: zypper update (Leap) / zypper dup (Tumbleweed)\n' "$package" ;;
+    arch) printf 'Install: pacman -Syu %s\nUpdate: pacman -Syu\n' "$package" ;;
+  esac
+  exit 0
+fi
+# Install bootstrap dependencies using the distro's existing trusted repositories.
+case "$family" in
+  deb) run_root apt-get update; run_root apt-get install "${apt_yes[@]}" ca-certificates curl gnupg ;;
+  fedora) run_root dnf install "${dnf_yes[@]}" ca-certificates curl gnupg2 ;;
+  opensuse) run_root zypper "${zypper_yes[@]}" install ca-certificates curl gpg2 ;;
+  arch) run_root pacman -Syu "${pacman_yes[@]}" --needed ca-certificates curl gnupg ;;
+esac
+temp_dir="$(mktemp -d)"
+trap 'rm -rf "$temp_dir"' EXIT
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' "$REPO_URL/key.asc" -o "$temp_dir/key.asc"
+mkdir -m 700 "$temp_dir/gnupg"
+# Inspect the primary key only; do not import into the user's personal keyring.
+found="$(gpg --homedir "$temp_dir/gnupg" --batch --show-keys --with-colons "$temp_dir/key.asc" | awk -F: '$1=="fpr" {print $10; exit}')"
+[[ "$found" == "$KEY_FINGERPRINT" ]] || { echo 'Repository key fingerprint mismatch; nothing added.' >&2; exit 1; }
+case "$family" in
+  deb)
+    apt_arch=amd64; [[ "$arch" != aarch64 ]] || apt_arch=arm64
+    gpg --batch --dearmor --output "$temp_dir/key.gpg" "$temp_dir/key.asc"
+    run_root install -d -m 755 /etc/apt/keyrings
+    run_root install -m 644 "$temp_dir/key.gpg" /etc/apt/keyrings/zalo-for-linux.gpg
+    cat > "$temp_dir/zalo.sources" <<EOF
+Types: deb
+URIs: $RELEASE_URL
+Suites: ./
+Architectures: $apt_arch
+Signed-By: /etc/apt/keyrings/zalo-for-linux.gpg
+EOF
+    run_root install -m 644 "$temp_dir/zalo.sources" /etc/apt/sources.list.d/zalo-for-linux.sources
+    run_root apt-get update
+    run_root apt-get install "${apt_yes[@]}" "$package" "$other-"
+    ;;
+  fedora|opensuse)
+    run_root install -d -m 755 /etc/pki/rpm-gpg
+    run_root install -m 644 "$temp_dir/key.asc" /etc/pki/rpm-gpg/RPM-GPG-KEY-zalo-for-linux
+    run_root rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-zalo-for-linux
+    cat > "$temp_dir/zalo.repo" <<EOF
+[zalo-for-linux]
+name=Zalo for Linux
+baseurl=$REPO_URL/rpm/$family/$arch
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-zalo-for-linux
+EOF
+    if [[ "$family" == fedora ]]; then
+      run_root install -m 644 "$temp_dir/zalo.repo" /etc/yum.repos.d/zalo-for-linux.repo
+      run_root dnf --refresh install "${dnf_yes[@]}" --allowerasing "$package"
+    else
+      run_root install -m 644 "$temp_dir/zalo.repo" /etc/zypp/repos.d/zalo-for-linux.repo
+      run_root zypper "${zypper_yes[@]}" refresh zalo-for-linux
+      run_root zypper "${zypper_yes[@]}" install --force-resolution "$package"
+    fi
+    ;;
+  arch)
+    run_root pacman-key --add "$temp_dir/key.asc"
+    run_root pacman-key --lsign-key "$KEY_FINGERPRINT"
+    cat > "$temp_dir/zalo.conf" <<EOF
+[zalo-for-linux]
+SigLevel = Required DatabaseRequired
+Server = $RELEASE_URL
+EOF
+    run_root install -m 644 "$temp_dir/zalo.conf" /etc/pacman.d/zalo-for-linux.conf
+    if ! grep -Fxq 'Include = /etc/pacman.d/zalo-for-linux.conf' /etc/pacman.conf; then
+      printf '\nInclude = /etc/pacman.d/zalo-for-linux.conf\n' | run_root tee -a /etc/pacman.conf >/dev/null
+    fi
+    run_root pacman -Syu "${pacman_yes[@]}" "$package"
+    ;;
+esac
+printf '\nInstalled %s. Open Zalo from the application menu. Future system updates keep the selected variant.\n' "$package"
