@@ -565,15 +565,40 @@ function start() {
       updateAdvancedOptionsFromZalo(msg.data);
     }
   });
+  // On X11, enumerate running windows (excluding the call window itself) for the share menu.
+  ipcMain.handle('zcall-ui-x11-windows', async () => {
+    const isWayland = (process.env.XDG_SESSION_TYPE || '').trim().toLowerCase() === 'wayland';
+    if (isWayland) return null;
+    const { desktopCapturer } = require('electron');
+    const callWinId = win && !win.isDestroyed() && typeof win.getMediaSourceId === 'function' ? win.getMediaSourceId() : null;
+    const callTitle = win && !win.isDestroyed() ? win.getTitle() : '';
+    try {
+      const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
+      return sources.filter((s) => {
+        if (!s.id.startsWith('window:')) return false;
+        if (callWinId && s.id === callWinId) return false;
+        if (callTitle && s.name === callTitle) return false;
+        if (!s.name || !s.name.trim()) return false;
+        return true;
+      }).map((s) => ({ id: s.id, label: s.name }));
+    } catch (_) {
+      return [];
+    }
+  });
   // The screen / window to share. With PipeWire capture (Wayland, see zcall.configure)
   // this asks the desktop's portal, which lets the user pick one.
   ipcMain.handle('zcall-ui-screen-source', async (_e, preferredId) => {
     sharingScreen = true;
     await compactJob; // out of full screen and compact before the portal's dialog opens
     const { desktopCapturer } = require('electron');
+    if (typeof preferredId === 'string' && preferredId.startsWith('window:') && preferredId !== 'window:select') {
+      return preferredId;
+    }
     if (preferredId === 'window:select') {
+      const callWinId = win && !win.isDestroyed() && typeof win.getMediaSourceId === 'function' ? win.getMediaSourceId() : null;
+      const callTitle = win && !win.isDestroyed() ? win.getTitle() : '';
       const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
-      const s = sources.find((x) => x.id.startsWith('window:')) || sources[0];
+      const s = sources.find((x) => x.id.startsWith('window:') && x.id !== callWinId && (!callTitle || x.name !== callTitle)) || sources[0];
       return s ? s.id : 'window:0:0';
     }
     const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });

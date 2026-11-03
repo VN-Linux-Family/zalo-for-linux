@@ -738,24 +738,17 @@ async function startLocal() {
 // right under it, above Zalo's main window. The camera stays on until the first screen frame;
 // cancelling, or 60 s without a pick, gives up. Stopping it from the
 // desktop's indicator ends the share.
-// A failure within 3 s of the click is not the user cancelling: the first
-// capture after a launch sometimes fails at once, the second works. So
-// that one is retried, once. While sharing, the window is compact.
+// While sharing, the window is compact.
 // pendingScreen declared at top
 async function startScreen(attempt = 1, targetSourceId = null) {
   if (sharing || (pendingScreen && attempt === 1)) return;
   const isWindow = targetSourceId === 'window:select' || (typeof targetSourceId === 'string' && targetSourceId.startsWith('window:'));
   const cap = pendingScreen = { kind: 'screen', stop: () => {}, sourceId: targetSourceId, isWindow };
-  const t0 = performance.now();
   const giveUp = (why) => {
     if (pendingScreen !== cap) return;
     pendingScreen = null;
     cap.stop();
     act('log', { text: 'screen share attempt ' + attempt + ': ' + why });
-    if (attempt === 1 && why !== 'timeout' && performance.now() - t0 < 3000 && state.phase === 'connected') {
-      setTimeout(() => startScreen(2, targetSourceId), 300);
-      return;
-    }
     act('screen', { on: false });
     if (autoCompact) { autoCompact = false; ipcRenderer.send('zcall-ui-window', 'expand'); }
   };
@@ -998,6 +991,14 @@ async function sections(kind) {
       ],
     });
   }
+  if (kind === 'share-windows') {
+    const list = (await ipcRenderer.invoke('zcall-ui-x11-windows')) || [];
+    out.push({
+      kind: 'share-windows',
+      noHeader: true,
+      items: list,
+    });
+  }
   return out;
 }
 async function openMenu(kind, anchor) {
@@ -1014,6 +1015,11 @@ async function openMenu(kind, anchor) {
       h.append(hi, sec.title); menu.appendChild(h);
       if (!sec.items.length) { const r = document.createElement('div'); r.className = 'h'; r.textContent = 'Không tìm thấy thiết bị'; menu.appendChild(r); }
     }
+    if (sec.noHeader && !sec.items.length) {
+      const r = document.createElement('div'); r.className = 'h';
+      r.textContent = sec.kind === 'share-windows' ? 'Không có cửa sổ khác' : 'Trống';
+      menu.appendChild(r);
+    }
     for (const it of sec.items) {
       const r = document.createElement('div'); r.className = 'it'; r.title = it.label;
       if (it.id === sec.current) { const ck = document.createElement('img'); setIcon(ck, 'check'); r.appendChild(ck); }
@@ -1026,6 +1032,9 @@ async function openMenu(kind, anchor) {
   if (kind === 'share') {
     menu.style.left = '8px';
     menu.style.width = '180px';
+  } else if (kind === 'share-windows') {
+    menu.style.left = '8px';
+    menu.style.width = '240px';
   } else {
     menu.style.width = '';
     const r = anchor.getBoundingClientRect();
@@ -1079,7 +1088,21 @@ ipcRenderer.on('zcall-ui-mic-level', (_e, level) => {
 });
 
 function pick(kind, it) {
-  if (kind === 'share') { startScreen(1, it.id); return; }
+  if (kind === 'share') {
+    if (it.id === 'window:select') {
+      const isWayland = (process.env.XDG_SESSION_TYPE || '').trim().toLowerCase() === 'wayland';
+      if (!isWayland) {
+        openMenu('share-windows', $('screen'));
+        return;
+      }
+    }
+    startScreen(1, it.id);
+    return;
+  }
+  if (kind === 'share-windows') {
+    startScreen(1, it.id);
+    return;
+  }
   if (kind === 'camera' && sharing) return;
   act('device', { kind, id: it.id, label: it.label });
   if (kind !== 'camera') return;

@@ -223,7 +223,7 @@ body:not(.phase-connected) #full, body.is-video:not(.has-video):not(.has-tiles) 
 #menu .it { cursor: pointer; }
 #menu .it:hover { background: var(--menu-hover); }
 #menu .it img { position: absolute; left: 18px; top: 8px; width: 14px; height: 14px; }
-#menu[data-kind="share"] .it { padding: 0 16px; }
+#menu[data-kind="share"] .it, #menu[data-kind="share-windows"] .it, #menu[data-kind="share-windows"] .h { padding: 0 16px; }
 #menu .sep { height: 1px; margin: 4px 0; background: var(--menu-line); }
 /* Microphone level under "Chọn micro": slider, meter of what we send, hint. */
 #menu .vol { padding: 6px 16px 8px 45px; cursor: default; }

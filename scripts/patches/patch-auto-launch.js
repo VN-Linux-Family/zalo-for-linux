@@ -6,25 +6,68 @@ const APP_DIR = path.join(__dirname, '..', '..', 'app');
 const MAIN_DIST_DIR = path.join(APP_DIR, 'main-dist');
 const AUTO_LAUNCH_BUNDLES = ['main.js', 'compact-app.js'];
 
+const START = '// --- Zalo Linux DBus Autostart ---';
+const END = '// --- End Zalo Linux DBus Autostart ---';
+
+const DBUS_LAUNCHER_HELPER = `function __zaloWrapLinuxLauncher(r){
+  const{execFile:e}=require("child_process"),t=require("fs"),n=Boolean(process.env.FLATPAK_ID||t.existsSync("/.flatpak-info"));
+  const APP_ID="net.vietnamlinuxfamily.zalo_for_linux";
+  function o(t,n=3000){return new Promise(((o,a)=>{e("gdbus",t,{timeout:n},((e,t,n)=>e?a(new Error(n||(e&&e.message)||"gdbus error")):o(t?t.trim():"")))}))}
+  return{
+    async isEnabled(){
+      if(n){
+        try{
+          const e=await o(["call","--session","--dest","org.freedesktop.impl.portal.PermissionStore","--object-path","/org/freedesktop/impl/portal/PermissionStore","--method","org.freedesktop.impl.portal.PermissionStore.GetPermission","background","background",APP_ID]);
+          if(e.includes("'yes'"))return!0;
+          if(e.includes("'no'"))return!1
+        }catch(e){}
+      }
+      if(r&&"function"==typeof r.isEnabled)try{return await r.isEnabled()}catch(e){}
+      return!1
+    },
+    async enable(){
+      let e=!1;
+      try{
+        if(n)try{await o(["call","--session","--dest","org.freedesktop.impl.portal.PermissionStore","--object-path","/org/freedesktop/impl/portal/PermissionStore","--method","org.freedesktop.impl.portal.PermissionStore.SetPermission","background","true","background",APP_ID,"['yes']"],3000)}catch(_){}
+        const t="zalo_auto_"+Math.floor(1e8*Math.random()),a=n?"['zalo', '--file-forwarding', '--hidden']":"['"+(process.env.APPIMAGE||process.execPath)+"', '--hidden']",s="{'handle_token': <'"+t+"'>, 'reason': <'Tự động khởi động Zalo khi đăng nhập'>, 'autostart': <true>, 'commandline': <"+a+">, 'dbus-activatable': <false>}";
+        await o(["call","--session","--dest","org.freedesktop.portal.Desktop","--object-path","/org/freedesktop/portal/desktop","--method","org.freedesktop.portal.Background.RequestBackground","",s],5000);
+        e=!0
+      }catch(t){console.warn("[autostart-dbus] Portal enable failed:",t&&t.message||t)}
+      if(r&&"function"==typeof r.enable)try{await r.enable()}catch(t){if(!e)throw t}
+    },
+    async disable(){
+      try{
+        const e="zalo_auto_"+Math.floor(1e8*Math.random()),t="{'handle_token': <'"+e+"'>, 'autostart': <false>}";
+        await o(["call","--session","--dest","org.freedesktop.portal.Desktop","--object-path","/org/freedesktop/portal/desktop","--method","org.freedesktop.portal.Background.RequestBackground","",t],5000);
+        if(n)try{await o(["call","--session","--dest","org.freedesktop.impl.portal.PermissionStore","--object-path","/org/freedesktop/impl/portal/PermissionStore","--method","org.freedesktop.impl.portal.PermissionStore.SetPermission","background","false","background",APP_ID,"['no']"],3000)}catch(_){}
+      }catch(e){console.warn("[autostart-dbus] Portal disable failed:",e&&e.message||e)}
+      if(r&&"function"==typeof r.disable)try{await r.disable()}catch(e){}
+    }
+  }
+}`;
+
+function injectHelper(content) {
+  const block = `${START}\n${DBUS_LAUNCHER_HELPER}\n${END}\n`;
+  const start = content.indexOf(START);
+  if (start === -1) return block + content;
+  const end = content.indexOf(END, start);
+  if (end === -1) throw new Error('DBus autostart end marker not found');
+  return content.slice(0, start) + block + content.slice(end + END.length).replace(/^\r?\n/, '');
+}
+
 // main-dist/main.js 26.08.20+ release: launcher=d, initializer=u, config=l (swap d and l).
 
-// const LAUNCHER_OPTIONS_ORIGINAL =
-//   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}l=new r(e)';
-// const LAUNCHER_OPTIONS_PATCHED =
-//   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe");l=new r(e)';
 const LAUNCHER_OPTIONS_ORIGINAL =
   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}d=new r(e)';
-// On Linux, isHidden makes auto-launch append `--hidden` to the autostart Exec
-// line, which plugins/start-hidden handles by starting in the tray (#58).
+// On Linux, wrap launcher with DBus portal Background support (works in Flatpak and on host)
 const LAUNCHER_OPTIONS_PATCHED =
-  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;d=new r(e)';
+  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;d=__zaloWrapLinuxLauncher(new r(e))';
+
 const COMPACT_LAUNCHER_OPTIONS_ORIGINAL =
   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}u=new r(e)';
 const COMPACT_LAUNCHER_OPTIONS_PATCHED =
-  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;u=new r(e)';
+  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;u=__zaloWrapLinuxLauncher(new r(e))';
 
-// const GET_LAUNCHER_ORIGINAL = 'getZaloLauncher:()=>l';
-// const GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!l)u(d);return l}';
 const GET_LAUNCHER_ORIGINAL = 'getZaloLauncher:()=>d';
 const GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!d)u(l);return d}';
 
@@ -39,8 +82,8 @@ const HANDLERS_ORIGINAL = new RegExp(
 );
 
 const HANDLERS_PATCHED =
-  'checkAutoLaunchEnable:async e=>{try{const{getZaloLauncher:t}=n("$1"),r=t();' +
-  'return!!(r&&"function"==typeof r.isEnabled)&&!!await r.isEnabled()}catch(e){return!1}},' +
+  'checkAutoLaunchEnable:async e=>{try{const{getZaloLauncher:t}=n("$1"),o=t();' +
+  'return!!(o&&"function"==typeof o.isEnabled)&&!!await o.isEnabled()}catch(e){return!1}},' +
   'toggleAutoLaunch:async(e,t)=>{const{appConfig:r}=n("$2"),{getZaloLauncher:i}=n("$1");try{' +
   'const o=i();if(!o)return r.set("autolaunch",!!t),!1;return t?' +
   '($3.zsymb(4,"$4",["autolaunch to enable","$5"]),await o.enable(),r.set("autolaunch",!0),!0):' +
@@ -70,6 +113,8 @@ function patchAutoLaunch(content) {
   if (!isMainVariant && !isCompactVariant) {
     throw new Error('Auto-launch launcher module anchor not found; upstream Zalo bundle may have changed.');
   }
+
+  content = injectHelper(content);
 
   if (isMainVariant) {
     content = replaceRequired(
