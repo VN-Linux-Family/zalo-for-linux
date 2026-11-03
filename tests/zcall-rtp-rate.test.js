@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'bun:test';
+'use strict';
+
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const path = require('path');
 const rtp = require(path.join(__dirname, '..', 'zcall-native', 'native-engine', 'rtp'));
 const { SendRate, DEFAULT_LADDER } = require(path.join(__dirname, '..', 'zcall-native', 'native-engine', 'send-rate'));
@@ -18,24 +21,24 @@ describe('RTP & SendRate Adaptation', () => {
       marker: true
     });
 
-    expect(hdr.length).toBe(20);
+    assert.strictEqual(hdr.length, 20);
     const parsed = rtp.readAudioRtpHeader(hdr);
-    expect(parsed).not.toBeNull();
-    expect(parsed.marker).toBe(true);
-    expect(parsed.seq).toBe(seq);
-    expect(parsed.ts).toBe(ts);
-    expect(parsed.ssrc).toBe(ssrc);
-    expect(parsed.twSeq).toBe(twSeq);
-    expect(parsed.pt).toBe(rtp.AUDIO_PT);
+    assert.ok(parsed !== null);
+    assert.strictEqual(parsed.marker, true);
+    assert.strictEqual(parsed.seq, seq);
+    assert.strictEqual(parsed.ts, ts);
+    assert.strictEqual(parsed.ssrc, ssrc);
+    assert.strictEqual(parsed.twSeq, twSeq);
+    assert.strictEqual(parsed.pt, rtp.AUDIO_PT);
   });
 
   it('initializes SendRate with default ladder and startup profile', () => {
     const rate = new SendRate();
     const current = rate.profile();
-    expect(current).toBeDefined();
-    expect(current.bitrate).toBeGreaterThanOrEqual(100);
+    assert.ok(current !== undefined);
+    assert.ok(current.bitrate >= 100);
     // Rung 1 (30 kbps) is filtered out by MIN_KBPS (100 kbps), leaving 6 rungs
-    expect(rate.ladder.length).toBe(6);
+    assert.strictEqual(rate.ladder.length, 6);
   });
 
   it('steps down on packet loss and respects backoff', () => {
@@ -49,8 +52,8 @@ describe('RTP & SendRate Adaptation', () => {
     rate.tick(true, 0.5);
 
     if (initialLevel > 0) {
-      expect(rate.level).toBeLessThan(initialLevel);
-      expect(changed).toBe(true);
+      assert.ok(rate.level < initialLevel);
+      assert.strictEqual(changed, true);
     }
   });
 });

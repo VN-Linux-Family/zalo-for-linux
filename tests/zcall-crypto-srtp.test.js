@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'bun:test';
+'use strict';
+
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const path = require('path');
 const srtp = require(path.join(__dirname, '..', 'zcall-native', 'native-engine', 'srtp-aes'));
 
@@ -7,26 +10,26 @@ describe('SRTP AES & KDF (RFC 3711)', () => {
 
   it('generates session keys with correct lengths', () => {
     const keys = srtp.sessionKeys(masterKeyAndSalt);
-    expect(keys).toBeDefined();
-    expect(Buffer.isBuffer(keys.enc)).toBe(true);
-    expect(keys.enc.length).toBe(16); // 128-bit AES key
-    expect(Buffer.isBuffer(keys.auth)).toBe(true);
-    expect(keys.auth.length).toBe(20); // 160-bit HMAC-SHA1 key
-    expect(Buffer.isBuffer(keys.salt)).toBe(true);
-    expect(keys.salt.length).toBe(14); // 112-bit salt
+    assert.ok(keys !== undefined);
+    assert.ok(Buffer.isBuffer(keys.enc));
+    assert.strictEqual(keys.enc.length, 16); // 128-bit AES key
+    assert.ok(Buffer.isBuffer(keys.auth));
+    assert.strictEqual(keys.auth.length, 20); // 160-bit HMAC-SHA1 key
+    assert.ok(Buffer.isBuffer(keys.salt));
+    assert.strictEqual(keys.salt.length, 14); // 112-bit salt
   });
 
   it('rejects master key shorter than 30 bytes', () => {
-    expect(() => srtp.sessionKeys(Buffer.alloc(29))).toThrow(TypeError);
+    assert.throws(() => srtp.sessionKeys(Buffer.alloc(29)), TypeError);
   });
 
   it('derives master key from sessId string or buffer', () => {
     const sessIdStr = '012345678901234567890123456789extra';
     const master = srtp.masterFromSessId(sessIdStr);
-    expect(master.length).toBe(30);
-    expect(master.toString('utf8')).toBe(sessIdStr.slice(0, 30));
+    assert.strictEqual(master.length, 30);
+    assert.strictEqual(master.toString('utf8'), sessIdStr.slice(0, 30));
 
-    expect(() => srtp.masterFromSessId('short')).toThrow(TypeError);
+    assert.throws(() => srtp.masterFromSessId('short'), TypeError);
   });
 
   it('computes deterministic 16-byte packet IV', () => {
@@ -35,9 +38,9 @@ describe('SRTP AES & KDF (RFC 3711)', () => {
     const iv2 = srtp.packetIv(keys.salt, 0x12345678, 100, 0);
     const ivDifferentSeq = srtp.packetIv(keys.salt, 0x12345678, 101, 0);
 
-    expect(iv1.length).toBe(16);
-    expect(iv1.equals(iv2)).toBe(true);
-    expect(iv1.equals(ivDifferentSeq)).toBe(false);
+    assert.strictEqual(iv1.length, 16);
+    assert.ok(iv1.equals(iv2));
+    assert.ok(!iv1.equals(ivDifferentSeq));
   });
 
   it('encrypts (protect) and decrypts (unprotect) RTP payload', () => {
@@ -57,13 +60,13 @@ describe('SRTP AES & KDF (RFC 3711)', () => {
     const originalOpus = Buffer.from('Testing Opus Audio Frame Payload 1234567890!@#$%^&*()');
 
     const protectedPacket = srtp.protectRtp(rtpHeader, originalOpus, keys, seq, ssrc, roc);
-    expect(protectedPacket.length).toBe(rtpHeader.length + originalOpus.length + 10);
+    assert.strictEqual(protectedPacket.length, rtpHeader.length + originalOpus.length + 10);
 
     const unprotected = srtp.unprotectRtp(protectedPacket, keys, roc);
-    expect(unprotected).not.toBeNull();
-    expect(unprotected.seq).toBe(seq);
-    expect(unprotected.ssrc).toBe(ssrc);
-    expect(unprotected.opus.equals(originalOpus)).toBe(true);
+    assert.ok(unprotected !== null);
+    assert.strictEqual(unprotected.seq, seq);
+    assert.strictEqual(unprotected.ssrc, ssrc);
+    assert.ok(unprotected.opus.equals(originalOpus));
   });
 
   it('rejects tampered ciphertext or modified HMAC tag', () => {
@@ -83,11 +86,11 @@ describe('SRTP AES & KDF (RFC 3711)', () => {
     // Tamper with payload byte
     const tamperedPayload = Buffer.from(protectedPacket);
     tamperedPayload[15] ^= 0xff;
-    expect(srtp.unprotectRtp(tamperedPayload, keys, 0)).toBeNull();
+    assert.strictEqual(srtp.unprotectRtp(tamperedPayload, keys, 0), null);
 
     // Tamper with auth tag byte
     const tamperedTag = Buffer.from(protectedPacket);
     tamperedTag[tamperedTag.length - 1] ^= 0x01;
-    expect(srtp.unprotectRtp(tamperedTag, keys, 0)).toBeNull();
+    assert.strictEqual(srtp.unprotectRtp(tamperedTag, keys, 0), null);
   });
 });

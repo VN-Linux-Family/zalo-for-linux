@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'bun:test';
+'use strict';
+
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const path = require('path');
 const { renderTrayBadge, decodePng, encodePng } = require(path.join(__dirname, '..', 'plugins', 'tray-badge', 'badge-icon'));
 
@@ -20,33 +23,33 @@ describe('Badge Icon PNG Decoder, Renderer, and Encoder', () => {
     const height = 32;
     const pngBuffer = createBlankImage(width, height);
 
-    expect(Buffer.isBuffer(pngBuffer)).toBe(true);
+    assert.ok(Buffer.isBuffer(pngBuffer));
     // PNG signature: 89 50 4E 47 0D 0A 1A 0A
-    expect(pngBuffer[0]).toBe(0x89);
-    expect(pngBuffer[1]).toBe(0x50);
-    expect(pngBuffer[2]).toBe(0x4e);
-    expect(pngBuffer[3]).toBe(0x47);
+    assert.strictEqual(pngBuffer[0], 0x89);
+    assert.strictEqual(pngBuffer[1], 0x50);
+    assert.strictEqual(pngBuffer[2], 0x4e);
+    assert.strictEqual(pngBuffer[3], 0x47);
 
     const decoded = decodePng(pngBuffer);
-    expect(decoded.width).toBe(width);
-    expect(decoded.height).toBe(height);
-    expect(decoded.data.length).toBe(width * height * 4);
+    assert.strictEqual(decoded.width, width);
+    assert.strictEqual(decoded.height, height);
+    assert.strictEqual(decoded.data.length, width * height * 4);
 
     // Verify pixel values
-    expect(decoded.data[0]).toBe(20);
-    expect(decoded.data[1]).toBe(120);
-    expect(decoded.data[2]).toBe(220);
-    expect(decoded.data[3]).toBe(255);
+    assert.strictEqual(decoded.data[0], 20);
+    assert.strictEqual(decoded.data[1], 120);
+    assert.strictEqual(decoded.data[2], 220);
+    assert.strictEqual(decoded.data[3], 255);
   });
 
   it('renders badge for single digit count', () => {
     const basePng = createBlankImage(32, 32);
     const badged = renderTrayBadge(basePng, 5);
 
-    expect(Buffer.isBuffer(badged)).toBe(true);
+    assert.ok(Buffer.isBuffer(badged));
     const decoded = decodePng(badged);
-    expect(decoded.width).toBe(32);
-    expect(decoded.height).toBe(32);
+    assert.strictEqual(decoded.width, 32);
+    assert.strictEqual(decoded.height, 32);
 
     // The top-right badge should have modified red pixels (default badgeColor: 240, 54, 54)
     let foundRed = false;
@@ -56,17 +59,17 @@ describe('Badge Icon PNG Decoder, Renderer, and Encoder', () => {
         break;
       }
     }
-    expect(foundRed).toBe(true);
+    assert.ok(foundRed);
   });
 
   it('renders badge for 99+ count', () => {
     const basePng = createBlankImage(48, 48);
     const badged = renderTrayBadge(basePng, 150);
 
-    expect(Buffer.isBuffer(badged)).toBe(true);
+    assert.ok(Buffer.isBuffer(badged));
     const decoded = decodePng(badged);
-    expect(decoded.width).toBe(48);
-    expect(decoded.height).toBe(48);
+    assert.strictEqual(decoded.width, 48);
+    assert.strictEqual(decoded.height, 48);
   });
 
   it('returns unchanged base icon when count <= 0', () => {
@@ -78,7 +81,7 @@ describe('Badge Icon PNG Decoder, Renderer, and Encoder', () => {
     const dec0 = decodePng(result0);
     const decNeg = decodePng(resultNeg);
 
-    expect(Buffer.from(dec0.data).equals(Buffer.from(decBase.data))).toBe(true);
-    expect(Buffer.from(decNeg.data).equals(Buffer.from(decBase.data))).toBe(true);
+    assert.ok(Buffer.from(dec0.data).equals(Buffer.from(decBase.data)));
+    assert.ok(Buffer.from(decNeg.data).equals(Buffer.from(decBase.data)));
   });
 });

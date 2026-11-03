@@ -1,4 +1,7 @@
-import { describe, expect, it, afterAll } from 'bun:test';
+'use strict';
+
+const { describe, it, after } = require('node:test');
+const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -8,7 +11,7 @@ const offlineStore = require(path.join(__dirname, '..', 'plugins', 'offline', 's
 describe('Plugin Stores & Persistence', () => {
   const tmpDir = path.join(os.tmpdir(), `zalo-test-${Date.now()}`);
 
-  afterAll(() => {
+  after(() => {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch (_) { }
@@ -21,8 +24,8 @@ describe('Plugin Stores & Persistence', () => {
         { name: 'other_cookie', value: 'ignore', domain: 'zalo.me', httpOnly: false, secure: false }
       ];
       const key = offlineStore.sessionKey(dummyCookies);
-      expect(key).not.toBeNull();
-      expect(key.length).toBe(32); // SHA-256 digest
+      assert.ok(key !== null);
+      assert.strictEqual(key.length, 32); // SHA-256 digest
     });
 
     it('encrypts, writes, and reads back offline session record', () => {
@@ -42,22 +45,22 @@ describe('Plugin Stores & Persistence', () => {
         }
       };
 
-      expect(offlineStore.validRecord(record)).toBe(true);
+      assert.strictEqual(offlineStore.validRecord(record), true);
 
       const writeOk = store.write(key, record);
-      expect(writeOk).toBe(true);
+      assert.strictEqual(writeOk, true);
 
       const readBack = store.read(key);
-      expect(readBack).not.toBeNull();
-      expect(readBack.clientId).toBe(record.clientId);
-      expect(readBack.info.UIN).toBe(record.info.UIN);
+      assert.ok(readBack !== null);
+      assert.strictEqual(readBack.clientId, record.clientId);
+      assert.strictEqual(readBack.info.UIN, record.info.UIN);
 
       // Wrong key fails decryption
       const wrongKey = Buffer.alloc(32, 0x99);
-      expect(store.read(wrongKey)).toBeNull();
+      assert.strictEqual(store.read(wrongKey), null);
 
       store.clear();
-      expect(store.read(key)).toBeNull();
+      assert.strictEqual(store.read(key), null);
     });
   });
 
@@ -65,14 +68,14 @@ describe('Plugin Stores & Persistence', () => {
     it('reads and initializes settings with empty values', () => {
       const store = advancedStore.createStore(path.join(tmpDir, 'adv'));
       const settings = store.read();
-      expect(settings).toBeDefined();
-      expect(typeof settings.ringtone).toBe('string');
-      expect(typeof settings.ringback).toBe('string');
+      assert.ok(settings !== undefined);
+      assert.strictEqual(typeof settings.ringtone, 'string');
+      assert.strictEqual(typeof settings.ringback, 'string');
     });
 
     it('validates sound kinds properly', () => {
       const store = advancedStore.createStore(path.join(tmpDir, 'adv'));
-      expect(() => store.save('invalid_kind', '/dummy/path.mp3')).toThrow();
+      assert.throws(() => store.save('invalid_kind', '/dummy/path.mp3'));
     });
   });
 });

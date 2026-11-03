@@ -1,27 +1,30 @@
-import { describe, expect, it } from 'bun:test';
+'use strict';
+
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const logger = require(path.join(__dirname, '..', 'scripts', 'utils', 'logger'));
 
 describe('Scripts & Patches Integration', () => {
   it('loads logger and invokes logging methods without error', () => {
-    expect(typeof logger.info).toBe('function');
-    expect(typeof logger.warn).toBe('function');
-    expect(typeof logger.error).toBe('function');
-    expect(typeof logger.success).toBe('function');
-    expect(typeof logger.dim).toBe('function');
+    assert.strictEqual(typeof logger.info, 'function');
+    assert.strictEqual(typeof logger.warn, 'function');
+    assert.strictEqual(typeof logger.error, 'function');
+    assert.strictEqual(typeof logger.success, 'function');
+    assert.strictEqual(typeof logger.dim, 'function');
   });
 
   it('validates that all patch scripts in scripts/patches load and export main', () => {
     const patchesDir = path.join(__dirname, '..', 'scripts', 'patches');
     const files = fs.readdirSync(patchesDir).filter(f => f.endsWith('.js'));
 
-    expect(files.length).toBeGreaterThanOrEqual(25);
+    assert.ok(files.length >= 25, `Expected >= 25 patch files, got ${files.length}`);
 
     for (const file of files) {
       const fullPath = path.join(patchesDir, file);
       const mod = require(fullPath);
-      expect(typeof mod.main).toBe('function');
+      assert.strictEqual(typeof mod.main, 'function', `${file} does not export main function`);
     }
   });
 });
