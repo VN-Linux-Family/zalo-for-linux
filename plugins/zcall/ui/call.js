@@ -998,6 +998,14 @@ async function sections(kind) {
       ],
     });
   }
+  if (kind === 'share-windows') {
+    const list = (await ipcRenderer.invoke('zcall-ui-x11-windows')) || [];
+    out.push({
+      kind: 'share-windows',
+      noHeader: true,
+      items: list,
+    });
+  }
   return out;
 }
 async function openMenu(kind, anchor) {
@@ -1014,6 +1022,11 @@ async function openMenu(kind, anchor) {
       h.append(hi, sec.title); menu.appendChild(h);
       if (!sec.items.length) { const r = document.createElement('div'); r.className = 'h'; r.textContent = 'Không tìm thấy thiết bị'; menu.appendChild(r); }
     }
+    if (sec.noHeader && !sec.items.length) {
+      const r = document.createElement('div'); r.className = 'h';
+      r.textContent = sec.kind === 'share-windows' ? 'Không có cửa sổ khác' : 'Trống';
+      menu.appendChild(r);
+    }
     for (const it of sec.items) {
       const r = document.createElement('div'); r.className = 'it'; r.title = it.label;
       if (it.id === sec.current) { const ck = document.createElement('img'); setIcon(ck, 'check'); r.appendChild(ck); }
@@ -1026,6 +1039,9 @@ async function openMenu(kind, anchor) {
   if (kind === 'share') {
     menu.style.left = '8px';
     menu.style.width = '180px';
+  } else if (kind === 'share-windows') {
+    menu.style.left = '8px';
+    menu.style.width = '240px';
   } else {
     menu.style.width = '';
     const r = anchor.getBoundingClientRect();
@@ -1079,7 +1095,21 @@ ipcRenderer.on('zcall-ui-mic-level', (_e, level) => {
 });
 
 function pick(kind, it) {
-  if (kind === 'share') { startScreen(1, it.id); return; }
+  if (kind === 'share') {
+    if (it.id === 'window:select') {
+      const isWayland = (process.env.XDG_SESSION_TYPE || '').trim().toLowerCase() === 'wayland';
+      if (!isWayland) {
+        openMenu('share-windows', $('screen'));
+        return;
+      }
+    }
+    startScreen(1, it.id);
+    return;
+  }
+  if (kind === 'share-windows') {
+    startScreen(1, it.id);
+    return;
+  }
   if (kind === 'camera' && sharing) return;
   act('device', { kind, id: it.id, label: it.label });
   if (kind !== 'camera') return;
