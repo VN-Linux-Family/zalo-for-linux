@@ -132,11 +132,13 @@ function prepare() {
  * Before 'ready', after Zalo's bootstrap: on Wayland, screen sharing needs
  * Chromium's PipeWire capture (through the desktop portal); X11 capture
  * only sees XWayland windows. Chromium keeps the last --enable-features, so
- * merge with Zalo's own (JXL).
+ * merge with Zalo's own (JXL). In Flatpak (without --socket=wayland), WebRTC
+ * also needs WAYLAND_DISPLAY to route capture to the desktop portal.
  */
 function configure(app) {
-  const isWayland = process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY;
+  const isWayland = (process.env.XDG_SESSION_TYPE || '').trim().toLowerCase() === 'wayland';
   if (!isWayland) return;
+  if (!process.env.WAYLAND_DISPLAY) process.env.WAYLAND_DISPLAY = 'wayland-0';
   const features = app.commandLine.getSwitchValue('enable-features').split(',').filter(Boolean);
   if (!features.includes('WebRTCPipeWireCapturer')) features.push('WebRTCPipeWireCapturer');
   app.commandLine.appendSwitch('enable-features', features.join(','));
