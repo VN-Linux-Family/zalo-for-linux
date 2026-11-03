@@ -49,6 +49,8 @@
       "main.js",
       "package.json",
       "plugins/**/*",
+      "!plugins/zadark/**",
+      "!plugins/zadark-sync/**",
       "assets/**/*"
     ],
     "extraFiles": [
