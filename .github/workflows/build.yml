@@ -186,7 +186,7 @@ jobs:
       if: steps.build.outputs.build == 'true' && steps.build.outputs.original_appimage_file != ''
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.build.outputs.original_appimage_name }}-${{ matrix.arch }}
+        name: ${{ steps.build.outputs.original_appimage_name }}
         path: ${{ steps.build.outputs.original_appimage_file }}*
         retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
@@ -194,7 +194,7 @@ jobs:
       if: steps.build.outputs.build == 'true' && steps.build.outputs.zadark_appimage_file != ''
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.build.outputs.zadark_appimage_name }}-${{ matrix.arch }}
+        name: ${{ steps.build.outputs.zadark_appimage_name }}
         path: ${{ steps.build.outputs.zadark_appimage_file }}*
         retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
 
