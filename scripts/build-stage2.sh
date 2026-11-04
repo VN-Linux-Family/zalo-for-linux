@@ -30,22 +30,22 @@ DIST_DIR="${3:?Error: No DIST_DIR given}"
 : "${UPINFO:?Error: UPINFO is required}"
 
 case "$VARIANT" in
-  original)
-    [[ "$OUTNAME" == *-Original-* ]] || {
-      echo "Error: OUTNAME is not an Original build name: $OUTNAME" >&2
-      exit 1
-    }
-    ;;
-  zadark)
-    [[ "$OUTNAME" == *+ZaDark-* ]] || {
-      echo "Error: OUTNAME is not a ZaDark build name: $OUTNAME" >&2
-      exit 1
-    }
-    ;;
-  *)
-    echo "Error: VARIANT must be 'original' or 'zadark', got: $VARIANT" >&2
+original)
+  [[ "$OUTNAME" == *-Original-* ]] || {
+    echo "Error: OUTNAME is not an Original build name: $OUTNAME" >&2
     exit 1
-    ;;
+  }
+  ;;
+zadark)
+  [[ "$OUTNAME" == *+ZaDark-* ]] || {
+    echo "Error: OUTNAME is not a ZaDark build name: $OUTNAME" >&2
+    exit 1
+  }
+  ;;
+*)
+  echo "Error: VARIANT must be 'original' or 'zadark', got: $VARIANT" >&2
+  exit 1
+  ;;
 esac
 
 [[ "$OUTNAME" == *"${ARCH_SUFFIX}.AppImage" ]] || {
@@ -113,6 +113,15 @@ fi
 cd "$DIST_DIR"
 rm -f "$OUTNAME"
 
+if [[ -z "${DWARFS_COMP:-}" ]]; then
+  # Run on GitHub Actions AND (main branch OR tag) AND not a PR
+  if [[ "${GITHUB_ACTIONS:-}" == "true" && ( "${GITHUB_REF:-}" == "refs/heads/main" || "${GITHUB_REF_TYPE:-}" == "tag" ) && "${GITHUB_EVENT_NAME:-}" != "pull_request" ]]; then
+    export DWARFS_COMP="zstd:level=19 -B2 -S26"
+  else
+    export DWARFS_COMP="zstd:level=1 -B2 -S24"
+  fi
+fi
+
 # Repack it with quick-sharun
 echo "Packaging $OUTNAME..."
 "$APPIMAGETOOL" --make-appimage
@@ -128,4 +137,5 @@ rm -rf "${DIST_DIR}/appinfo"
 chmod +x "$OUTNAME"
 
 echo "=== Build completed: ${DIST_DIR}/${OUTNAME} ==="
-exit 
+exit
+
