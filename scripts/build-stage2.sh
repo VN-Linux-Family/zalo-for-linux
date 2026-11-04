@@ -2,34 +2,80 @@
 
 set -euo pipefail
 
-# Get the envs from arguments
+# Adapter between scripts/build.js and the AppImage toolchain (quick-sharun +
+# appimagetool). All naming decisions live in build.js so there is only one
+# source of truth; this script refuses to guess them.
+#
+# Arguments:
+#   $1  VERSION      Zalo version, embedded in the AppImage metadata
+#   $2  OUTNAME      final AppImage filename, produced by build.js
+#   $3  DIST_DIR     output directory (also holds the AppDir and appimagetool)
+#
+# Required environment (set by build.js):
+#   VARIANT          original | zadark
+#   ARCH             x86_64 | aarch64 (uname style, used by appimagetool)
+#   ARCH_SUFFIX      -x86_64 | -aarch64
+#   UPINFO           zsync update information string
+# Optional environment:
+#   REUSE_APPDIR     1 = pack dist/squashfs-root as-is instead of extracting
+#   KEEP_APPDIR      1 = leave the AppDir behind for the next build phase
+
 VER="${1:-unknown}"
 OUTNAME="${2:?Error: No OUTNAME given}"
 DIST_DIR="${3:?Error: No DIST_DIR given}"
 
-export ZADARK_SUFFIX=$( [[ "${OUTNAME}" == *ZaDark* ]] && echo "+ZaDark-[0-9]*[0-9]" || echo "-Original" )
-export ARCH="$(uname -m)"
-export ARCH_SUFFIX=$( [[ "${ARCH}" == "arm64" || "${ARCH}" == "aarch64" ]] && echo "-aarch64" || echo "-x86_64" )
+: "${VARIANT:?Error: VARIANT is required (original|zadark)}"
+: "${ARCH:?Error: ARCH is required (x86_64|aarch64)}"
+: "${ARCH_SUFFIX:?Error: ARCH_SUFFIX is required (-x86_64|-aarch64)}"
+: "${UPINFO:?Error: UPINFO is required}"
+
+case "$VARIANT" in
+  original)
+    [[ "$OUTNAME" == *-Original-* ]] || {
+      echo "Error: OUTNAME is not an Original build name: $OUTNAME" >&2
+      exit 1
+    }
+    ;;
+  zadark)
+    [[ "$OUTNAME" == *+ZaDark-* ]] || {
+      echo "Error: OUTNAME is not a ZaDark build name: $OUTNAME" >&2
+      exit 1
+    }
+    ;;
+  *)
+    echo "Error: VARIANT must be 'original' or 'zadark', got: $VARIANT" >&2
+    exit 1
+    ;;
+esac
+
+[[ "$OUTNAME" == *"${ARCH_SUFFIX}.AppImage" ]] || {
+  echo "Error: OUTNAME does not end with ${ARCH_SUFFIX}.AppImage: $OUTNAME" >&2
+  exit 1
+}
+
 export APP_NAME="Zalo"
 export DESKTOP="zalo.desktop"
 export ICON="zalo.png"
 export STARTUPWMCLASS="zalo"
 export OUTPATH="${DIST_DIR}"
-export UPINFO="gh-releases-zsync|VN-Linux-Family|zalo-for-linux|latest|Zalo-[0-9]*[0-9]${ZADARK_SUFFIX}-???????${ARCH_SUFFIX}.AppImage.zsync"
 export VERSION="$VER"
+export VARIANT ARCH ARCH_SUFFIX UPINFO
+export OUTNAME
 
 APPDIR="${DIST_DIR}/squashfs-root"
 APPIMAGETOOL="${DIST_DIR}/appimagetool"
 
-export APPDIR OUTNAME 
+# REUSE_APPDIR=1: pack an AppDir that already exists instead of extracting one
+# from a freshly built AppImage (used to derive the ZaDark variant from the
+# Original AppDir without a second electron-builder run).
+REUSE_APPDIR="${REUSE_APPDIR:-0}"
+# KEEP_APPDIR=1: leave $APPDIR behind after packing so the next phase can reuse
+# it.
+KEEP_APPDIR="${KEEP_APPDIR:-0}"
 
-echo "=== Building Zalo AppImage for ${ARCH} ==="
+export APPDIR
 
-# Check if the original AppImage exists
-if [[ ! -f "${DIST_DIR}/${OUTNAME}" ]]; then
-  echo "Error: Cannot find ${OUTNAME}, please run the builder first." >&2
-  exit 1
-fi
+echo "=== Building ${VARIANT} AppImage for ${ARCH} ==="
 
 # Prepare appimagetool (which is quick-sharun.sh in this case)
 if [[ ! -f "$APPIMAGETOOL" ]]; then
@@ -38,18 +84,33 @@ if [[ ! -f "$APPIMAGETOOL" ]]; then
   chmod +x "$APPIMAGETOOL"
 fi
 
-# Extract the original AppImage
-echo "Extracting AppImage..."
-chmod +x "${DIST_DIR}/${OUTNAME}"
-cd "$DIST_DIR"
-./"$OUTNAME" --appimage-extract >/dev/null 2>&1
+if [[ "${REUSE_APPDIR}" == "1" ]]; then
+  echo "Reusing existing AppDir: $APPDIR"
+  if [[ ! -d "$APPDIR" ]]; then
+    echo "Error: Cannot find ${APPDIR} to reuse." >&2
+    exit 1
+  fi
+else
+  # Check if the original AppImage exists
+  if [[ ! -f "${DIST_DIR}/${OUTNAME}" ]]; then
+    echo "Error: Cannot find ${OUTNAME}, please run the builder first." >&2
+    exit 1
+  fi
 
-if [[ ! -d "$APPDIR" ]]; then
-  echo "Error: Cannot find ${APPDIR}, extraction failed." >&2
-  exit 1
+  # Extract the original AppImage
+  echo "Extracting AppImage..."
+  chmod +x "${DIST_DIR}/${OUTNAME}"
+  cd "$DIST_DIR"
+  ./"$OUTNAME" --appimage-extract >/dev/null 2>&1
+
+  if [[ ! -d "$APPDIR" ]]; then
+    echo "Error: Cannot find ${APPDIR}, extraction failed." >&2
+    exit 1
+  fi
 fi
 
-# Remove the original AppImage before repacking
+# Remove any previous output before repacking
+cd "$DIST_DIR"
 rm -f "$OUTNAME"
 
 # Repack it with quick-sharun
@@ -57,8 +118,14 @@ echo "Packaging $OUTNAME..."
 "$APPIMAGETOOL" --make-appimage
 
 # Cleanup and chmod the output file
-rm -rf "$APPDIR" "${DIST_DIR}/appinfo"
-chmod -x "$OUTNAME" || true
+if [[ "${KEEP_APPDIR}" != "1" ]]; then
+  rm -rf "$APPDIR"
+fi
+rm -rf "${DIST_DIR}/appinfo"
+# quick-sharun already marks the AppImage executable, but it may pick a stale
+# artifact from the glob in $OUTPATH. Set the mode on the file we just built so
+# the output does not depend on what else is in dist/.
+chmod +x "$OUTNAME"
 
 echo "=== Build completed: ${DIST_DIR}/${OUTNAME} ==="
 exit 
