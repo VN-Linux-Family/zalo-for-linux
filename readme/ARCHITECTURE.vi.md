@@ -30,9 +30,12 @@ zalo-for-linux/
 │   ├── file-utilities # Addon quét hệ thống file bất đồng bộ và so khớp mẫu
 │   ├── file-utils # Addon tiện ích truy cập hệ thống file và quản lý file
 │   ├── mp4thumb # Addon trích xuất ảnh thu nhỏ từ file video MP4
+│   ├── v8-profiles # Công cụ phân tích hiệu năng CPU native cho Zalo
 │   ├── README.md # Thông tin về thư mục này
+│   ├── zfile # Addon cung cấp thông tin ổ đĩa (dung lượng trống, điểm gắn)
 │   ├── zimage # Addon xử lý ảnh, thay đổi kích thước và chuyển đổi định dạng
-│   └── zjxl # Hỗ trợ giải mã và mã hóa ảnh JPEG XL (JXL)
+│   ├── zjxl # Hỗ trợ giải mã và mã hóa ảnh JPEG XL (JXL)
+│   └── zwalker # Bộ dọn rác bộ nhớ đệm phương tiện
 ├── package.json  # Thông tin dự án + cấu hình build
 ├── package-lock.json  # File khóa phiên bản dependency của dự án
 ├── plugins # Các submodule/plugin của Zalo

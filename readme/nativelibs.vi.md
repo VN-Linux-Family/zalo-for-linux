@@ -43,29 +43,36 @@ Ngoài ra, mỗi addon đều độc lập, tự chứa mọi thứ mình cần.
 | [file-utilities](../nativelibs/file-utilities) | ✅ Đã hoàn thành | Quét hệ thống file bất đồng bộ và so khớp mẫu |
 | [file-utils](../nativelibs/file-utils) | ✅ Đã hoàn thành | Các tiện ích truy cập hệ thống file và quản lý file |
 | [mp4thumb](../nativelibs/mp4thumb) | ✅ Đã hoàn thành | Trích xuất ảnh thumbnail từ file video MP4 |
+| [v8-profiles](./v8-profiles) | ✅ Đã hoàn thành | Công cụ phân tích hiệu năng CPU native cho Zalo |
+| [zfile](./zfile) | ✅ Đã hoàn thành | Cung cấp thông tin ổ đĩa (dung lượng trống, điểm gắn) |
 | [zimage](../nativelibs/zimage) | ✅ Đã hoàn thành | Xử lý ảnh, thay đổi kích thước và chuyển đổi định dạng |
 | [zjxl](../nativelibs/zjxl) | ✅ Đã hoàn thành | Hỗ trợ giải mã và mã hóa ảnh JPEG XL (JXL) |
+| [zwalker](./zwalker) | ✅ Đã hoàn thành | Hỗ trợ dọn rác bộ nhớ đệm phương tiện |
 
 ## Build một addon
+
+### Nếu là addon dựa trên gyp:
 
 ```bash
 node nativelibs/builder.js nativelibs/<addon-name>
 ```
 
+### Nếu là addon dựa trên Rust:
+
+```bash
+node nativelibs/builder-rust.js nativelibs/<addon-name>
+```
+
 File nhị phân sau khi biên dịch sẽ nằm tại:
-`<project-root>/nativelibs/<addon-name>/build/Release/*.node`
+`<project-root>/nativelibs/<addon-name>/build/Release/*.node # Addon dựa trên gyp`
+
+`<project-root>/nativelibs/<addon-name>/target/release/*.node # Addon dựa trên Rust`
 
 Đường dẫn này khớp với cấu trúc mà các JS binding của ứng dụng Zalo mong đợi.
 
 ## Công cụ hỗ trợ build
 
-`builder.js` là một script chạy từ dòng lệnh (terminal):
-
-```bash
-node nativelibs/builder.js <addon-path>
-```
-
-Script tự động đọc phiên bản Electron từ file `package.json` ở thư mục gốc của dự án.
+`builder.js` là một script chạy từ dòng lệnh (terminal), script tự động đọc phiên bản Electron từ file `package.json` ở thư mục gốc của dự án.
 
 ## Thêm một addon mới
 
@@ -120,5 +127,5 @@ Cách làm này đảm bảo:
 ## Ghi nhận
 
 Các bản viết lại dựa trên công sức dịch ngược của
-[realdtn2](https://github.com/realdtn2/zalo-linux-2026). Xem `README.md` của
+[realdtn2](https://github.com/realdtn2/zalo-linux-2026), [DMKha241](https://github.com/DMKha241) và [thotam](https://github.com/thotam). Xem `README.md` của
 từng addon để biết ghi nhận cụ thể.

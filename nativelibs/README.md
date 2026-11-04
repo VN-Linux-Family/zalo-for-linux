@@ -42,29 +42,36 @@ addons. Each addon is otherwise self-contained.
 | [file-utilities](./file-utilities) | ✅ Implemented | Asynchronous filesystem scanning & pattern matching |
 | [file-utils](./file-utils) | ✅ Implemented | Filesystem access and file management utilities |
 | [mp4thumb](./mp4thumb) | ✅ Implemented | Video thumbnail extraction from MP4 files |
+| [v8-profiles](./v8-profiles) | ✅ Implemented | Native CPU profiler for Zalo |
+| [zfile](./zfile) | ✅ Implemented | Disk/volume info (free space, mount points) |
 | [zimage](./zimage) | ✅ Implemented | Image processing, resizing, and format conversions |
 | [zjxl](./zjxl) | ✅ Implemented | JPEG XL (JXL) image decoding and encoding support |
+| [zwalker](./zwalker) | ✅ Implemented | Media-cache garbage collecting support |
 
 ## Building an Addon
+
+### For gyp-based addons:
 
 ```bash
 node nativelibs/builder.js nativelibs/<addon-name>
 ```
 
+### For Rust-based addons:
+
+```bash
+node nativelibs/builder-rust.js nativelibs/<addon-name>
+```
+
 The compiled binary stays in:
-`<project-root>/nativelibs/<addon-name>/build/Release/*.node`
+`<project-root>/nativelibs/<addon-name>/build/Release/*.node # gyp-based addons`
+
+`<project-root>/nativelibs/<addon-name>/target/release/*.node # Rust-based addons`
 
 This path matches the structure expected by the Zalo app's JS bindings.
 
 ## Build Helper
 
-`builder.js` is a CLI script:
-
-```bash
-node nativelibs/builder.js <addon-path>
-```
-
-It reads the Electron version from the project root `package.json` automatically.
+`builder.js` and `builder-rust.js` is a CLI script, it reads the Electron version from the project root `package.json` automatically.
 
 ## Adding a New Addon
 
@@ -119,5 +126,5 @@ This ensures:
 ## Credits
 
 Reimplementations are based on reverse engineering work by
-[realdtn2](https://github.com/realdtn2/zalo-linux-2026). See each
+[realdtn2](https://github.com/realdtn2), [DMKha241](https://github.com/DMKha241) and [thotam](https://github.com/thotam). See each
 addon's `README.md` for specific attribution.

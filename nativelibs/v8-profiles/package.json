@@ -1,0 +1,8 @@
+{
+  "name": "v8-profiles-linux",
+  "version": "1.0.0",
+  "description": "Linux native CPU profiler for Zalo v8-profiles (vendored from v8-profiler-next, MIT; trimmed to Zalo's binding.cpu.* head-based shape)",
+  "private": true,
+  "main": "index.js",
+  "dependencies": { "nan": "^2.18.0" }
+}

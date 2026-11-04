@@ -273,18 +273,18 @@ async function extractAppAsar() {
   const { main: patchZjxl } = require('./patches/patch-zjxl');
   await patchZjxl();
 
+  const { main: patchZfile } = require('./patches/patch-zfile');
+  await patchZfile();
+
+  const { main: patchV8Profiles } = require('./patches/patch-v8-profiles');
+  await patchV8Profiles();
+
   const { main: patchZcallCallgate } = require('./patches/patch-zcall-callgate');
   await patchZcallCallgate();
 
   // Calls run on the native engine (zcall-native/), no Wine.
   const { main: patchZcallNative } = require('./patches/patch-zcall-native');
   await patchZcallNative();
-
-  // const { main: patchFixImageResizeLinux } = require('./patches/patch-fix-image-resize-linux');
-  // await patchFixImageResizeLinux();
-
-  // const { main: patchFixImageResizeCanvas } = require('./patches/patch-fix-image-resize-canvas');
-  // await patchFixImageResizeCanvas();
 
   const { main: patchAutoLaunch } = require('./patches/patch-auto-launch');
   await patchAutoLaunch();
@@ -320,6 +320,9 @@ async function extractAppAsar() {
 
   const { main: patchflatpakFileTransfer } = require('./patches/patch-flatpak-file-transfer');
   await patchflatpakFileTransfer();
+
+  const { main: patchZwalker } = require('./patches/patch-zwalker');
+  await patchZwalker();
 
   // The call window's icons, sounds and fonts, from the macOS app.
   await require('./extract-zcall-assets').main();
