@@ -143,15 +143,17 @@ async function build(buildName = '', outputSuffix = '') {
           logger.warn('Could not read ZaDark version, using "unknown"');
         }
       }
+      const versionTagZaDark = `${ZALO_VERSION}+zadark${zadarkVersion}-${commitHash}`;
 
       artifactName = `Zalo-${ZALO_VERSION}+ZaDark-${zadarkVersion}-${commitHash}${archSuffix}.AppImage`;
       buildCommand = `npx electron-builder --linux --config.linux.artifactName="${artifactName}" -c.extraMetadata.version=${ZALO_VERSION} --publish=never`;
-      buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${ZALO_VERSION}" "${artifactName}" "${DIST_DIR}"`;
+      buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${versionTagZaDark}" "${artifactName}" "${DIST_DIR}"`;
       logger.info(`Building ${buildName} with Zalo: ${ZALO_VERSION}, ZaDark: ${zadarkVersion}, Commit: ${commitHash}`);
     } else {
+      const versionTagOriginal = `${ZALO_VERSION}-${commitHash}`;
       artifactName = `Zalo-${ZALO_VERSION}-Original-${commitHash}${archSuffix}.AppImage`;
       buildCommand = `npx electron-builder --linux --config.linux.artifactName="${artifactName}" -c.extraMetadata.version=${ZALO_VERSION} --publish=never`;
-      buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${ZALO_VERSION}" "${artifactName}" "${DIST_DIR}"`;
+      buildCommandst2 = `chmod +x "${St2script}" && "${St2script}" "${versionTagOriginal}" "${artifactName}" "${DIST_DIR}"`;
       logger.info(`Building ${buildName} with Zalo: ${ZALO_VERSION}, Commit: ${commitHash}`);
     }
     // Write build-info.json to the app directory so the AppImage will contain its metadata
