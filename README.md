@@ -6,7 +6,7 @@
 
 An unofficial, community-driven port of the Zalo desktop application for **Linux only**, created by repackaging the official macOS client into a standard AppImage with integrated ZaDark.
 
-Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.com/realdtn2/zalo-linux-2026).
+Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.com/DMKha241/zalo-linux-2026) (original repo is deleted/hidden, we are using a backup repo from [DMKha241](https://github.com/DMKha241)).
 
 ## ⚠️ Important: Known Issues
 
@@ -187,6 +187,16 @@ If you encounter issues or want to inspect the app's behavior, you can easily op
 - [nativelibs/README.md](./nativelibs/README.md) — Native addons (db-cross-v4, etc.)
 - [zcall-native/README.md](./zcall-native/README.md) — native call engine
 
-## 📄 License
+## 📄 License & Disclaimer
 
-This project is licensed under the MIT License. Zalo is a trademark of VNG Corporation. This project is not affiliated with or endorsed by VNG Corporation.
+### License
+
+This project is licensed under the BSD 3-Clause.
+
+### Disclaimer
+
+This project is **an unofficial port and is not affiliated with, endorsed by, or sponsored by Zalo or VNG Corporation**. 
+
+Zalo is a trademark of VNG Corporation. This software **is provided for educational and personal use only**. **Users are responsible for complying with applicable terms of service and laws**. 
+
+This project **does not endorse, verify, or take responsibility** for any third-party forks OR forks requesting donations; any modified versions or forks containing malware operate completely independently and without our authorization, according to BSD 3-Clause license, Clause 3.

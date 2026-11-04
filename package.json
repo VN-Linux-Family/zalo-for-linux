@@ -26,8 +26,8 @@
     "messaging",
     "linux"
   ],
-  "author": "doandat943",
-  "license": "MIT",
+  "author": "Việt Nam Linux Family <developer@vietnamlinuxfamily.net>",
+  "license": "BSD-3-Clause",
   "homepage": "https://github.com/VN-Linux-Family/zalo-for-linux",
   "repository": {
     "type": "git",
