@@ -87,10 +87,8 @@ The repository is a flake that installs the release AppImage, with what calls ne
      };
    }
    ```
-2. Enable it in `configuration.nix`. Zalo is proprietary, so allow it as unfree:
+2. Enable it in `configuration.nix`:
    ```nix
-   nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "zalo";
-
    programs.zalo = {
      enable = true;
      # variant = "original";  # the AppImage without ZaDark
@@ -104,6 +102,44 @@ The repository is a flake that installs the release AppImage, with what calls ne
    sudo nixos-rebuild switch
    ```
    *Note: each rebuild deletes the old AppImages from the Releases page. If `nixos-rebuild` fails to download the file (404), run `nix flake update zalo-for-linux` to point the flake to the latest build, then rebuild.*
+
+#### For Home Manager users:
+
+The flake also has a Home Manager module with the same `programs.zalo` options, which installs Zalo for your user only (on NixOS or any other distro).
+
+1. Add the flake to your `flake.nix` and import its module:
+   ```nix
+   {
+     inputs.zalo-for-linux = {
+       url = "github:VN-Linux-Family/zalo-for-linux";
+       inputs.nixpkgs.follows = "nixpkgs";
+     };
+
+     outputs = { nixpkgs, home-manager, zalo-for-linux, ... }: {
+       homeConfigurations.<username> = home-manager.lib.homeManagerConfiguration {
+         pkgs = nixpkgs.legacyPackages.x86_64-linux;
+         modules = [
+           zalo-for-linux.homeModules.default
+           ./home.nix
+         ];
+       };
+     };
+   }
+   ```
+   If you use Home Manager as a NixOS module, add `zalo-for-linux.homeModules.default` to `home-manager.sharedModules` (or to the `imports` of your user's config) instead.
+2. Enable it in `home.nix`:
+   ```nix
+   programs.zalo = {
+     enable = true;
+     # variant = "original";  # the AppImage without ZaDark
+   };
+   ```
+3. Apply it with `home-manager switch` (or `sudo nixos-rebuild switch` if Home Manager is a NixOS module).
+4. How to update:
+   ```bash
+   nix flake update zalo-for-linux
+   home-manager switch
+   ```
 
 To try it without installing: `nix run github:VN-Linux-Family/zalo-for-linux`.
 

@@ -87,10 +87,8 @@ Repo này là một flake, cài Zalo từ file AppImage của bản phát hành,
      };
    }
    ```
-2. Bật Zalo trong `configuration.nix`. Zalo là phần mềm độc quyền nên cần cho phép gói unfree:
+2. Bật Zalo trong `configuration.nix`:
    ```nix
-   nixpkgs.config.allowUnfreePredicate = pkg: lib.getName pkg == "zalo";
-
    programs.zalo = {
      enable = true;
      # variant = "original";  # bản AppImage không có ZaDark
@@ -104,6 +102,44 @@ Repo này là một flake, cài Zalo từ file AppImage của bản phát hành,
    sudo nixos-rebuild switch
    ```
    *Lưu ý: mỗi lần build lại, file AppImage cũ trên trang Releases bị xoá. Nếu `nixos-rebuild` báo lỗi tải file (404), hãy chạy `nix flake update zalo-for-linux` để flake trỏ sang bản mới nhất rồi rebuild lại.*
+
+#### Nếu bạn dùng Home Manager
+
+Flake cũng có module cho Home Manager với các option `programs.zalo` giống hệt, cài Zalo cho riêng người dùng của bạn (trên NixOS hay distro nào cũng được).
+
+1. Thêm flake vào `flake.nix` và import module của nó:
+   ```nix
+   {
+     inputs.zalo-for-linux = {
+       url = "github:VN-Linux-Family/zalo-for-linux";
+       inputs.nixpkgs.follows = "nixpkgs";
+     };
+
+     outputs = { nixpkgs, home-manager, zalo-for-linux, ... }: {
+       homeConfigurations.<username> = home-manager.lib.homeManagerConfiguration {
+         pkgs = nixpkgs.legacyPackages.x86_64-linux;
+         modules = [
+           zalo-for-linux.homeModules.default
+           ./home.nix
+         ];
+       };
+     };
+   }
+   ```
+   Nếu bạn dùng Home Manager dưới dạng module của NixOS, hãy thêm `zalo-for-linux.homeModules.default` vào `home-manager.sharedModules` (hoặc vào `imports` trong config người dùng).
+2. Bật Zalo trong `home.nix`:
+   ```nix
+   programs.zalo = {
+     enable = true;
+     # variant = "original";  # bản AppImage không có ZaDark
+   };
+   ```
+3. Áp dụng bằng lệnh `home-manager switch` (hoặc `sudo nixos-rebuild switch` nếu Home Manager là module của NixOS).
+4. Cách cập nhật:
+   ```bash
+   nix flake update zalo-for-linux
+   home-manager switch
+   ```
 
 Muốn chạy thử mà không cài: `nix run github:VN-Linux-Family/zalo-for-linux`.
 

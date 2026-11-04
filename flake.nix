@@ -4,7 +4,7 @@
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs =
-    { nixpkgs, ... }:
+    { self, nixpkgs, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -34,6 +34,11 @@
         zalo = final.callPackage ./nix/package.nix { };
       };
 
-      nixosModules.default = ./nix/module.nix;
+      # The modules take `self` so `programs.zalo.package` defaults to
+      # `self.packages`, which already allows Zalo as unfree.
+      nixosModules.default = import ./nix/module.nix self;
+      homeModules.default = import ./nix/hm-module.nix self;
+      # Older name for the Home Manager module, kept for existing configs.
+      homeManagerModules.default = self.homeModules.default;
     };
 }
