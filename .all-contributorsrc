@@ -1,0 +1,202 @@
+{
+  "projectName": "zalo-for-linux",
+  "projectOwner": "VN-Linux-Family",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md",
+    "readme/README.vi.md"
+  ],
+  "imageSize": 100,
+  "commit": false,
+  "contributorsPerLine": 7,
+  "linkToUsage": false,
+  "contributors": [
+    {
+      "login": "doandat943",
+      "name": "DANG DOAN DAT",
+      "avatar_url": "https://avatars.githubusercontent.com/u/113295259?v=4",
+      "profile": "https://github.com/doandat943",
+      "contributions": [
+        "code",
+        "doc",
+        "infra",
+        "maintenance"
+      ]
+    },
+    {
+      "login": "nhktmdzhg",
+      "name": "Nguyen Hoang Ky",
+      "avatar_url": "https://avatars.githubusercontent.com/u/57983253?v=4",
+      "profile": "https://github.com/nhktmdzhg",
+      "contributions": [
+        "code",
+        "doc",
+        "infra"
+      ]
+    },
+    {
+      "login": "DMKha241",
+      "name": "DMKha",
+      "avatar_url": "https://avatars.githubusercontent.com/u/237471390?v=4",
+      "profile": "https://github.com/DMKha241",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "nct88",
+      "name": "truong.me",
+      "avatar_url": "https://avatars.githubusercontent.com/u/55949169?v=4",
+      "profile": "https://truong.me/",
+      "contributions": [
+        "code",
+        "doc"
+      ]
+    },
+    {
+      "login": "imngkhang",
+      "name": "imngkhang",
+      "avatar_url": "https://avatars.githubusercontent.com/u/237411516?v=4",
+      "profile": "https://github.com/imngkhang",
+      "contributions": [
+        "code",
+        "doc"
+      ]
+    },
+    {
+      "login": "ngxccc",
+      "name": "Ngoc Tran",
+      "avatar_url": "https://avatars.githubusercontent.com/u/163379246?v=4",
+      "profile": "https://ngxccc.github.io/",
+      "contributions": [
+        "code",
+        "test",
+        "infra"
+      ]
+    },
+    {
+      "login": "akimiya7742",
+      "name": "Akimiya",
+      "avatar_url": "https://avatars.githubusercontent.com/u/105062613?v=4",
+      "profile": "https://github.com/akimiya7742",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "anupamme",
+      "name": "Anupam Mediratta",
+      "avatar_url": "https://avatars.githubusercontent.com/u/667857?v=4",
+      "profile": "https://orbisappsec.com/",
+      "contributions": [
+        "code",
+        "security"
+      ]
+    },
+    {
+      "login": "justanoobcoder",
+      "name": "Nguyễn Hồng Hiệp",
+      "avatar_url": "https://avatars.githubusercontent.com/u/57614330?v=4",
+      "profile": "https://github.com/justanoobcoder",
+      "contributions": [
+        "code",
+        "infra"
+      ]
+    },
+    {
+      "login": "namtao",
+      "name": "namtao",
+      "avatar_url": "https://avatars.githubusercontent.com/u/48555338?v=4",
+      "profile": "https://retec.vn/",
+      "contributions": [
+        "code",
+        "doc"
+      ]
+    },
+    {
+      "login": "mncc8337",
+      "name": "mncc",
+      "avatar_url": "https://avatars.githubusercontent.com/u/134080447?v=4",
+      "profile": "https://github.com/mncc8337",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "hainguyents13",
+      "name": "Hải Nguyễn",
+      "avatar_url": "https://avatars.githubusercontent.com/u/9494293?v=4",
+      "profile": "https://github.com/hainguyents13",
+      "contributions": [
+        "doc",
+        "translation"
+      ]
+    },
+    {
+      "login": "dont-wait",
+      "name": "sang-nt",
+      "avatar_url": "https://avatars.githubusercontent.com/u/157901375?v=4",
+      "profile": "https://github.com/dont-wait",
+      "contributions": [
+        "code",
+        "doc"
+      ]
+    },
+    {
+      "login": "NguyenDuc2309",
+      "name": "Nguyễn Đức",
+      "avatar_url": "https://avatars.githubusercontent.com/u/195840290?v=4",
+      "profile": "https://github.com/NguyenDuc2309",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "collyn",
+      "name": "Nguyen Tien Huy",
+      "avatar_url": "https://avatars.githubusercontent.com/u/13034759?v=4",
+      "profile": "https://github.com/collyn",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "hthienloc",
+      "name": "Huỳnh Thiện Lộc",
+      "avatar_url": "https://avatars.githubusercontent.com/u/148019203?v=4",
+      "profile": "https://github.com/hthienloc",
+      "contributions": [
+        "doc"
+      ]
+    },
+    {
+      "login": "brucenguyen1102",
+      "name": "Bruce Nguyen",
+      "avatar_url": "https://avatars.githubusercontent.com/u/49108434?v=4",
+      "profile": "https://github.com/brucenguyen1102",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "lolmc0587",
+      "name": "Tom",
+      "avatar_url": "https://avatars.githubusercontent.com/u/59377673?v=4",
+      "profile": "https://github.com/lolmc0587",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "mrd9999",
+      "name": "MrD",
+      "avatar_url": "https://avatars.githubusercontent.com/u/224975069?v=4",
+      "profile": "https://github.com/mrd9999",
+      "contributions": [
+        "promotion",
+        "maintenance"
+      ]
+    }
+  ]
+}
