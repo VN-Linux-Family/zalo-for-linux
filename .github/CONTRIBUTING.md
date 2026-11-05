@@ -1,6 +1,5 @@
 # Contributing to Zalo for Linux
 
-**English** | [Tiếng Việt](./readme/CONTRIBUTING.vi.md)
 
 Thanks for taking the time to contribute. Zalo for Linux is a port that originates from the official macOS build and repackages it with patches for Linux.
 
@@ -8,23 +7,23 @@ Thanks for taking the time to contribute. Zalo for Linux is a port that originat
 
 Read the documents that explain how the project works:
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — the build pipeline and how the patches are applied
-- [DEVELOPMENT.md](./DEVELOPMENT.md) — building from source, the scripts, environment variables, adding patches
-- [FEATURES.md](./FEATURES.md) — what this port adds over the official client
-- [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) — known limitations and the history of resolved bugs
+- [docs/dev/architecture.md](../docs/dev/architecture.md) — the build pipeline and how the patches are applied
+- [docs/dev/development.md](../docs/dev/development.md) — building from source, the scripts, environment variables, adding patches
+- [docs/user/features.md](../docs/user/features.md) — what this port adds over the official client
+- [docs/user/known-issues.md](../docs/user/known-issues.md) — known limitations and the history of resolved bugs
 
 Then look through the [issues](https://github.com/VN-Linux-Family/zalo-for-linux/issues) and pull requests that already exist before starting: someone may be doing the same work.
 
-Zalo itself is proprietary. Please never commit Zalo binaries, extracted `app.asar` contents, or prebuilt `.node` files — the native addons are always rebuilt from source and no proprietary code ships in this repository ([nativelibs/README.md](./nativelibs/README.md)).
+Zalo itself is proprietary. Please never commit Zalo binaries, extracted `app.asar` contents, or prebuilt `.node` files — the native addons are always rebuilt from source and no proprietary code ships in this repository ([nativelibs/README.md](../nativelibs/README.md)).
 
 ## Ways to contribute
 
 - **Bug reports** — see [Reporting bugs](#reporting-bugs).
 - **Feature requests** — see [Feature requests](#feature-requests).
 - **Code** — JavaScript patches in `scripts/patches/`, Rust and gyp addons in `nativelibs/` and `zocr/`, Node.js and Python in `zcall-native/`.
-- **Documentation** — keep the English and Vietnamese versions in sync (see [Documentation](#documentation)).
+- **Documentation** — keep documentation accurate and clear (see [Documentation](#documentation)).
 - **Testing** — especially on aarch64
-- **Packaging** — the AppImage is the official artifact; the repository also has a Nix flake (see the NixOS section in [README.md](./README.md)).
+- **Packaging** — the AppImage is the official artifact; the repository also has a Nix flake (see the NixOS section in [README.md](../README.md)).
 
 ## Development setup
 
@@ -52,11 +51,11 @@ npm run main:build      # package the AppImage from app/
 npm run start           # run the extracted app in development mode
 ```
 
-For the full list of scripts, environment variables (`ZALO_VERSION`, `ZADARK_VERSION`, `FORCE_DOWNLOAD`) and how to add a patch, see [DEVELOPMENT.md](./DEVELOPMENT.md).
+For the full list of scripts, environment variables (`ZALO_VERSION`, `ZADARK_VERSION`, `FORCE_DOWNLOAD`) and how to add a patch, see [DEVELOPMENT.md](../docs/dev/development.md).
 
 ## Code style
 
-Patches live one per file in `scripts/patches/patch-<name>.js` and export `{ main }`. Always check that the expected pattern exists before replacing — a Zalo update changes the code, so the pattern is no longer found to patch — then register the patch in `scripts/prepare-app.js` (see "Adding a New Patch" in [DEVELOPMENT.md](./DEVELOPMENT.md)).
+Patches live one per file in `scripts/patches/patch-<name>.js` and export `{ main }`. Always check that the expected pattern exists before replacing — a Zalo update changes the code, so the pattern is no longer found to patch — then register the patch in `scripts/prepare-app.js` (see "Adding a New Patch" in [DEVELOPMENT.md](../docs/dev/development.md)).
 
 ## Tests
 
@@ -77,19 +76,11 @@ for c in nativelibs/*/Cargo.toml; do cargo test --manifest-path "$c" --locked; d
 Optional benchmarks: `npm run bench` and `npm run bench:patches`.
 
 ## Documentation
+Documentation is organized centrally under `docs/`:
 
-Every document exists twice: `<NAME>.md` at the repository root (English) and `readme/<NAME>.vi.md` (Vietnamese). Both carry a language switcher directly below the title:
-
-```markdown
-**English** | [Tiếng Việt](./readme/<NAME>.vi.md)
-```
-
-```markdown
-[English](../<NAME>.md) | **Tiếng Việt**
-```
-
-Update both versions in the same pull request.
-
+- **Developer & Technical Documentation** (`docs/dev/`): 100% English SSOT (`architecture.md`, `development.md`).
+- **User Documentation** (`docs/user/` and root `README`): Available in English and Vietnamese (`README.md` / `README.vi.md`, `known-issues.md` / `known-issues.vi.md`).
+- **Component Documentation**: Modules in `nativelibs/` and submodules in `plugins/` contain code-colocated documentation.
 ## Commits and pull requests
 
 Pull requests target **`main`**.
@@ -99,7 +90,7 @@ Pull requests target **`main`**.
 - Always rebase on `main` before opening the PR.
 - The `app.setName` in `main.js` and the StartupWMClass entry in the `build` section of `package.json` **must be `Zalo`**.
 - If you develop a new feature, please test it locally first, then capture a screenshot (if it contains your private infomation, please blur them, otherwise **we will delete your screenshot for your privacy**).
-- If you add/update a new Native addon, please update [ARCHITECTURE.md](./ARCHITECTURE.md) and [nativelibs/README.md](./nativelibs/README.md) (including their Vietnamese version), so that newcomers can understand what your addon will do.
+- If you add/update a new Native addon, please update [architecture.md](../docs/dev/architecture.md) and [nativelibs/README.md](../nativelibs/README.md), so that newcomers can understand what your addon will do.
 - Commit subject: follow the convention — see [this link](https://www.conventionalcommits.org/en/v1.0.0/).
 - Pull request description: what changed and why, `Closes #N` when it fixes an issue, the platform you tested (x86_64 or aarch64, X11 or Wayland), and screenshots for UI changes.
 
@@ -109,7 +100,7 @@ Checklist before opening:
 - [ ] No generated files (`app/`, `temp/`, `dist/`, `node_modules/`).
 - [ ] No prebuilt binaries or `.node` files.
 - [ ] Tested locally and captured the screenshot.
-- [ ] Documentation updated in both languages (if the changes are in `nativelibs`).
+- [ ] Documentation updated (if your change affects user guides or dev specs).
 
 ## Reporting bugs
 
@@ -122,7 +113,7 @@ Include:
 
 ## Feature requests
 
-Check [FEATURES.md](./FEATURES.md), [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) and the existing issues first. Describe the use case and why it belongs in this port rather than in Zalo itself.
+Check [features.md](../docs/user/features.md), [known-issues.md](../docs/user/known-issues.md) and the existing issues first. Describe the use case and why it belongs in this port rather than in Zalo itself.
 
 ## AI usage
 
@@ -175,7 +166,7 @@ Do not open a public issue for a vulnerability. Use the **Security** tab of the 
 
 ## License
 
-By contributing you agree that your contributions are licensed under the same license as the project — see [LICENSE](./LICENSE). This repository has no CLA. Zalo is a trademark of VNG Corporation; this project is not affiliated with or endorsed by VNG Corporation.
+By contributing you agree that your contributions are licensed under the same license as the project — see [LICENSE](../LICENSE). This repository has no CLA. Zalo is a trademark of VNG Corporation; this project is not affiliated with or endorsed by VNG Corporation.
 
 ## Code of conduct
 

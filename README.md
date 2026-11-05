@@ -1,6 +1,6 @@
 # Zalo for Linux 🐧
 
-**English** | [Tiếng Việt](./readme/README.vi.md)
+**English** | [Tiếng Việt](./README.vi.md)
 
 [![Build Status](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml/badge.svg)](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml)
 
@@ -12,7 +12,7 @@ Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.
 
 ## ⚠️ Important: Known Issues
 
-> 💡 **For the full list of resolved issues, workarounds, and community credits, see [KNOWN_ISSUES.md](./KNOWN_ISSUES.md).**
+> 💡 **For the full list of resolved issues, workarounds, and community credits, see [KNOWN_ISSUES.md](./docs/user/known-issues.md).**
 
 This project is best suited for users who need a native-feeling Zalo client on Linux and are comfortable with the technical workarounds required for full functionality.
 
@@ -20,7 +20,7 @@ This project is best suited for users who need a native-feeling Zalo client on L
 
 This project added some features in the app, that the official version doesn't have equivalents.
 
-✨ **For the full list of the features that included in this project, see [FEATURES.md](./FEATURES.md).**
+✨ **For the full list of the features that included in this project, see [FEATURES.md](./docs/user/features.md).**
 
 ## 🚀 Quick Start
 
@@ -192,7 +192,7 @@ npm run main
 
 The final AppImage will be in the `dist/` directory.
 
-> For a detailed walkthrough of the build pipeline, scripts, environment variables, and how to add new patches, see [`DEVELOPMENT.md`](./DEVELOPMENT.md).
+> For a detailed walkthrough of the build pipeline, scripts, environment variables, and how to add new patches, see [`DEVELOPMENT.md`](./docs/dev/development.md).
 
 
 ## ⚙️ How It Works
@@ -205,7 +205,7 @@ This project is not a from-scratch rewrite of Zalo. It works by:
 4.  Wrapping the extracted application in a minimal, Linux-compatible Electron shell.
 5.  Using `electron-builder`, then `quick-sharun` to package everything into a single, portable `AppImage` file.
 
-For a deeper dive into the build pipeline and patching strategy, see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+For a deeper dive into the build pipeline and patching strategy, see [`ARCHITECTURE.md`](./docs/dev/architecture.md).
 
 For native addons (db-cross-v4, etc.), see [`nativelibs/README.md`](./nativelibs/README.md).
 
@@ -219,9 +219,9 @@ If you encounter issues or want to inspect the app's behavior, you can easily op
 
 ## 📚 More Documentation
 
-- [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) — Known issues, workarounds, and resolved bug history
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — How the build pipeline and patches work
-- [DEVELOPMENT.md](./DEVELOPMENT.md) — Building from source, scripts, adding patches
+- [KNOWN_ISSUES.md](./docs/user/known-issues.md) — Known issues, workarounds, and resolved bug history
+- [ARCHITECTURE.md](./docs/dev/architecture.md) — How the build pipeline and patches work
+- [DEVELOPMENT.md](./docs/dev/development.md) — Building from source, scripts, adding patches
 - [nativelibs/README.md](./nativelibs/README.md) — Native addons (db-cross-v4, etc.)
 - [zcall-native/README.md](./zcall-native/README.md) — native call engine
 

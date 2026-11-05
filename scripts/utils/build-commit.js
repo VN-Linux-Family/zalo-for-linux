@@ -11,7 +11,7 @@ function buildCommit() {
     '.gitignore',
     '**/LICENSE',
     '**/LICENSE*',
-    'readme/**',
+    'docs/**',
     'flake.nix',
     'flake.lock',
     'nix/**',

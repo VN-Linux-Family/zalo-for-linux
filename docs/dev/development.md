@@ -1,20 +1,19 @@
 # Development
 
-**English** | [Tiếng Việt](./readme/DEVELOPMENT.vi.md)
 
 This document covers building Zalo for Linux from source, including the
 toolchain, scripts, and how to add new patches or native addons.
 
 For an overview of how the project works, see
-[ARCHITECTURE.md](./ARCHITECTURE.md). For info on the native addons
-reimplementation, see [nativelibs/README.md](./nativelibs/README.md).
+[architecture.md](./architecture.md). For info on the native addons
+reimplementation, see [nativelibs/README.md](../../nativelibs/README.md).
 
 ## Prerequisites
 
 - Linux x86_64
 - Node.js and npm
 - `7z` (`p7zip-full`) for extracting the macOS app
-- C++ build tools for native addons (see [nativelibs/README.md](./nativelibs/README.md#requirements))
+- C++ build tools for native addons (see [nativelibs/README.md](../../nativelibs/README.md#requirements))
 
 On Debian/Ubuntu:
 

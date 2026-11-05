@@ -1,6 +1,5 @@
 # Architecture
 
-**English** | [Tiếng Việt](./readme/ARCHITECTURE.vi.md)
 
 This document explains how Zalo for Linux works under the hood.
 
@@ -18,11 +17,14 @@ This project is not a from-scratch rewrite of Zalo. Instead, it:
 
 ```
 zalo-for-linux/
-├── ARCHITECTURE.md # Explains how Zalo for Linux works under the hood
-├── DEVELOPMENT.md # Covers building Zalo for Linux from source
-├── KNOWN_ISSUES.md # Tracks current limitations and historical issues that have been addressed, and credits
-├── LICENSE # License file, with disclaimer
-├── main.js # Electron entrypoint
+├── .github/          # GitHub workflows and contributing guidelines
+├── docs/             # Centralized documentation (SSOT)
+│   ├── dev/          # Technical docs (Architecture, Development)
+│   └── user/         # End-user docs (Features, Known issues)
+├── LICENSE           # License file, with disclaimer
+├── main.js           # Electron entrypoint
+├── README.md         # Project homepage (English)
+├── README.vi.md      # Project homepage (Vietnamese)
 ├── nativelibs # Linux reimplementations of Zalo native addons
 │   ├── builder.js # CLI build helper
 │   ├── builder-rust.js # CLI build helper, for Rust-based addons
@@ -88,7 +90,7 @@ zalo-for-linux/
 When the macOS `app.asar` is extracted, certain modifications are needed
 for Linux compatibility. These are applied in `scripts/prepare-app.js`
 
-For more details on the native addons, see [nativelibs/README.md](./nativelibs/README.md).
+For more details on the native addons, see [nativelibs/README.md](../../nativelibs/README.md).
 
 ## Why an Electron shell?
 

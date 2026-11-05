@@ -1,6 +1,6 @@
 # Zalo for Linux 🐧
 
-[English](../README.md) | **Tiếng Việt**
+[English](./README.md) | **Tiếng Việt**
 
 [![Build Status](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml/badge.svg)](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml)
 
@@ -12,7 +12,7 @@ Cảm ơn **realdtn2** đã đưa ra giải pháp: [realdtn2/zalo-linux-2026](ht
 
 ## ⚠️ Lưu ý quan trọng: Các lỗi đã biết
 
-> 💡 **Danh sách đầy đủ các lỗi đã sửa, cách khắc phục tạm thời và ghi nhận đóng góp của cộng đồng nằm trong [KNOWN_ISSUES.vi.md](./KNOWN_ISSUES.vi.md).**
+> 💡 **Danh sách đầy đủ các lỗi đã sửa, cách khắc phục tạm thời và ghi nhận đóng góp của cộng đồng nằm trong [known-issues.vi.md](./docs/user/known-issues.vi.md).**
 
 Dự án này phù hợp nhất với những ai cần một ứng dụng Zalo chạy như ứng dụng gốc trên Linux và không ngại xử lý một vài thao tác kỹ thuật để dùng đầy đủ tính năng.
 
@@ -20,7 +20,7 @@ Dự án này phù hợp nhất với những ai cần một ứng dụng Zalo c
 
 Dự án có thêm một số tính năng mà bản Zalo chính thức không có.
 
-✨ **Danh sách đầy đủ các tính năng có trong dự án nằm trong [FEATURES.vi.md](./FEATURES.vi.md).**
+✨ **Danh sách đầy đủ các tính năng có trong dự án nằm trong [features.md](./docs/user/features.md).**
 
 ## 🚀 Bắt đầu nhanh
 
@@ -40,7 +40,7 @@ Chúng mình khuyên bạn nên dùng **Gear Lever** hoặc **AM** để AppImag
    am -i zalo
    ```
 3. Một lời nhắc như hình dưới sẽ hiện ra:
-   <img width="747" height="600" alt="installer" src="../sample/am-guide.png" />
+   <img width="747" height="600" alt="installer" src="./sample/am-guide.png" />
 
    *Bạn chọn phiên bản mình muốn, AM sẽ tự tải đúng phiên bản.*
 4. Vậy là ứng dụng **đã được cài**. Bạn có thể mở Zalo từ menu ứng dụng của hệ thống.
@@ -192,7 +192,7 @@ npm run main
 
 File AppImage hoàn chỉnh sẽ nằm trong thư mục `dist/`.
 
-> Hướng dẫn chi tiết về build pipeline, các script, biến môi trường và cách thêm patch mới nằm trong [`DEVELOPMENT.vi.md`](./DEVELOPMENT.vi.md).
+> Hướng dẫn chi tiết về build pipeline, các script, biến môi trường và cách thêm patch mới nằm trong [`development.md`](./docs/dev/development.md).
 
 ## ⚙️ Cách hoạt động
 
@@ -204,11 +204,11 @@ Dự án này không viết lại Zalo từ đầu. Cách làm như sau:
 4. Bọc ứng dụng đã giải nén trong một Electron shell tối giản, tương thích với Linux.
 5. Dùng `electron-builder`, sau đó là `quick-sharun` để đóng gói tất cả thành một file `AppImage` duy nhất, chạy được trên nhiều bản phân phối Linux.
 
-Tìm hiểu sâu hơn về build pipeline và cách patch trong [`ARCHITECTURE.vi.md`](./ARCHITECTURE.vi.md).
+Tìm hiểu sâu hơn về build pipeline và cách patch trong [`architecture.md`](./docs/dev/architecture.md).
 
-Về các native addon (db-cross-v4, v.v.), xem [`nativelibs.vi.md`](./nativelibs.vi.md).
+Về các native addon (db-cross-v4, v.v.), xem [`nativelibs/README.md`](./nativelibs/README.md).
 
-Về engine gọi điện native, xem [`zcall-native/README.md`](../zcall-native/README.md).
+Về engine gọi điện native, xem [`zcall-native/README.md`](./zcall-native/README.md).
 
 ## 🐛 Xử lý sự cố và gỡ lỗi
 
@@ -218,11 +218,11 @@ Nếu gặp lỗi hoặc muốn xem ứng dụng đang hoạt động thế nào
 
 ## 📚 Tài liệu khác
 
-- [KNOWN_ISSUES.vi.md](./KNOWN_ISSUES.vi.md): các lỗi đã biết, cách khắc phục tạm thời và lịch sử các lỗi đã sửa
-- [ARCHITECTURE.vi.md](./ARCHITECTURE.vi.md): cách build pipeline và các patch hoạt động
-- [DEVELOPMENT.vi.md](./DEVELOPMENT.vi.md): build từ mã nguồn, các script, cách thêm patch
-- [nativelibs.vi.md](./nativelibs.vi.md): các native addon (db-cross-v4, v.v.)
-- [zcall-native/README.md](../zcall-native/README.md): engine gọi điện native
+- [known-issues.vi.md](./docs/user/known-issues.vi.md): các lỗi đã biết, cách khắc phục tạm thời và lịch sử các lỗi đã sửa
+- [architecture.md](./docs/dev/architecture.md): cách build pipeline và các patch hoạt động
+- [development.md](./docs/dev/development.md): build từ mã nguồn, các script, cách thêm patch
+- [nativelibs/README.md](./nativelibs/README.md): các native addon (db-cross-v4, v.v.)
+- [zcall-native/README.md](./zcall-native/README.md): engine gọi điện native
 
 ## Những người đóng góp
 
