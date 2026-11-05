@@ -51,25 +51,41 @@ async function main() {
     // Return the local filesystem path of a file that the user copied
     // (e.g. an image file copied from a file manager). Wayland exposes
     // such copies as 'text/uri-list', so we shell out to wl-paste /
-    // xclip to read it. Returns null if the clipboard has no file URI.
-    getClipboardFilePath: () => {
-        const _rc = (t) => {
-            const _ex = require("child_process").execFileSync;
-            const _o = { timeout: 1e3, stdio: ["ignore", "pipe", "ignore"] };
-            try {
-                const _b = _ex("wl-paste", ["--type", t], _o);
-                if (_b && _b.length > 0) return _b;
-            } catch (_) {}
-            try {
-                const _b = _ex("xclip", ["-selection", "clipboard", "-t", t, "-o"], _o);
-                if (_b && _b.length > 0) return _b;
-            } catch (_) {}
-            return null;
-        };
+    // xclip asynchronously without blocking the UI thread.
+    getClipboardFilePath: async () => {
+        const _rc = (t) => new Promise((resolve) => {
+            const { execFile } = require("child_process");
+            const isWayland = Boolean(process.env.WAYLAND_DISPLAY);
+            const isX11 = Boolean(process.env.DISPLAY);
+            const _o = { timeout: 500, encoding: "buffer", maxBuffer: 10 * 1024 * 1024 };
+
+            const runCmd = (cmd, args, next) => {
+                execFile(cmd, args, _o, (err, stdout) => {
+                    if (!err && stdout && stdout.length > 0) {
+                        return resolve(stdout);
+                    }
+                    if (err && err.code === "ENOENT" && !globalThis.__zaloClipWarned) {
+                        globalThis.__zaloClipWarned = true;
+                        console.warn("[Zalo-Linux] Missing clipboard utility (" + cmd + "). Install wl-clipboard (Wayland) or xclip (X11) to paste files/images.");
+                    }
+                    if (next) next();
+                    else resolve(null);
+                });
+            };
+
+            if (isWayland) {
+                runCmd("wl-paste", ["--type", t], isX11 ? () => runCmd("xclip", ["-selection", "clipboard", "-t", t, "-o"]) : null);
+            } else if (isX11) {
+                runCmd("xclip", ["-selection", "clipboard", "-t", t, "-o"], null);
+            } else {
+                resolve(null);
+            }
+        });
+
         try {
-            const _b = _rc("text/uri-list");
+            const _b = await _rc("text/uri-list");
             if (!_b) return null;
-            const text = _b.toString().trim();
+            const text = _b.toString("utf8").trim();
             if (!text) return null;
             const uri = text.split("\\n")[0].trim();
             if (!uri.startsWith("file://")) return null;
@@ -85,21 +101,37 @@ async function main() {
     // Save the clipboard image to a temp .png file and return its path.
     // Preferred for large images (avoids base64 33% bloat). Tries the
     // Electron API first; if that yields nothing, falls back to the
-    // external clipboard tools (works on both Wayland and X11).
-    saveClipboardImageToTemp: () => {
-        const _rc = (t) => {
-            const _ex = require("child_process").execFileSync;
-            const _o = { timeout: 1e3, stdio: ["ignore", "pipe", "ignore"] };
-            try {
-                const _b = _ex("wl-paste", ["--type", t], _o);
-                if (_b && _b.length > 0) return _b;
-            } catch (_) {}
-            try {
-                const _b = _ex("xclip", ["-selection", "clipboard", "-t", t, "-o"], _o);
-                if (_b && _b.length > 0) return _b;
-            } catch (_) {}
-            return null;
-        };
+    // external clipboard tools asynchronously without blocking the UI.
+    saveClipboardImageToTemp: async () => {
+        const _rc = (t) => new Promise((resolve) => {
+            const { execFile } = require("child_process");
+            const isWayland = Boolean(process.env.WAYLAND_DISPLAY);
+            const isX11 = Boolean(process.env.DISPLAY);
+            const _o = { timeout: 500, encoding: "buffer", maxBuffer: 20 * 1024 * 1024 };
+
+            const runCmd = (cmd, args, next) => {
+                execFile(cmd, args, _o, (err, stdout) => {
+                    if (!err && stdout && stdout.length > 0) {
+                        return resolve(stdout);
+                    }
+                    if (err && err.code === "ENOENT" && !globalThis.__zaloClipWarned) {
+                        globalThis.__zaloClipWarned = true;
+                        console.warn("[Zalo-Linux] Missing clipboard utility (" + cmd + "). Install wl-clipboard (Wayland) or xclip (X11) to paste files/images.");
+                    }
+                    if (next) next();
+                    else resolve(null);
+                });
+            };
+
+            if (isWayland) {
+                runCmd("wl-paste", ["--type", t], isX11 ? () => runCmd("xclip", ["-selection", "clipboard", "-t", t, "-o"]) : null);
+            } else if (isX11) {
+                runCmd("xclip", ["-selection", "clipboard", "-t", t, "-o"], null);
+            } else {
+                resolve(null);
+            }
+        });
+
         try {
             const _fs = require("fs"), _os = require("os"), _path = require("path");
             let e = r.clipboard.readImage();
@@ -110,7 +142,7 @@ async function main() {
                 } catch (_) {}
             }
             if (e.isEmpty()) {
-                const _b = _rc("image/png");
+                const _b = await _rc("image/png");
                 if (_b && _b.length > 0) {
                     const tmpPath = _path.join(_os.tmpdir(), "zalo_clip_" + Date.now() + ".png");
                     _fs.writeFileSync(tmpPath, _b);
@@ -160,7 +192,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
                 file = new File([bytes], 'image.png', { type: 'image/png' });
             } else if (window.$zelectronNative.saveClipboardImageToTemp) {
-                const tmp = window.$zelectronNative.saveClipboardImageToTemp();
+                const tmp = await window.$zelectronNative.saveClipboardImageToTemp();
                 if (tmp && !tmp.startsWith('Error')) {
                     try {
                         const res = await fetch('file://' + tmp);
@@ -172,7 +204,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 }
             }
             if (!file) {
-                const filePath = window.$zelectronNative.getClipboardFilePath && window.$zelectronNative.getClipboardFilePath();
+                const filePath = window.$zelectronNative.getClipboardFilePath && (await window.$zelectronNative.getClipboardFilePath());
                 if (filePath) {
                     const ext = filePath.split('.').pop().toLowerCase();
                     const imageExts = ['png','jpg','jpeg','gif','webp','bmp','tiff','tif','avif','jxl'];
