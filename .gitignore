@@ -5,7 +5,8 @@
 /dist/
 /build/
 /out/
-
+target/
+**/target/
 # Generated directories from scripts
 /app/
 /temp/

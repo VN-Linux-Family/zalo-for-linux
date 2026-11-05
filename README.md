@@ -12,58 +12,28 @@ Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.
 
 ## ⚡ Quick Start
 
-### 1. Direct AppImage (Fastest)
+### 1. am
 
-Download the latest `.AppImage` from [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases), make it executable, and run:
-
-```bash
-chmod +x Zalo-*.AppImage
-./Zalo-*.AppImage
-```
-
-> 📞 **Voice & Video Calls Requirement**: Install audio utilities for native call support:  
-> - **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`  
-> - **Arch Linux**: `sudo pacman -S python opus pulseaudio`  
-> - **Fedora**: `sudo dnf install python3 opus pulseaudio-utils`
-
----
-
-### 2. Package Managers & System Integration
-
-<details>
-<summary><b>⚙️ Gear Lever (Recommended Desktop Integration)</b></summary>
-
-1. Download the latest `.AppImage` from [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases).
-2. Install **Gear Lever** from [Flathub](https://flathub.org/en/apps/it.mijorus.gearlever).
-3. Open Gear Lever $\rightarrow$ click **Open** $\rightarrow$ select the downloaded `.AppImage`.
-4. Click **Move to the app menu** to integrate Zalo into your desktop application launcher.
-5. Updates are detected automatically inside Gear Lever via the **Update** button.
-
-</details>
-
-<details>
-<summary><b>📦 AM / AppMan (CLI Package Manager)</b></summary>
-
-Install and update via [AM Application Manager](https://github.com/ivan-hc/AM):
+Install and update directly using [am](https://github.com/ivan-hc/AM):
 
 ```bash
 # Install Zalo
 am -i zalo
 
-# Update Zalo along with other AM packages
+# Update Zalo
 am -u
 ```
 
 <img width="600" alt="installer" src="./sample/am-guide.png" />
 
-</details>
+---
 
-<details>
-<summary><b>❄️ NixOS & Home Manager (Declarative Flake)</b></summary>
+### 2. Nix
 
-The repository provides a Nix flake packaging the release AppImage with call dependencies.
+The repository provides a Nix flake packaging the release AppImage with call dependencies:
 
-**NixOS System Configuration (`flake.nix` + `configuration.nix`):**
+**NixOS Configuration (`flake.nix` + `configuration.nix`):**
+
 ```nix
 # flake.nix
 {
@@ -78,6 +48,7 @@ The repository provides a Nix flake packaging the release AppImage with call dep
   };
 }
 ```
+
 ```nix
 # configuration.nix
 programs.zalo = {
@@ -87,14 +58,47 @@ programs.zalo = {
 ```
 
 **Home Manager (`home.nix`):**
+
 ```nix
 programs.zalo.enable = true;
 ```
 
-**Quick Try (without installing):**
+**Quick Try without installing:**
+
 ```bash
 nix run github:VN-Linux-Family/zalo-for-linux
 ```
+
+---
+
+### 3. Other Installation Methods
+
+<details>
+<summary><b>⚙️ Gear Lever (Desktop Integration)</b></summary>
+
+1. Download the latest `.AppImage` from [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases).
+2. Install **Gear Lever** from [Flathub](https://flathub.org/en/apps/it.mijorus.gearlever).
+3. Open Gear Lever $\rightarrow$ click **Open** $\rightarrow$ select the downloaded `.AppImage`.
+4. Click **Move to the app menu** to integrate Zalo into your desktop application launcher.
+5. Updates are detected automatically inside Gear Lever via the **Update** button.
+
+</details>
+
+<details>
+<summary><b>📦 Manual AppImage Run</b></summary>
+
+Download the latest `.AppImage` from [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases), make it executable, and run:
+
+```bash
+chmod +x Zalo-*.AppImage
+./Zalo-*.AppImage
+```
+
+> 📞 **Voice & Video Calls Requirement**: Install audio utilities for native call support:
+>
+> - **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`
+> - **Arch Linux**: `sudo pacman -S python opus pulseaudio`
+> - **Fedora**: `sudo dnf install python3 opus pulseaudio-utils`
 
 </details>
 
@@ -113,20 +117,19 @@ npm run main
 The compiled AppImage will be saved in `dist/`. For build pipeline details and environment variables, see [development.md](./docs/dev/development.md).
 
 </details>
-
 ---
 
 ## 📚 Documentation & Guides
 
-| Guide | Purpose |
-| :--- | :--- |
-| [**Known Issues & Workarounds**](./docs/user/known-issues.md) | Symptom-to-fix lookup table, Ubuntu sandbox fix, and call troubleshooting. |
-| [**Feature Overview**](./docs/user/features.md) | Offline mode, system tray autostart, custom userscripts, and ZaDark theme. |
-| [**Architecture Specs**](./docs/dev/architecture.md) | Technical overview of Electron wrapping, patch pipeline, and native modules. |
-| [**Development Guide**](./docs/dev/development.md) | Setup instructions, debugging workflows, and local test commands. |
-| [**Patch Authoring Guide**](./docs/dev/patch-guide.md) | How to write, register, and maintain resilient JavaScript patches. |
-| [**CI/CD & Release Workflow**](./docs/dev/ci-workflow.md) | Upstream polling mechanism, release bot, Nix hash updates, and fork rules. |
-| [**Contributing Guidelines**](./.github/CONTRIBUTING.md) | Pull request standards, commit conventions, and testing requirements. |
+| Guide                                                         | Purpose                                                                      |
+| :------------------------------------------------------------ | :--------------------------------------------------------------------------- |
+| [**Known Issues & Workarounds**](./docs/user/known-issues.md) | Symptom-to-fix lookup table, Ubuntu sandbox fix, and call troubleshooting.   |
+| [**Feature Overview**](./docs/user/features.md)               | Offline mode, system tray autostart, custom userscripts, and ZaDark theme.   |
+| [**Architecture Specs**](./docs/dev/architecture.md)          | Technical overview of Electron wrapping, patch pipeline, and native modules. |
+| [**Development Guide**](./docs/dev/development.md)            | Setup instructions, debugging workflows, and local test commands.            |
+| [**Patch Authoring Guide**](./docs/dev/patch-guide.md)        | How to write, register, and maintain resilient JavaScript patches.           |
+| [**CI/CD & Release Workflow**](./docs/dev/ci-workflow.md)     | Upstream polling mechanism, release bot, Nix hash updates, and fork rules.   |
+| [**Contributing Guidelines**](./CONTRIBUTING.md)              | Pull request standards, commit conventions, and testing requirements.        |
 
 ---
 
@@ -134,11 +137,11 @@ The compiled AppImage will be saved in `dist/`. For build pipeline details and e
 
 This project is not a from-scratch rewrite of Zalo. It works by:
 
-1.  Downloading the official macOS `.dmg` file.
-2.  Using `7z` to extract the `app.asar` archive, which contains the main application logic written in JavaScript.
-3.  Removing incompatible native macOS files.
-4.  Wrapping the extracted application in a minimal, Linux-compatible Electron shell.
-5.  Using `electron-builder`, then `quick-sharun` to package everything into a single, portable `AppImage` file.
+1. Downloading the official macOS `.dmg` file.
+2. Using `7z` to extract the `app.asar` archive, which contains the main application logic written in JavaScript.
+3. Removing incompatible native macOS files.
+4. Wrapping the extracted application in a minimal, Linux-compatible Electron shell.
+5. Using `electron-builder`, then `quick-sharun` to package everything into a single, portable `AppImage` file.
 
 For a deeper dive into the build pipeline and patching strategy, see [`ARCHITECTURE.md`](./docs/dev/architecture.md).
 
@@ -149,6 +152,7 @@ For the native call engine, see [`zcall-native/README.md`](./zcall-native/README
 ## 🐛 Troubleshooting & Debugging
 
 If you encounter issues or want to inspect the app's behavior, you can easily open Chrome Developer Tools (DevTools) using the following methods:
+
 - **Keyboard Shortcut**: Press `Ctrl` + `Shift` + `I` while the Zalo window is focused.
 - **Tray Menu**: Right-click the Zalo tray icon and select **"Toggle DevTools"**.
 
@@ -198,12 +202,12 @@ Thanks goes to these wonderful people
 
 ### License
 
-This project is licensed under the BSD 3-Clause *“New” or “Revised”* License. 
+This project is licensed under the BSD 3-Clause _“New” or “Revised”_ License.
 
 ### Disclaimer
 
-This project is **an unofficial port and is not affiliated with, endorsed by, or sponsored by Zalo or VNG Corporation**. 
+This project is **an unofficial port and is not affiliated with, endorsed by, or sponsored by Zalo or VNG Corporation**.
 
-Zalo is a trademark of VNG Corporation. This software **is provided for educational and personal use only**. **Users are responsible for complying with applicable terms of service and laws**. 
+Zalo is a trademark of VNG Corporation. This software **is provided for educational and personal use only**. **Users are responsible for complying with applicable terms of service and laws**.
 
 This project **does not endorse, verify, or take responsibility** for any third-party forks OR forks requesting donations; any modified versions or forks containing malware operate completely independently and without our authorization, according to BSD 3-Clause license, Clause 3.

@@ -12,6 +12,7 @@ function buildCommit() {
     '**/LICENSE',
     '**/LICENSE*',
     'docs/**',
+    '.github/**',
     'flake.nix',
     'flake.lock',
     'nix/**',

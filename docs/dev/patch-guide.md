@@ -1,5 +1,6 @@
 # Patch Authoring and Maintenance Guide
 
+**English** | [Tiếng Việt](./patch-guide.vi.md)
 This document explains how JavaScript patches work in **Zalo for Linux**, how to author new patches, register them into the build pipeline, and maintain them across upstream Zalo updates.
 
 ---

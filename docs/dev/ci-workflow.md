@@ -1,5 +1,6 @@
 # Continuous Integration & Release Automation
 
+**English** | [Tiếng Việt](./ci-workflow.vi.md)
 This document outlines the CI/CD pipeline, automated release mechanism, and upstream version polling architecture configured in `.github/workflows/build.yml`.
 
 ---
