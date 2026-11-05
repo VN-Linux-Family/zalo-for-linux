@@ -10,7 +10,7 @@ function buildCommit() {
     '**/*.md',
     '.gitignore',
     '**/LICENSE',
-    '**/LICENSE.*',
+    '**/LICENSE*',
     'readme/**',
     'flake.nix',
     'flake.lock',
