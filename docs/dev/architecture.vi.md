@@ -39,6 +39,7 @@ zalo-for-linux/
 │   ├── zfile         # Đọc thông tin ổ đĩa (dung lượng trống, mount point)
 │   ├── zimage        # Xử lý ảnh và chuyển đổi định dạng
 │   ├── zjxl          # Giải mã và mã hóa ảnh JPEG XL (JXL)
+│   ├── zlang         # Nhận diện ngôn ngữ tự nhiên (whatlang)
 │   └── zwalker       # Bộ dọn rác bộ nhớ đệm media
 ├── package.json      # Metadata dự án + cấu hình electron-builder
 ├── plugins           # Các plugin/extension của Zalo for Linux
