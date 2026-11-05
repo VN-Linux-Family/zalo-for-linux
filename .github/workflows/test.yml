@@ -35,6 +35,18 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            nativelibs/*/target
+            zocr/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('nativelibs/*/Cargo.lock', 'zocr/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
 
