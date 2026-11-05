@@ -1,0 +1,43 @@
+name: ✨ Feature Request
+description: Propose a new feature, platform enhancement, or Linux-specific integration.
+title: "feat: <brief summary of requested feature>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before proposing a feature, please review our [Feature Overview](https://github.com/VN-Linux-Family/zalo-for-linux/blob/main/docs/user/features.md) and [Known Issues](https://github.com/VN-Linux-Family/zalo-for-linux/blob/main/docs/user/known-issues.md).
+        *Note: This project is an unofficial Linux repackaging wrapper. Features that require backend server changes or proprietary Zalo protocol rewrites may not be feasible.*
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem & Motivation
+      description: What limitation or user experience problem does this proposal address?
+      placeholder: "I am always frustrated when..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe how this feature should work from the user and technical perspective.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions, workarounds, or external tools you have considered.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Proposal Checklist
+      options:
+        - label: "This feature belongs in the Linux repackaging wrapper rather than requiring changes to Zalo's proprietary backend server."
+          required: true
+        - label: "I have searched existing [GitHub Issues](https://github.com/VN-Linux-Family/zalo-for-linux/issues) and [Pull Requests](https://github.com/VN-Linux-Family/zalo-for-linux/pulls) to make sure this is not a duplicate."
+          required: true

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation & Guides
+    url: https://github.com/VN-Linux-Family/zalo-for-linux#readme
+    about: Read the project setup guides, installation options, and architecture specs.
+  - name: 🛠️ Known Issues & Troubleshooting
+    url: https://github.com/VN-Linux-Family/zalo-for-linux/blob/main/docs/user/known-issues.md
+    about: Look up quick fixes for common issues like Ubuntu sandbox or audio call requirements.
