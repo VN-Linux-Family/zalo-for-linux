@@ -227,28 +227,8 @@ jobs:
       with:
         tag_name: ${{ needs.build.outputs.zalo_version }}
         name: ${{ needs.build.outputs.zalo_version }}
-        body: |
-          ### ⚡ Quick Run
-          ```bash
-          chmod +x Zalo-*.AppImage && ./Zalo-*.AppImage
-          ```
-
-          > 📞 **Voice & Video Calls**: Requires `python3`, `libopus`, and PulseAudio/PipeWire tools:  
-          > • **Debian/Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`  
-          > • **Arch Linux**: `sudo pacman -S python opus pulseaudio`  
-          > • **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`  
-          > • **openSUSE**: `sudo zypper install python3 libopus0 pulseaudio-utils`  
-          > • **Gentoo**: `sudo emerge --ask dev-lang/python media-libs/opus media-sound/pulseaudio-daemon`
-
-          ### 📦 Assets Guide
-          - **Architecture**: `x86_64` (Intel/AMD) or `aarch64` (ARM64).
-          - **Variants**: `Original` (standard theme) or `+ZaDark` (integrated dark mode & privacy).
-          - *Note: Download `.AppImage` files. Files ending in `.AppImage.zsync` are for delta updates only.*
-
-          ### 📖 Documentation & Integration
-          - **Desktop Integration (Gear Lever, AM, NixOS)**: See [Quick Start Guide](https://github.com/${{ github.repository }}#readme).
-          - **Troubleshooting & Known Issues**: See [Known Issues & Fixes](https://github.com/${{ github.repository }}/blob/main/docs/user/known-issues.md).
-          - **Bug Reports**: Open an issue in [GitHub Issues](https://github.com/${{ github.repository }}/issues).
+        body_path: .github/release-template.md
+        generate_release_notes: true
         files: dist/*.AppImage*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
