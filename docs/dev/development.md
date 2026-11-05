@@ -102,6 +102,8 @@ A single DMG is auto-selected.
 
 ## Adding a New Patch
 
+> For a comprehensive walkthrough on authoring resilient patches, execution order, and testing, see [patch-guide.md](./patch-guide.md).
+
 Patches live in `scripts/patches/` as individual files. To add a new patch:
 
 1. Create `scripts/patches/patch-<name>.js`:

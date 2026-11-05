@@ -9,6 +9,8 @@ Read the documents that explain how the project works:
 
 - [docs/dev/architecture.md](../docs/dev/architecture.md) — the build pipeline and how the patches are applied
 - [docs/dev/development.md](../docs/dev/development.md) — building from source, the scripts, environment variables, adding patches
+- [docs/dev/patch-guide.md](../docs/dev/patch-guide.md) — how to write, test, and maintain JavaScript patches
+- [docs/dev/ci-workflow.md](../docs/dev/ci-workflow.md) — GitHub Actions CI/CD, upstream polling, and release bot
 - [docs/user/features.md](../docs/user/features.md) — what this port adds over the official client
 - [docs/user/known-issues.md](../docs/user/known-issues.md) — known limitations and the history of resolved bugs
 

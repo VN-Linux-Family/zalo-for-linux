@@ -76,8 +76,7 @@ zalo-for-linux/
 
 ## Build Pipeline
 
-`npm run main` runs the full pipeline:
-
+`npm run main` runs the full pipeline (for automated CI/CD and release details, see [ci-workflow.md](./ci-workflow.md)):
 1. **check-versions** — Compares local vs latest Zalo release
 2. **download** — Downloads `ZaloSetup-universal-<version>.dmg` and `ZaloSetup-<version>.exe` to `temp/`
 3. **prepare-zadark** — Builds ZaDark assets (cloned from submodule)
@@ -87,11 +86,9 @@ zalo-for-linux/
 
 ## Extracted App Patches
 
-When the macOS `app.asar` is extracted, certain modifications are needed
-for Linux compatibility. These are applied in `scripts/prepare-app.js`
+When the macOS `app.asar` is extracted, certain modifications are needed for Linux compatibility. These are applied in `scripts/prepare-app.js`. For detailed instructions on writing and maintaining patches, see [patch-guide.md](./patch-guide.md).
 
 For more details on the native addons, see [nativelibs/README.md](../../nativelibs/README.md).
-
 ## Why an Electron shell?
 
 The extracted Zalo app is an Electron app designed for macOS. We:
