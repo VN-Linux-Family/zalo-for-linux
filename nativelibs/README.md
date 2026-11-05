@@ -102,11 +102,18 @@ Building addons requires:
 - OpenSSL development headers (`libssl-dev`) — for crypto addons
 - LZMA development headers (`liblzma-dev`) — for compression addons
 
-On Debian/Ubuntu:
-
-```bash
-sudo apt install -y build-essential libssl-dev liblzma-dev
-```
+- **Debian / Ubuntu**:
+  ```bash
+  sudo apt install -y build-essential libssl-dev liblzma-dev clang libclang-dev llvm
+  ```
+- **Arch Linux**:
+  ```bash
+  sudo pacman -S base-devel openssl xz clang llvm
+  ```
+- **Fedora / RHEL**:
+  ```bash
+  sudo dnf install @development-tools openssl-devel xz-devel clang llvm
+  ```
 
 ## Source vs. Binary
 

@@ -102,11 +102,18 @@ File nhị phân sau khi biên dịch sẽ nằm tại:
 - Header phát triển của OpenSSL (`libssl-dev`) — cho các addon mã hóa
 - Header phát triển của LZMA (`liblzma-dev`) — cho các addon nén dữ liệu
 
-Trên Debian/Ubuntu:
-
-```bash
-sudo apt install -y build-essential libssl-dev liblzma-dev clang libclang-dev llvm
-```
+- **Debian / Ubuntu**:
+  ```bash
+  sudo apt install -y build-essential libssl-dev liblzma-dev clang libclang-dev llvm
+  ```
+- **Arch Linux**:
+  ```bash
+  sudo pacman -S base-devel openssl xz clang llvm
+  ```
+- **Fedora / RHEL**:
+  ```bash
+  sudo dnf install @development-tools openssl-devel xz-devel clang llvm
+  ```
 
 ## Mã nguồn hay file nhị phân
 

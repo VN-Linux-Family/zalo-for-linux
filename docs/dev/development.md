@@ -15,11 +15,18 @@ reimplementation, see [nativelibs/README.md](../../nativelibs/README.md).
 - `7z` (`p7zip-full`) for extracting the macOS app
 - C++ build tools for native addons (see [nativelibs/README.md](../../nativelibs/README.md#requirements))
 
-On Debian/Ubuntu:
-
-```bash
-sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev
-```
+- **Debian / Ubuntu**:
+  ```bash
+  sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev clang libclang-dev llvm
+  ```
+- **Arch Linux**:
+  ```bash
+  sudo pacman -S p7zip base-devel openssl xz clang llvm
+  ```
+- **Fedora / RHEL**:
+  ```bash
+  sudo dnf install p7zip p7zip-plugins @development-tools openssl-devel xz-devel clang llvm
+  ```
 
 ## Quick Start
 

@@ -13,11 +13,18 @@ Tài liệu này hướng dẫn cách build Zalo for Linux từ mã nguồn, bao
 - `7z` (`p7zip-full`) để giải nén gói ứng dụng macOS
 - Bộ công cụ biên dịch C++ và Rust cho các native addon (xem [nativelibs/README.vi.md](../../nativelibs/README.vi.md))
 
-Cài đặt trên Debian/Ubuntu:
-
-```bash
-sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev clang libclang-dev llvm
-```
+- **Debian / Ubuntu**:
+  ```bash
+  sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev clang libclang-dev llvm
+  ```
+- **Arch Linux**:
+  ```bash
+  sudo pacman -S p7zip base-devel openssl xz clang llvm
+  ```
+- **Fedora / RHEL**:
+  ```bash
+  sudo dnf install p7zip p7zip-plugins @development-tools openssl-devel xz-devel clang llvm
+  ```
 
 ## Bắt đầu nhanh
 

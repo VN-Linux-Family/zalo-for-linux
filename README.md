@@ -98,7 +98,7 @@ chmod +x Zalo-*.AppImage
 >
 > - **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`
 > - **Arch Linux**: `sudo pacman -S python opus pulseaudio`
-> - **Fedora**: `sudo dnf install python3 opus pulseaudio-utils`
+> - **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`
 
 </details>
 

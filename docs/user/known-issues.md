@@ -7,7 +7,7 @@ Quick diagnostic lookup table for common runtime and configuration issues on Lin
 | Symptom / Error | Root Cause | Quick Fix |
 | :--- | :--- | :--- |
 | **Crash on launch (Ubuntu 23.10+)** | Unprivileged user namespaces restricted by AppArmor | Add `--no-sandbox` to Zalo launcher command or `.desktop` entry. |
-| **Calls fail (Audio / Mic / Video)** | Missing system Opus codecs and PulseAudio utilities | Install required packages:<br>• **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`<br>• **Arch Linux**: `sudo pacman -S python opus pulseaudio`<br>• **Fedora**: `sudo dnf install python3 opus pulseaudio-utils` |
+| **Calls fail (Audio / Mic / Video)** | Missing system Opus codecs and PulseAudio utilities | Install required packages:<br>• **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`<br>• **Arch Linux**: `sudo pacman -S python opus pulseaudio`<br>• **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils` |
 | **Cannot paste images (`Ctrl+V`)** | Missing clipboard tool for Wayland/X11 | Install `wl-clipboard` (Wayland) or `xclip` (X11). |
 | **Dark mode does not follow system** | Application defaults to static theme | Built-in real-time detection via GNOME D-Bus and XDG Desktop Portal is enabled in current builds. |
 | **Missing desktop shortcut** | Manual AppImage execution without integration | Use [Gear Lever](https://flathub.org/en/apps/it.mijorus.gearlever) to integrate into desktop menu, or create `~/.local/share/applications/zalo.desktop`. |
