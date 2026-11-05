@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 const APP_DIR = path.join(__dirname, '..', '..', 'app');
 const MAIN_DIR = path.join(APP_DIR, 'main-dist');
@@ -8,14 +9,32 @@ const LINUX_DIRECTORY_GUARD_PATTERN =
   /if\("linux"===process\.platform&&([A-Za-z_$][\w$]*)\.isDirectory\(\)\)return [A-Za-z_$][\w$]*\(e\)/;
 
 function patchShellOpenLinux(content) {
+  if (LINUX_DIRECTORY_GUARD_PATTERN.test(content)) return content;
+
+  try {
+    const root = parseAst(content);
+    const openFn = root.find('function $FN($E) { return $OBJ.shell.openPath($E); }');
+    const dirCheck = root.find('if (!$STAT.isDirectory()) { $$$BODY }');
+    if (openFn && dirCheck) {
+      const openPath = openFn.getMatch('FN').text();
+      const stat = dirCheck.getMatch('STAT').text();
+      const body = dirCheck.field('consequence');
+      const edit = dirCheck.replace(
+        `if("linux"===process.platform&&${stat}.isDirectory())return ${openPath}(e);if(!${stat}.isDirectory()){${body.text().slice(1)}`
+      );
+      logger.dim('Patched shell.openPath via AST');
+      return applyEdits(root, [edit]);
+    }
+  } catch (err) {
+    logger.warn('AST shell-open patch skipped, using fallback:', err.message);
+  }
+
   const shellModuleStart = content.indexOf('Mz8P:function');
   if (shellModuleStart === -1) {
     throw new Error('Shell module not found.');
   }
 
   const shellModule = content.slice(shellModuleStart);
-  if (LINUX_DIRECTORY_GUARD_PATTERN.test(shellModule)) return content;
-
   const openPathMatch = shellModule.match(
     /function ([A-Za-z_$][\w$]*)\(e\)\{return [A-Za-z_$][\w$]*\.shell\.openPath\(e\)\}/
   );
@@ -35,7 +54,7 @@ function patchShellOpenLinux(content) {
   const patchedShellModule = shellModule.replace(
     directoryBranchPattern,
     `if(${stat}){if("linux"===process.platform&&${stat}.isDirectory())return ${openPath}(e);` +
-      `if(!${stat}.isDirectory()){`
+    `if(!${stat}.isDirectory()){`
   );
   return content.slice(0, shellModuleStart) + patchedShellModule;
 }
