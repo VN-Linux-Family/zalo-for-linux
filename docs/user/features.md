@@ -1,80 +1,66 @@
-# Features added in this project that original Zalo doesn't have ✨
+# Feature Overview ✨
 
+**English** | [Tiếng Việt](./features.vi.md)
 
-This document show the added features included in **Zalo for Linux**, which doesn't have in the official version.
+This document highlights features added to **Zalo for Linux** that are not present in the official Zalo client.
 
 ---
 
-## Open Zalo offline
+### 🌐 1. Offline Mode
 
-After opening this build online once with a remembered login, you can restart
-Zalo without internet and read the last account's locally stored chat history,
-contacts and groups. An offline indicator is shown. Messages or attachments
-that have never been downloaded are unavailable offline.
+Read locally cached chats, contacts, and groups when working without an internet connection.
 
-Zalo retries authentication in the background. Once the server accepts the
-session, the interface reloads automatically and normal synchronization resumes.
-Logging out or receiving a rejected session clears the offline session cache.
+- **How it works**: Open Zalo online once with "Remember Login" checked. If internet is disconnected later, Zalo boots into offline mode with a visual indicator.
+- **Auto-reconnect**: Zalo retries authentication in the background and seamlessly reloads once network access returns.
+- **Notes**: Uncached attachments or messages sent during downtime remain unavailable until reconnection. Logging out clears the offline session cache.
 
-## 🙈 Start hidden in the tray
+---
 
-When **Settings → Launch Zalo on startup** is enabled, Zalo starts minimized
-to the system tray at login. The autostart entry it writes to
-`~/.config/autostart/` launches it with `--hidden`. If you enabled the setting
-with an older build, turn it off and on again to update the entry.
+### 🙈 2. Start Minimized to System Tray
 
-You can also pass the flag yourself (`--start-hidden` works too):
+Launch Zalo hidden in the system tray on startup or from the command line.
 
-```bash
-/path/to/zalo --hidden
-```
+- **How to enable**:
+  - **In App**: Navigate to **Settings → General** and enable **"Launch Zalo on system startup"**.
+  - **CLI Command**: Launch directly with `--hidden` or `--start-hidden`:
+    ```bash
+    /path/to/zalo --hidden
+    ```
+- **How to open window**: Click the tray icon, click an incoming notification, or launch Zalo again.
+- **Failsafe**: If no system tray is detected in your desktop environment, the flag is ignored so the window is never lost.
 
-Open the window from the tray icon, by clicking a notification, or by launching
-Zalo again. If no system tray is available, the flag is ignored so the window
-is never unreachable.
+---
 
-## ⚙️ Advanced Linux settings
+### ⚙️ 3. Advanced Linux Audio Settings
 
-Open **Settings → Nâng cao...** to customize the ringtone (incoming calls) and
-ringback (played locally while an outgoing call waits for an answer). Enter an
-absolute audio file path or browse for a file, preview it, then save. Each sound
-can be reset to Zalo's default. Settings persist across restarts and apply on the
-next playback; missing or unplayable custom files fall back to the default.
+Customize call ringtones and audio playback without modifying application assets.
 
-The Userscript Manager opens in the same settings window, with a transition and
-a back button. Returning to Advanced keeps the script editor's current content.
+- **How to access**: Open **Settings → Nâng cao... (Advanced)**.
+- **Configurable sounds**:
+  - **Ringtone**: Custom audio file for incoming calls.
+  - **Ringback**: Custom audio file played while waiting for outgoing calls to connect.
+- **Notes**: Supports browsing local audio files with built-in preview and reset-to-default buttons. Persists across restarts.
 
-## 🧩 Userscripts manager
+---
 
-Open **Settings → Nâng cao... → Userscript Manager** to create, paste, edit, import, delete,
-and enable or disable scripts that run inside Zalo. Tampermonkey-style metadata
-such as `@name`, `@description`, `@version`, `@match`, `@include`, and
-`@exclude` is recognized. Imported scripts may use the `.js` or `.user.js`
-extension.
+### 🧩 4. Built-in Userscripts Manager
 
-The compatibility layer currently provides `GM_info`, `GM_addStyle`,
-`GM_getValue`, `GM_setValue`, `GM_deleteValue`, `GM_listValues`, and
-`unsafeWindow`. Changes take effect the next time the Zalo page is loaded.
+Run custom Tampermonkey-compatible JavaScript extensions directly inside Zalo.
 
-> **Security:** Userscripts execute with access to the current Zalo page and
-> messages displayed in it. Only install scripts whose source you trust.
+- **How to access**: Open **Settings → Nâng cao... → Userscript Manager**.
+- **Supported features**:
+  - Create, edit, paste, import (`.js`, `.user.js`), toggle, and delete scripts.
+  - Supports Tampermonkey metadata: `@name`, `@description`, `@version`, `@match`, `@include`, `@exclude`.
+  - Implemented GM APIs: `GM_info`, `GM_addStyle`, `GM_getValue`, `GM_setValue`, `GM_deleteValue`, `GM_listValues`, and `unsafeWindow`.
+- **Security warning**: Userscripts run with full DOM access to messages and chat views. Only install scripts from sources you trust.
 
-## 🌙 ZaDark Integration
+---
 
-This project includes integrated [ZaDark](https://github.com/quaric/zadark), ZaDark is an extension that helps you enable Dark Mode, more privacy features, and additional functionality.
+### 🌙 5. Integrated ZaDark Theme
 
-**ZaDark helps you experience Zalo 🔒 more privately ✨ more personalized.**
+Native dark mode, privacy enhancements, and custom UI personalization powered by [ZaDark](https://github.com/quaric/zadark).
 
-### Features
-
-- 🌙 **Dark Mode optimized specifically for Zalo** - Complete dark theme tailored for Zalo interface
-- 🆃 **Customize fonts and font sizes** - Personalize text appearance to your preference
-- 🖼️ **Custom chat backgrounds** - Set personalized backgrounds for conversations
-- 🔤 **Quick message translation** - Instantly translate messages to your preferred language
-- 😊 **Express emotions with 80+ Emojis** - Enhanced emoji reactions for messages
-- 🔒 **Anti-message peeking protection** - Prevent others from secretly viewing your messages
-- 👁️ **Hide status indicators** - Hide "typing", "delivered" and "read" status from others
-- 📱 **Native Integration** - Seamlessly integrated during build process
-
-> **Note:** ZaDark is licensed under MPL-2.0 and is developed by [Quaric](https://zadark.com). The setup process automatically prepares ZaDark, and build process integrates it seamlessly!
-
+- **Dark Mode**: Fully optimized dark theme matching modern Linux desktop aesthetics.
+- **Privacy Protections**: Anti-peeking message blurring and optional hidden typing/read indicators.
+- **Customization**: Custom conversation wallpapers, font overrides, quick translation, and 80+ emoji reactions.
+- **Integration**: Pre-compiled and bundled directly into the AppImage during build.

@@ -1,86 +1,73 @@
-# Known Issues & Workarounds 🛠️
+# Known Issues & Troubleshooting 🛠️
 
 **English** | [Tiếng Việt](./known-issues.vi.md)
 
-This document tracks current limitations and historical issues that have been addressed in **Zalo for Linux**, along with credits to the community contributors who helped resolve them.
+Quick diagnostic lookup table for common runtime and configuration issues on Linux:
+
+| Symptom / Error | Root Cause | Quick Fix |
+| :--- | :--- | :--- |
+| **Crash on launch (Ubuntu 23.10+)** | Unprivileged user namespaces restricted by AppArmor | Add `--no-sandbox` to Zalo launcher command or `.desktop` entry. |
+| **Calls fail (Audio / Mic / Video)** | Missing system Opus codecs and PulseAudio utilities | Install required packages:<br>• **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`<br>• **Arch Linux**: `sudo pacman -S python opus pulseaudio`<br>• **Fedora**: `sudo dnf install python3 opus pulseaudio-utils` |
+| **Cannot paste images (`Ctrl+V`)** | Missing clipboard tool for Wayland/X11 | Install `wl-clipboard` (Wayland) or `xclip` (X11). |
+| **Dark mode does not follow system** | Application defaults to static theme | Built-in real-time detection via GNOME D-Bus and XDG Desktop Portal is enabled in current builds. |
+| **Missing desktop shortcut** | Manual AppImage execution without integration | Use [Gear Lever](https://flathub.org/en/apps/it.mijorus.gearlever) to integrate into desktop menu, or create `~/.local/share/applications/zalo.desktop`. |
 
 ---
 
-## ⚠️ Current Issues & Limitations
+## ⚠️ Active Limitations
 
-- **Calls on ARM64:** 
-  Calls now run on the native engine (`zcall-native/`, Node.js + Python, nothing x86-only) instead of Wine and `ZaloCall.exe` ([PR #62](https://github.com/VN-Linux-Family/zalo-for-linux/pull/62), [Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)), so aarch64 is no longer ruled out, but calls have not been tried on aarch64 yet.
+- **Calls on ARM64 (`aarch64`)**: The call engine runs on a native Node.js + Python stack (`zcall-native/`, eliminating x86-only Wine dependencies), but voice/video calls have not yet been fully tested on physical ARM64 hardware ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
+- **Ubuntu 23.10+ Sandbox Restrictions**: AppArmor blocks unprivileged user namespaces used by Electron's `chrome-sandbox`. Run with `--no-sandbox` or follow [AM Ubuntu Troubleshooting](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) ([Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72), [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143)).
 
-- **Ubuntu-only: Zalo fails to start on Ubuntu 23.10 and onwards without `--no-sandbox` flag:** 
-  Ubuntu has restricted unprivileged user namespaces since version 23.10, and every app needs a profile to access them. The restriction breaks `chrome-sandbox` without making it owned by `root` and has mode `4755` or having an AppArmor profile.
-  Please add `--no-sandbox` to Zalo's `.desktop` files, or disable the restriction by following [iVAN's AM Troubleshooting guide, "Ubuntu mess" section](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess). See [Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72) and [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143).
 ---
 
-## ✅ Resolved Issues & Workarounds
+## ✅ Resolved Issues & Technical History
 
-- **Calls (voice, video, screen sharing, group calls):**
-  - **Issue:** Calls could not be made or received on Linux. The Wine wrapper of [PR #62](https://github.com/VN-Linux-Family/zalo-for-linux/pull/62) (thanks @collyn) made them partly work, through Wine, `ZaloCall.exe` and 32-bit libraries.
-  - **Solution:** Voice and video calls, screen sharing and group calls (audio, camera, screen share) run on a native Linux call engine ([`zcall-native/`](../../zcall-native/README.md), from [zalo-linux-native](https://github.com/nct88/zalo-linux-native)), in a call window laid out as Zalo for macOS with its own icons and sounds (taken from the macOS DMG at build time), and incoming calls show a notice in the screen's corner: no Wine, no `ZaloCall.exe`, no 32-bit libraries. Calls need `python3`, libopus and the PulseAudio tools (Debian / Ubuntu: `sudo apt install python3 libopus0 pulseaudio-utils`); the first call says what is missing. Switching a voice call to video during the call is not possible, as with Zalo for macOS and Windows (phone to phone only).
-  - **Credits:** Thanks to [@nct88](https://github.com/nct88). See [PR #128](https://github.com/VN-Linux-Family/zalo-for-linux/pull/128), [PR #129](https://github.com/VN-Linux-Family/zalo-for-linux/pull/129), [PR #135](https://github.com/VN-Linux-Family/zalo-for-linux/pull/135), [PR #136](https://github.com/VN-Linux-Family/zalo-for-linux/pull/136) and [PR #137](https://github.com/VN-Linux-Family/zalo-for-linux/pull/137).
+<details>
+<summary><b>Click to expand full resolved bug history and community credits</b></summary>
 
-- **System/Auto Theme not working:** 
-  - **Issue:** The app does not follow the system's dark/light mode. Both ZaDark and Zalo ignore `prefers-color-scheme`. 
-  - **Solution:** The app now can do real-time detection via GNOME D-Bus (org.gnome.desktop.interface color-scheme), XDG Desktop Portal (org.freedesktop.appearane), or gtk-theme. Automatically synchronizes `nativeTheme.themeSource` and the `.dark` class in DOM without interfering with or altering the operating system's default title bar.
-  - **Credits:** Thanks to [@nct88](https://github.com/nct88). See [PR #87](https://github.com/VN-Linux-Family/zalo-for-linux/pull/87), [Issue #22](https://github.com/VN-Linux-Family/zalo-for-linux/issues/22), and [Issue #21](https://github.com/VN-Linux-Family/zalo-for-linux/issues/21#issuecomment-4437302799).
+- **Calls (Voice, Video, Screen Sharing, Group Calls):**
+  - **Issue:** Calls could not be made or received on Linux.
+  - **Solution:** Calls run on a native Linux call engine ([`zcall-native/`](../../zcall-native/README.md), from [zalo-linux-native](https://github.com/nct88/zalo-linux-native)). No Wine, no `ZaloCall.exe`, no 32-bit libraries.
+  - **Credits:** [@nct88](https://github.com/nct88), [@collyn](https://github.com/collyn). See [PR #62](https://github.com/VN-Linux-Family/zalo-for-linux/pull/62), [PR #128](https://github.com/VN-Linux-Family/zalo-for-linux/pull/128), [PR #129](https://github.com/VN-Linux-Family/zalo-for-linux/pull/129), [PR #135](https://github.com/VN-Linux-Family/zalo-for-linux/pull/135), [PR #136](https://github.com/VN-Linux-Family/zalo-for-linux/pull/136), [PR #137](https://github.com/VN-Linux-Family/zalo-for-linux/pull/137).
 
+- **System / Auto Theme Synchronization:**
+  - **Issue:** Zalo and ZaDark ignored `prefers-color-scheme`.
+  - **Solution:** Real-time theme detection via GNOME D-Bus (`org.gnome.desktop.interface color-scheme`), XDG Desktop Portal (`org.freedesktop.appearance`), or GTK theme. Synchronizes `nativeTheme.themeSource` and DOM `.dark` class without touching titlebar frames.
+  - **Credits:** [@nct88](https://github.com/nct88). See [PR #87](https://github.com/VN-Linux-Family/zalo-for-linux/pull/87), [Issue #21](https://github.com/VN-Linux-Family/zalo-for-linux/issues/21), [Issue #22](https://github.com/VN-Linux-Family/zalo-for-linux/issues/22).
 
-- **Message Synchronization (E2EE):**
-  - **Issue:** Missing `db-cross-v4` native module caused end-to-end encryption (E2EE) messages to fail to sync on Linux.
-  - **Solution:** Reimplemented `db-cross-v4` in C++. E2EE message sync now works natively without any Wine dependency.
-  - **Credits:** Thanks to [@realdtn2](https://github.com/realdtn2) for the implementation and [@DMKha2k7](https://github.com/DMKha2k7) for the integration PR. See [PR #24](https://github.com/VN-Linux-Family/zalo-for-linux/pull/24) and [Issue #15](https://github.com/VN-Linux-Family/zalo-for-linux/issues/15).
-
-- **Conversation Info Panel (Photos/Videos, Files, and Links):**
-  - **Issue:** Media, files, and links in the right-side info panel did not load.
-  - **Solution:** Resolved by providing the native `db-cross-v4` module.
-
-- **Message Reactions:**
-  - **Issue:** Unable to view or react to messages with emoji reactions.
-  - **Solution:** Resolved by providing the native `db-cross-v4` module.
+- **Message Synchronization (E2EE) & Info Panel:**
+  - **Issue:** Missing `db-cross-v4` native module caused end-to-end encryption messages, conversation info panel media, and emoji reactions to fail on Linux.
+  - **Solution:** Reimplemented clean-room `db-cross-v4` addon in C++.
+  - **Credits:** [@realdtn2](https://github.com/realdtn2), [@DMKha2k7](https://github.com/DMKha2k7). See [PR #24](https://github.com/VN-Linux-Family/zalo-for-linux/pull/24), [Issue #15](https://github.com/VN-Linux-Family/zalo-for-linux/issues/15).
 
 - **Pasting & Sending Images:**
-  - **Issue:** Copying images in Linux and pressing `Ctrl+V` into chat did not work, and sending images often defaulted to raw file attachments instead of inline photo previews.
-  - **Solution:** Image files (`.png`, `.jpg`, `.jpeg`, etc.) can now be pasted into chats via `Ctrl+V` (Wayland via `wl-clipboard` and X11 via `xclip`), and images sent from the file picker are properly recognized as photos rather than generic file attachments.
-  - **Credits:** Thanks to [@realdtn2](https://github.com/realdtn2) for the original clipboard solution, [@DMKha2k7](https://github.com/DMKha2k7) for [PR #25](https://github.com/VN-Linux-Family/zalo-for-linux/pull/25) / [Issue #23](https://github.com/VN-Linux-Family/zalo-for-linux/issues/23), and [@brucenguyen1102](https://github.com/brucenguyen1102) for [PR #34](https://github.com/VN-Linux-Family/zalo-for-linux/pull/34).
+  - **Issue:** Pressing `Ctrl+V` failed to paste copied images, and sending images defaulted to raw file attachments instead of inline photos.
+  - **Solution:** Clipboard image files are pasted via `wl-clipboard` (Wayland) and `xclip` (X11).
+  - **Credits:** [@realdtn2](https://github.com/realdtn2), [@DMKha2k7](https://github.com/DMKha2k7) ([PR #25](https://github.com/VN-Linux-Family/zalo-for-linux/pull/25)), [@brucenguyen1102](https://github.com/brucenguyen1102) ([PR #34](https://github.com/VN-Linux-Family/zalo-for-linux/pull/34)).
 
 - **Linux Auto-Launch on Startup:**
-  - **Issue:** Toggling "Start Zalo on system startup" in Zalo's built-in settings did not work on Linux.
-  - **Solution:** Patched the auto-launch IPC handlers to create or remove the standard autostart desktop entry at `~/.config/autostart/zalo.desktop`.
-  - **Credits:** Thanks to [@akimiya7742](https://github.com/akimiya7742) and [@DMKha241](https://github.com/DMKha241). See [PR #51](https://github.com/VN-Linux-Family/zalo-for-linux/pull/51), [PR #59](https://github.com/VN-Linux-Family/zalo-for-linux/pull/59), and [PR #61](https://github.com/VN-Linux-Family/zalo-for-linux/pull/61).
+  - **Issue:** Built-in "Start Zalo on system startup" setting failed on Linux.
+  - **Solution:** Patched IPC handlers to generate standard autostart entry at `~/.config/autostart/zalo.desktop`.
+  - **Credits:** [@akimiya7742](https://github.com/akimiya7742), [@DMKha241](https://github.com/DMKha241). See [PR #51](https://github.com/VN-Linux-Family/zalo-for-linux/pull/51), [PR #59](https://github.com/VN-Linux-Family/zalo-for-linux/pull/59), [PR #61](https://github.com/VN-Linux-Family/zalo-for-linux/pull/61).
 
 - **XDG User Directories & Download Path:**
-  - **Issue:** Zalo hardcoded and forcefully created an English `~/Zalo Received Files` directory directly in `$HOME`, disregarding user system locales and XDG standards.
-  - **Solution:** Patched file download and saving paths to adhere to standard Linux XDG directories (`$XDG_DOWNLOAD_DIR`).
-  - **Credits:** Thanks to [@akimiya7742](https://github.com/akimiya7742). See [PR #52](https://github.com/VN-Linux-Family/zalo-for-linux/pull/52), [Issue #20](https://github.com/VN-Linux-Family/zalo-for-linux/issues/20), and [Issue #48](https://github.com/VN-Linux-Family/zalo-for-linux/issues/48).
+  - **Issue:** Zalo forced an English `~/Zalo Received Files` directory in `$HOME`.
+  - **Solution:** Patched file download handlers to respect standard `$XDG_DOWNLOAD_DIR`.
+  - **Credits:** [@akimiya7742](https://github.com/akimiya7742). See [PR #52](https://github.com/VN-Linux-Family/zalo-for-linux/pull/52), [Issue #20](https://github.com/VN-Linux-Family/zalo-for-linux/issues/20), [Issue #48](https://github.com/VN-Linux-Family/zalo-for-linux/issues/48).
 
 - **Unread Message Badge Count:**
-  - **Issue:** The application icon on the system dock/taskbar did not show any badge indicator for unread messages.
-  - **Solution:** Implemented unread message count badge integration for desktop environments supporting Unity/KDE/GNOME badge protocols.
-  - **Credits:** Thanks to [@akimiya7742](https://github.com/akimiya7742). See [PR #43](https://github.com/VN-Linux-Family/zalo-for-linux/pull/43).
-
-- **Unread Count On The Tray Icon:**
-  - **Issue:** The launcher/taskbar badge showed the unread count, but the system tray icon did not, since the StatusNotifierItem protocol used by KDE/GNOME trays has no numeric-badge API.
-  - **Solution:** Draw the unread count onto the tray icon itself. A dependency-free helper composes the number over the Zalo logo (no canvas or GPU), and the `tray-badge` plugin mirrors the count from `app.setBadgeCount` onto the tray that `main.js` creates (Zalo builds its own tray only on Windows).
-  - **Credits:** Thanks to [@namtao](https://github.com/namtao). See [PR #151](https://github.com/VN-Linux-Family/zalo-for-linux/pull/151).
+  - **Issue:** Dock/tray icon showed no badge indicator for unread messages.
+  - **Solution:** Implemented badge counter support for Unity/KDE/GNOME dock protocols and custom number renderer over tray icon.
+  - **Credits:** [@akimiya7742](https://github.com/akimiya7742) ([PR #43](https://github.com/VN-Linux-Family/zalo-for-linux/pull/43)), [@namtao](https://github.com/namtao) ([PR #151](https://github.com/VN-Linux-Family/zalo-for-linux/pull/151)).
 
 - **In-App Screenshot Tool:**
-  - **Issue:** The built-in screenshot feature failed on Linux.
-  - **Solution:** Integrated with native Linux screenshot utilities (`deepin-screen-recorder`, `spectacle`, `flameshot`, `gnome-screenshot`, `xfce4-screenshooter`, `mate-screenshot`, `ksnapshot`, `scrot`).
-  - **Credits:** Thanks to [@hthienloc](https://github.com/hthienloc) for the solution. See [Issue #19](https://github.com/VN-Linux-Family/zalo-for-linux/issues/19).
-
-- **Window Title Bar Controls:**
-  - **Issue:** Missing standard minimize, maximize, and close buttons on certain window managers/desktop environments.
-  - **Solution:** Patched frame and title bar controls.
-  - **Credits:** Thanks to [@NanKillBro](https://github.com/NanKillBro) for the solution. For more details, see [Issue #4](https://github.com/VN-Linux-Family/zalo-for-linux/issues/4).
-
-- **System Tray Icon:**
-  - **Issue:** Missing tray menu icon on Linux desktops.
-  - **Solution:** Implemented native tray icon with status menu and toggle DevTools options.
+  - **Issue:** Built-in screen capture failed on Linux.
+  - **Solution:** Integrated native Linux screenshot tools (`spectacle`, `flameshot`, `gnome-screenshot`, `scrot`).
+  - **Credits:** [@hthienloc](https://github.com/hthienloc). See [Issue #19](https://github.com/VN-Linux-Family/zalo-for-linux/issues/19).
 
 - **Freeze on Login Screen:**
-  - **Issue:** Application froze upon opening the login screen.
-  - **Solution:** Replaced macOS sqlite3 binaries with native Linux builds. See [Issue #13](https://github.com/VN-Linux-Family/zalo-for-linux/issues/13).
+  - **Issue:** App hung when displaying the login window.
+  - **Solution:** Replaced macOS SQLite3 binaries with native Linux builds ([Issue #13](https://github.com/VN-Linux-Family/zalo-for-linux/issues/13)).
+
+</details>

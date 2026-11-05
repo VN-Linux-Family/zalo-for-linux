@@ -1,87 +1,73 @@
-# Các lỗi đã biết và cách khắc phục tạm thời 🛠️
+# Lỗi thường gặp & Cách khắc phục 🛠️
 
 [English](./known-issues.md) | **Tiếng Việt**
 
-Tài liệu này ghi lại những hạn chế hiện tại và các lỗi trước đây đã được xử lý trong **Zalo for Linux**, kèm lời cảm ơn tới các bạn trong cộng đồng đã góp công giải quyết.
+Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Zalo for Linux:
+
+| Hiện tượng / Triệu chứng lỗi | Nguyên nhân cốt lõi | Lệnh / Thao tác khắc phục ngay |
+| :--- | :--- | :--- |
+| **Văng ngay khi mở (Ubuntu 23.10+)** | AppArmor chặn unprivileged user namespace | Thêm cờ `--no-sandbox` vào lệnh chạy hoặc file `.desktop`. |
+| **Không gọi được (Mất tiếng/Mic/Cam)** | Thiếu thư viện âm thanh Opus và PulseAudio | Cài đặt các gói phụ thuộc:<br>• **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`<br>• **Arch Linux**: `sudo pacman -S python opus pulseaudio`<br>• **Fedora**: `sudo dnf install python3 opus pulseaudio-utils` |
+| **Không dán được ảnh (`Ctrl+V`)** | Thiếu công cụ clipboard cho Wayland / X11 | Cài đặt `wl-clipboard` (nếu dùng Wayland) hoặc `xclip` (nếu dùng X11). |
+| **Giao diện không tự đổi Dark/Light** | Ứng dụng mặc định giữ theme tĩnh | Đã hỗ trợ tự động nhận diện theo thời gian thực qua GNOME D-Bus và XDG Desktop Portal trong các bản build mới. |
+| **Không có icon trên menu ứng dụng** | Chạy AppImage trực tiếp chưa tích hợp | Dùng [Gear Lever](https://flathub.org/en/apps/it.mijorus.gearlever) để đưa vào Menu, hoặc tạo file `~/.local/share/applications/zalo.desktop`. |
 
 ---
 
-## ⚠️ Các lỗi và hạn chế hiện tại
+## ⚠️ Các giới hạn hiện tại
 
-- **Gọi điện trên ARM64:** 
-  Gọi điện nay chạy bằng engine native (`zcall-native/`, Node.js + Python, không có phần nào chỉ chạy trên x86) thay cho Wine và `ZaloCall.exe` ([PR #62](https://github.com/VN-Linux-Family/zalo-for-linux/pull/62), [Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)), nên aarch64 không còn bị loại trừ, nhưng chưa thử gọi trên aarch64.
-
-- **Chỉ bị ở Ubuntu: Zalo không chạy được trên Ubuntu 23.10 trở đi mà không có cờ `--no-sandbox`:** 
-  Ubuntu đã giới hạn không gian tên người dùng không đặc quyền kể từ phiên bản 23.10, và mỗi ứng dụng cần một hồ sơ để truy cập chúng. Việc hạn chế khiến `chrome-sandbox` lỗi nếu không để nó được sở hữu bởi `root` và có chế độ `4755` hoặc có một hồ sơ AppArmor. 
-  Xin hãy thêm `--no-sandbox` vào các tập tin `.desktop` của Zalo, hoặc tắt việc hạn chế bằng cách làm theo [Hướng dẫn gỡ lỗi AM của iVAN, mục "Đống rắc rối Ubuntu"](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) (Tiếng Anh). Xem [Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72) và [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143).
+- **Cuộc gọi trên ARM64 (`aarch64`)**: Engine gọi điện chạy hoàn toàn bằng Node.js + Python (`zcall-native/`, không dùng Wine của x86), nhưng chưa được kiểm thử toàn diện trên thiết bị phần cứng ARM64 thực tế ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
+- **Giới hạn Sandbox trên Ubuntu 23.10+**: Do cơ chế AppArmor mới, cần chạy với `--no-sandbox` hoặc cấu hình profile AppArmor riêng cho `chrome-sandbox` ([Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72), [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143)).
 
 ---
 
-## ✅ Các lỗi đã sửa và cách khắc phục tạm thời
+## ✅ Lịch sử các lỗi đã sửa & Đóng góp từ cộng đồng
 
-- **Gọi điện (gọi thoại, gọi video, chia sẻ màn hình, gọi nhóm):**
-  - **Lỗi:** Không gọi hay nhận cuộc gọi được trên Linux. Wine wrapper của [PR #62](https://github.com/VN-Linux-Family/zalo-for-linux/pull/62) (cảm ơn @collyn) giúp gọi được một phần, qua Wine, `ZaloCall.exe` và thư viện 32-bit.
-  - **Cách giải quyết:** Gọi thoại, gọi video, chia sẻ màn hình và gọi nhóm (âm thanh, camera, chia sẻ màn hình) chạy bằng engine gọi điện native cho Linux ([`zcall-native/`](../../zcall-native/README.md), từ [zalo-linux-native](https://github.com/nct88/zalo-linux-native)), với cửa sổ gọi theo bố cục Zalo macOS, dùng biểu tượng và âm thanh gốc (lấy từ DMG macOS lúc build), cuộc gọi đến hiện khung báo ở góc màn hình: không Wine, không `ZaloCall.exe`, không thư viện 32-bit. Cần `python3`, libopus và bộ công cụ PulseAudio (Debian / Ubuntu: `sudo apt install python3 libopus0 pulseaudio-utils`); lần gọi đầu sẽ báo nếu thiếu gói. Không chuyển được từ gọi thoại sang video giữa cuộc gọi, giống Zalo macOS và Windows (chỉ điện thoại với điện thoại).
-  - **Ghi nhận:** Cảm ơn [@nct88](https://github.com/nct88). Xem [PR #128](https://github.com/VN-Linux-Family/zalo-for-linux/pull/128), [PR #129](https://github.com/VN-Linux-Family/zalo-for-linux/pull/129), [PR #135](https://github.com/VN-Linux-Family/zalo-for-linux/pull/135), [PR #136](https://github.com/VN-Linux-Family/zalo-for-linux/pull/136) và [PR #137](https://github.com/VN-Linux-Family/zalo-for-linux/pull/137).
+<details>
+<summary><b>Bấm để xem chi tiết lịch sử sửa lỗi và ghi nhận người đóng góp</b></summary>
 
-- **Chủ đề theo hệ thống/tự động không hoạt động:** 
-  - **Lỗi:** Ứng dụng không đổi theo chế độ sáng/tối của hệ thống. Cả ZaDark lẫn Zalo đều bỏ qua `prefers-color-scheme`. 
-  - **Cách giải quyết:** Giờ đây ứng dụng có thể nhận biết thay đổi theo thời gian thực qua GNOME D-Bus (org.gnome.desktop.interface color-scheme), XDG Desktop Portal (org.freedesktop.appearane) hoặc gtk-theme. Ứng dụng tự động đồng bộ `nativeTheme.themeSource` và class `.dark` trong DOM mà không can thiệp hay làm thay đổi thanh tiêu đề mặc định của hệ điều hành.
-  - **Ghi nhận:** Cảm ơn [@nct88](https://github.com/nct88). Xem [PR #87](https://github.com/VN-Linux-Family/zalo-for-linux/pull/87), [Issue #22](https://github.com/VN-Linux-Family/zalo-for-linux/issues/22) và [Issue #21](https://github.com/VN-Linux-Family/zalo-for-linux/issues/21#issuecomment-4437302799).
+- **Cuộc gọi (Thoại, Video, Chia sẻ màn hình, Gọi nhóm):**
+  - **Lỗi:** Không gọi hay nhận cuộc gọi được trên Linux.
+  - **Khắc phục:** Sử dụng engine gọi native cho Linux ([`zcall-native/`](../../zcall-native/README.md), từ [zalo-linux-native](https://github.com/nct88/zalo-linux-native)). Hoàn toàn không dùng Wine, không cần `ZaloCall.exe`, không cần thư viện 32-bit.
+  - **Đóng góp:** [@nct88](https://github.com/nct88), [@collyn](https://github.com/collyn). Xem [PR #62](https://github.com/VN-Linux-Family/zalo-for-linux/pull/62), [PR #128](https://github.com/VN-Linux-Family/zalo-for-linux/pull/128), [PR #129](https://github.com/VN-Linux-Family/zalo-for-linux/pull/129), [PR #135](https://github.com/VN-Linux-Family/zalo-for-linux/pull/135), [PR #136](https://github.com/VN-Linux-Family/zalo-for-linux/pull/136), [PR #137](https://github.com/VN-Linux-Family/zalo-for-linux/pull/137).
 
+- **Tự động đổi theme Sáng / Tối theo hệ thống:**
+  - **Lỗi:** Zalo và ZaDark bỏ qua `prefers-color-scheme` của hệ điều hành.
+  - **Khắc phục:** Nhận diện thời gian thực qua GNOME D-Bus (`org.gnome.desktop.interface color-scheme`), XDG Desktop Portal (`org.freedesktop.appearance`) hoặc GTK theme. Tự động đồng bộ `nativeTheme.themeSource` và class `.dark` trong DOM.
+  - **Đóng góp:** [@nct88](https://github.com/nct88). Xem [PR #87](https://github.com/VN-Linux-Family/zalo-for-linux/pull/87), [Issue #21](https://github.com/VN-Linux-Family/zalo-for-linux/issues/21), [Issue #22](https://github.com/VN-Linux-Family/zalo-for-linux/issues/22).
 
-- **Đồng bộ tin nhắn (E2EE):**
-  - **Lỗi:** Thiếu module native `db-cross-v4` khiến tin nhắn mã hóa đầu cuối (E2EE) không đồng bộ được trên Linux.
-  - **Cách giải quyết:** Viết lại `db-cross-v4` bằng C++. Giờ đây tin nhắn E2EE đồng bộ trực tiếp trên Linux mà không cần đến Wine.
-  - **Ghi nhận:** Cảm ơn [@realdtn2](https://github.com/realdtn2) đã viết phần triển khai và [@DMKha2k7](https://github.com/DMKha2k7) đã gửi PR tích hợp. Xem [PR #24](https://github.com/VN-Linux-Family/zalo-for-linux/pull/24) và [Issue #15](https://github.com/VN-Linux-Family/zalo-for-linux/issues/15).
+- **Đồng bộ tin nhắn mã hóa đầu cuối (E2EE) & Bảng thông tin hội thoại:**
+  - **Lỗi:** Thiếu native module `db-cross-v4` khiến tin nhắn E2EE, media trong panel thông tin và thả cảm xúc emoji bị lỗi trên Linux.
+  - **Khắc phục:** Viết lại addon native `db-cross-v4` bằng C++.
+  - **Đóng góp:** [@realdtn2](https://github.com/realdtn2), [@DMKha2k7](https://github.com/DMKha2k7). Xem [PR #24](https://github.com/VN-Linux-Family/zalo-for-linux/pull/24), [Issue #15](https://github.com/VN-Linux-Family/zalo-for-linux/issues/15).
 
-- **Bảng thông tin hội thoại (Ảnh/Video, File và Link):**
-  - **Lỗi:** Ảnh/video, file và link trong bảng thông tin bên phải không tải được.
-  - **Cách giải quyết:** Đã xử lý nhờ bổ sung module native `db-cross-v4`.
+- **Dán và gửi ảnh từ clipboard:**
+  - **Lỗi:** Nhấn `Ctrl+V` không dán được ảnh, gửi ảnh bị biến thành file đính kèm thô thay vì ảnh xem trước.
+  - **Khắc phục:** Tích hợp bộ dán ảnh qua `wl-clipboard` (Wayland) và `xclip` (X11).
+  - **Đóng góp:** [@realdtn2](https://github.com/realdtn2), [@DMKha2k7](https://github.com/DMKha2k7) ([PR #25](https://github.com/VN-Linux-Family/zalo-for-linux/pull/25)), [@brucenguyen1102](https://github.com/brucenguyen1102) ([PR #34](https://github.com/VN-Linux-Family/zalo-for-linux/pull/34)).
 
-- **Bày tỏ cảm xúc với tin nhắn:**
-  - **Lỗi:** Không xem được hoặc không thả được biểu tượng cảm xúc (emoji) cho tin nhắn.
-  - **Cách giải quyết:** Đã xử lý nhờ bổ sung module native `db-cross-v4`.
+- **Khởi động Zalo cùng hệ thống trên Linux:**
+  - **Lỗi:** Tùy chọn "Khởi động cùng hệ thống" trong cài đặt Zalo không hoạt động trên Linux.
+  - **Khắc phục:** Vá IPC handler để tự động tạo hoặc xóa file cấu hình tiêu chuẩn `~/.config/autostart/zalo.desktop`.
+  - **Đóng góp:** [@akimiya7742](https://github.com/akimiya7742), [@DMKha241](https://github.com/DMKha241). Xem [PR #51](https://github.com/VN-Linux-Family/zalo-for-linux/pull/51), [PR #59](https://github.com/VN-Linux-Family/zalo-for-linux/pull/59), [PR #61](https://github.com/VN-Linux-Family/zalo-for-linux/pull/61).
 
-- **Dán và gửi ảnh:**
-  - **Lỗi:** Sao chép ảnh trên Linux rồi nhấn `Ctrl+V` vào khung chat không hoạt động, và ảnh gửi đi thường bị chuyển thành file đính kèm thô thay vì hiện xem trước như ảnh.
-  - **Cách giải quyết:** Giờ bạn có thể dán file ảnh (`.png`, `.jpg`, `.jpeg`, v.v.) vào khung chat bằng `Ctrl+V` (Wayland dùng `wl-clipboard`, X11 dùng `xclip`), và ảnh gửi từ hộp thoại chọn file được nhận diện đúng là ảnh thay vì file đính kèm thông thường.
-  - **Ghi nhận:** Cảm ơn [@realdtn2](https://github.com/realdtn2) với giải pháp clipboard ban đầu, [@DMKha2k7](https://github.com/DMKha2k7) với [PR #25](https://github.com/VN-Linux-Family/zalo-for-linux/pull/25) / [Issue #23](https://github.com/VN-Linux-Family/zalo-for-linux/issues/23), và [@brucenguyen1102](https://github.com/brucenguyen1102) với [PR #34](https://github.com/VN-Linux-Family/zalo-for-linux/pull/34).
+- **Thư mục tải về chuẩn XDG:**
+  - **Lỗi:** Zalo tự động tạo thư mục tiếng Anh `~/Zalo Received Files` ở `$HOME` thay vì tuân theo chuẩn Linux.
+  - **Khắc phục:** Điều hướng đường dẫn tải file về đúng thư mục tiêu chuẩn `$XDG_DOWNLOAD_DIR`.
+  - **Đóng góp:** [@akimiya7742](https://github.com/akimiya7742). Xem [PR #52](https://github.com/VN-Linux-Family/zalo-for-linux/pull/52), [Issue #20](https://github.com/VN-Linux-Family/zalo-for-linux/issues/20), [Issue #48](https://github.com/VN-Linux-Family/zalo-for-linux/issues/48).
 
-- **Tự khởi động cùng hệ thống trên Linux:**
-  - **Lỗi:** Bật tùy chọn "Start Zalo on system startup" trong phần cài đặt có sẵn của Zalo không có tác dụng trên Linux.
-  - **Cách giải quyết:** Patch các IPC handler xử lý tự khởi động để tạo hoặc xóa file desktop entry tự khởi động tiêu chuẩn tại `~/.config/autostart/zalo.desktop`.
-  - **Ghi nhận:** Cảm ơn [@akimiya7742](https://github.com/akimiya7742) và [@DMKha241](https://github.com/DMKha241). Xem [PR #51](https://github.com/VN-Linux-Family/zalo-for-linux/pull/51), [PR #59](https://github.com/VN-Linux-Family/zalo-for-linux/pull/59) và [PR #61](https://github.com/VN-Linux-Family/zalo-for-linux/pull/61).
-
-- **Thư mục người dùng XDG và đường dẫn tải về:**
-  - **Lỗi:** Zalo gán cứng và luôn tự tạo thư mục tiếng Anh `~/Zalo Received Files` ngay trong `$HOME`, bỏ qua ngôn ngữ hệ thống của người dùng và chuẩn XDG.
-  - **Cách giải quyết:** Patch đường dẫn tải về và lưu file để tuân theo các thư mục XDG tiêu chuẩn của Linux (`$XDG_DOWNLOAD_DIR`).
-  - **Ghi nhận:** Cảm ơn [@akimiya7742](https://github.com/akimiya7742). Xem [PR #52](https://github.com/VN-Linux-Family/zalo-for-linux/pull/52), [Issue #20](https://github.com/VN-Linux-Family/zalo-for-linux/issues/20) và [Issue #48](https://github.com/VN-Linux-Family/zalo-for-linux/issues/48).
-
-- **Huy hiệu đếm tin nhắn chưa đọc:**
-  - **Lỗi:** Biểu tượng ứng dụng trên dock/thanh tác vụ không hiện huy hiệu báo số tin nhắn chưa đọc.
-  - **Cách giải quyết:** Bổ sung huy hiệu đếm tin nhắn chưa đọc cho các môi trường desktop hỗ trợ giao thức huy hiệu của Unity/KDE/GNOME.
-  - **Ghi nhận:** Cảm ơn [@akimiya7742](https://github.com/akimiya7742). Xem [PR #43](https://github.com/VN-Linux-Family/zalo-for-linux/pull/43).
-
-- **Số tin nhắn chưa đọc trên biểu tượng khay hệ thống:**
-  - **Lỗi:** Huy hiệu trên dock/thanh tác vụ đã hiện số tin nhắn chưa đọc, nhưng biểu tượng ở khay hệ thống thì không, vì giao thức StatusNotifierItem mà khay của KDE/GNOME dùng không có API hiển thị số.
-  - **Cách giải quyết:** Vẽ số tin nhắn chưa đọc trực tiếp lên biểu tượng khay. Một hàm tiện ích không cần thư viện ngoài vẽ con số lên logo Zalo (không dùng canvas hay GPU), và plugin `tray-badge` lấy số từ `app.setBadgeCount` để cập nhật lên biểu tượng khay do `main.js` tạo (Zalo chỉ tự tạo khay trên Windows).
-  - **Ghi nhận:** Cảm ơn [@namtao](https://github.com/namtao). Xem [PR #151](https://github.com/VN-Linux-Family/zalo-for-linux/pull/151).
+- **Huy hiệu đếm số tin nhắn chưa đọc (Badge Counter):**
+  - **Lỗi:** Icon trên thanh dock hoặc khay hệ thống không hiện số tin nhắn chưa đọc.
+  - **Khắc phục:** Tích hợp huy hiệu số đếm cho các môi trường desktop Unity/KDE/GNOME và vẽ trực tiếp số lên icon khay hệ thống.
+  - **Đóng góp:** [@akimiya7742](https://github.com/akimiya7742) ([PR #43](https://github.com/VN-Linux-Family/zalo-for-linux/pull/43)), [@namtao](https://github.com/namtao) ([PR #151](https://github.com/VN-Linux-Family/zalo-for-linux/pull/151)).
 
 - **Công cụ chụp màn hình trong ứng dụng:**
-  - **Lỗi:** Tính năng chụp màn hình có sẵn không hoạt động trên Linux.
-  - **Cách giải quyết:** Tích hợp với các công cụ chụp màn hình sẵn có trên Linux (`deepin-screen-recorder`, `spectacle`, `flameshot`, `gnome-screenshot`, `xfce4-screenshooter`, `mate-screenshot`, `ksnapshot`, `scrot`).
-  - **Ghi nhận:** Cảm ơn [@hthienloc](https://github.com/hthienloc) đã đưa ra giải pháp. Xem [Issue #19](https://github.com/VN-Linux-Family/zalo-for-linux/issues/19).
-
-- **Các nút điều khiển trên thanh tiêu đề cửa sổ:**
-  - **Lỗi:** Thiếu các nút thu nhỏ, phóng to và đóng tiêu chuẩn trên một số trình quản lý cửa sổ/môi trường desktop.
-  - **Cách giải quyết:** Patch khung cửa sổ và các nút điều khiển trên thanh tiêu đề.
-  - **Ghi nhận:** Cảm ơn [@NanKillBro](https://github.com/NanKillBro) đã đưa ra giải pháp. Xem thêm chi tiết tại [Issue #4](https://github.com/VN-Linux-Family/zalo-for-linux/issues/4).
-
-- **Biểu tượng ở khay hệ thống:**
-  - **Lỗi:** Không có biểu tượng và menu ở khay hệ thống trên các môi trường desktop Linux.
-  - **Cách giải quyết:** Bổ sung biểu tượng khay hệ thống native, kèm menu trạng thái và tùy chọn bật/tắt DevTools.
+  - **Lỗi:** Phím chụp màn hình tích hợp của Zalo không hoạt động trên Linux.
+  - **Khắc phục:** Tích hợp với các công cụ chụp ảnh màn hình native của Linux (`spectacle`, `flameshot`, `gnome-screenshot`, `scrot`).
+  - **Đóng góp:** [@hthienloc](https://github.com/hthienloc). Xem [Issue #19](https://github.com/VN-Linux-Family/zalo-for-linux/issues/19).
 
 - **Treo ở màn hình đăng nhập:**
-  - **Lỗi:** Ứng dụng bị treo khi mở màn hình đăng nhập.
-  - **Cách giải quyết:** Thay các file sqlite3 dành cho macOS bằng bản build native cho Linux. Xem [Issue #13](https://github.com/VN-Linux-Family/zalo-for-linux/issues/13).
+  - **Lỗi:** Ứng dụng bị đơ ngay khi mở màn hình đăng nhập.
+  - **Khắc phục:** Thay thế các file nhị phân SQLite3 của macOS bằng bản build native cho Linux ([Issue #13](https://github.com/VN-Linux-Family/zalo-for-linux/issues/13)).
+
+</details>
