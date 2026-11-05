@@ -132,6 +132,43 @@ We welcome the responsible use of AI tools (such as Codex, Claude Code, etc.) to
 - **Disclose significant use:** If a pull request or a major part of a patch/documentation is heavily generated or assisted by AI, please briefly mention it in the pull request description for transparency.
 - **No unverified code:** Do not blindly copy-paste AI-generated code, especially for native addons (`nativelibs/`, `zocr/`) or security-sensitive components, as they may introduce memory safety issues or regressions.
 
+## Code from other repositories
+
+If you incorporate code from another repository that does not use the BSD 3-Clause license, please include the original license information as follows:
+
+- **For an entire directory:** Add a notice file (please name it `LICENSE-<directory>`) at the root of the taken directory:
+
+  ```text
+  This folder is licensed under the BSD 3-Clause LICENSE file at the project root.
+
+  --------------------------------------------------------------------------------
+
+  ORIGINAL CODE & PORTIONS NOTICE (<original-license>)
+
+  The original code inside this directory was derived from:
+  <repo> (you can add "now deleted/hidden" if the link to the repository is dead)
+
+  Copyright (c) 2024-2026 <name> <email (if available)>
+
+  <original-license-text>
+  ```
+
+- **For an individual file**: Add a comment header at the very top of the file:
+
+  ```text
+  Original copyright
+  This file is derived from: <original-repo>
+  Copyright (c) 2026 <name> <email>
+  Licensed under the <original-license> License.
+  ---------------------------------------------------------------------------
+  Integration copyright
+  Copyright (c) 2026 doandat943 and Việt Nam Linux Family
+  Licensed under the BSD 3-Clause License.
+  ```
+
+- **Testing & Compatibility:** Just like code or patches assisted by AI, you are fully responsible for testing external code to ensure them works within our build pipeline without regressions or memory leaks.
+- **Explicit attribution:** Clearly specify the exact source repository and origin in your pull request description and commit history.
+
 ## Security
 
 Do not open a public issue for a vulnerability. Use the **Security** tab of the repository and choose "Report a vulnerability" (GitHub private advisory).

@@ -132,6 +132,44 @@ Chúng mình hoan nghênh việc sử dụng các công cụ AI một cách có 
 - **Khai báo nếu sử dụng nhiều:** Nếu pull request hoặc một phần lớn của patch/tài liệu được tạo ra hoặc hỗ trợ chủ yếu bởi AI, vui lòng đề cập ngắn gọn trong phần mô tả của pull request để đảm bảo tính minh bạch.
 - **Không gửi code chưa qua kiểm chứng:** Không sao chép và dán mù quáng code do AI tạo ra, đặc biệt là đối với các addon gốc (`nativelibs/`, `zocr/`) hoặc các thành phần nhạy cảm về bảo mật, vì chúng có thể gây ra các lỗi an toàn bộ nhớ hoặc làm phát sinh lỗi cũ.
 
+## Code từ các repo khác
+
+Nếu bạn tích hợp mã nguồn từ một repo khác không sử dụng giấy phép BSD 3-Clause, vui lòng đính kèm thông tin giấy phép gốc như sau:
+
+- **Nếu là toàn bộ thư mục:** Thêm một file thông báo (vui lòng đặt tên là `LICENSE-<thư-mục>`) ở thư mục gốc của thư mục được mang sang:
+
+  ```text
+  This folder is licensed under the BSD 3-Clause LICENSE file at the project root.
+
+  --------------------------------------------------------------------------------
+
+  ORIGINAL CODE & PORTIONS NOTICE (<giấy-phép-gốc>)
+
+  The original code inside this directory was derived from:
+  <repo> (bạn có thể thêm "now deleted/hidden" nếu liên kết tới repo đã chết)
+
+  Copyright (c) 2024-2026 <tên> <email (nếu có)>
+
+  <văn-bản-giấy-phép-gốc>
+  ```
+
+- **Nếu là từng file riêng lẻ**: Thêm phần chú thích (comment header) ở ngay đầu file:
+
+  ```text
+  Original copyright
+  This file is derived from: <repo-gốc>
+  Copyright (c) 2026 <tên> <email>
+  Licensed under the <giấy-phép-gốc> License.
+  ---------------------------------------------------------------------------
+  Integration copyright
+  Copyright (c) 2026 doandat943 and Việt Nam Linux Family
+  Licensed under the BSD 3-Clause License.
+  ```
+
+- **Kiểm thử & Tính tương thích**: Giống như các đoạn code hay patch có sự hỗ trợ của AI, bạn chịu hoàn toàn trách nhiệm kiểm thử code ngoài để đảm bảo chúng hoạt động trong hệ thống build của chúng mình mà không gây ra lỗi hồi quy hay rò rỉ bộ nhớ.
+
+- **Ghi rõ nguồn**: Nêu rõ repo nguồn và xuất xứ chính xác trong phần mô tả pull request và lịch sử commit của bạn.
+
 ## Bảo mật
 
 Không mở issue công khai cho lỗ hổng bảo mật. Dùng tab **Security** của repo và chọn "Report a vulnerability" (private advisory của GitHub).
