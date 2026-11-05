@@ -14,7 +14,7 @@ Cảm ơn **realdtn2** đã đưa ra giải pháp: [realdtn2/zalo-linux-2026](ht
 
 ### 1. AM
 
-Cài đặt và cập nhật trực tiếp qua [AM](https://github.com/ivan-hc/AM) (nếu thích giao diện đồ họa, bạn có thể cài [AM-GUI](https://github.com/ivan-hc/AM-GUI)):
+Cài đặt và cập nhật trực tiếp qua [AM](https://github.com/ivan-hc/AM) (nếu thích giao diện đồ họa, bạn có thể cài [AM-GUI](https://github.com/Shikakiben/AM-GUI)):
 
 ```bash
 # Cài đặt Zalo
@@ -113,6 +113,7 @@ Yêu cầu: Node.js 22+, npm, `7z` (`p7zip-full`), bộ công cụ C++ và Rust.
 git clone https://github.com/VN-Linux-Family/zalo-for-linux.git
 cd zalo-for-linux
 git submodule update --init --recursive
+npm ci --prefer-offline --no-audit
 npm run main
 ```
 

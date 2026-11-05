@@ -4,6 +4,7 @@
   "description": "Linux reimplementation of Zalo zfile native addon (disk/folder/file info + copy)",
   "main": "index.js",
   "private": true,
-  "scripts": { "build": "node-gyp configure build" },
-  "dependencies": { "node-addon-api": "^5.0.0" }
+  "scripts": {
+    "build": "node-gyp configure build"
+  }
 }

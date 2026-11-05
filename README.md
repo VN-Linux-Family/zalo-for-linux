@@ -14,7 +14,7 @@ Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.
 
 ### 1. AM
 
-Install and update directly using [AM](https://github.com/ivan-hc/AM) (for a graphical interface, install [AM-GUI](https://github.com/ivan-hc/AM-GUI)):
+Install and update directly using [AM](https://github.com/ivan-hc/AM) (for a graphical interface, install [AM-GUI](https://github.com/Shikakiben/AM-GUI)):
 
 ```bash
 # Install Zalo
@@ -115,6 +115,7 @@ Prerequisites: Node.js 22+, npm, `7z` (`p7zip-full`), C++ & Rust toolchains.
 git clone https://github.com/VN-Linux-Family/zalo-for-linux.git
 cd zalo-for-linux
 git submodule update --init --recursive
+npm ci --prefer-offline --no-audit
 npm run main
 ```
 

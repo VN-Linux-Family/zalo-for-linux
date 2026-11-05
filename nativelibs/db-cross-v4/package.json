@@ -6,8 +6,5 @@
   "private": true,
   "scripts": {
     "build": "node-gyp configure build"
-  },
-  "dependencies": {
-    "node-addon-api": "^5.0.0"
   }
 }
