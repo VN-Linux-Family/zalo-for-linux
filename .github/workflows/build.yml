@@ -236,7 +236,9 @@ jobs:
           > 📞 **Voice & Video Calls**: Requires `python3`, `libopus`, and PulseAudio/PipeWire tools:  
           > • **Debian/Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`  
           > • **Arch Linux**: `sudo pacman -S python opus pulseaudio`  
-          > • **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`
+          > • **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`  
+          > • **openSUSE**: `sudo zypper install python3 libopus0 pulseaudio-utils`  
+          > • **Gentoo**: `sudo emerge --ask dev-lang/python media-libs/opus media-sound/pulseaudio-daemon`
 
           ### 📦 Assets Guide
           - **Architecture**: `x86_64` (Intel/AMD) or `aarch64` (ARM64).

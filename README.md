@@ -1,6 +1,6 @@
 # Zalo for Linux 🐧
 
-**English** | [Tiếng Việt](./README.vi.md)
+**English** | [Tiếng Việt](./docs/user/README.vi.md)
 
 [![Build Status](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml/badge.svg)](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml)
 
@@ -12,9 +12,9 @@ Thanks **realdtn2** for the solution: [realdtn2/zalo-linux-2026](https://github.
 
 ## ⚡ Quick Start
 
-### 1. am
+### 1. AM
 
-Install and update directly using [am](https://github.com/ivan-hc/AM):
+Install and update directly using [AM](https://github.com/ivan-hc/AM) (for a graphical interface, install [AM-GUI](https://github.com/ivan-hc/AM-GUI)):
 
 ```bash
 # Install Zalo
@@ -101,6 +101,8 @@ chmod +x Zalo-*.AppImage
 > - **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`
 > - **Arch Linux**: `sudo pacman -S python opus pulseaudio`
 > - **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`
+> - **openSUSE**: `sudo zypper install python3 libopus0 pulseaudio-utils`
+> - **Gentoo**: `sudo emerge --ask dev-lang/python media-libs/opus media-sound/pulseaudio-daemon`
 
 </details>
 

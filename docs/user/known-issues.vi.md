@@ -6,18 +6,18 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
 
 | Hiện tượng / Triệu chứng lỗi | Nguyên nhân cốt lõi | Lệnh / Thao tác khắc phục ngay |
 | :--- | :--- | :--- |
-| **Văng ngay khi mở (Ubuntu 23.10+)** | AppArmor chặn unprivileged user namespace | Thêm cờ `--no-sandbox` vào lệnh chạy hoặc file `.desktop`. |
-| **Không gọi được (Mất tiếng/Mic/Cam)** | Thiếu thư viện âm thanh Opus và PulseAudio | Cài đặt các gói phụ thuộc:<br>• **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`<br>• **Arch Linux**: `sudo pacman -S python opus pulseaudio`<br>• **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils` |
+| **Văng ngay khi mở (Ubuntu 23.10+)** | AppArmor chặn unprivileged user namespace | Thêm cờ `--no-sandbox` vào lệnh chạy hoặc file `.desktop`, hoặc làm theo [hướng dẫn xử lý của AM](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) để tắt triệt để giới hạn. |
+| **Không gọi được (Mất tiếng/Mic/Cam)** | Thiếu thư viện âm thanh Opus và PulseAudio | Cài đặt các gói phụ thuộc:<br>• **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`<br>• **Arch Linux**: `sudo pacman -S python opus pulseaudio`<br>• **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`<br>• **openSUSE**: `sudo zypper install python3 libopus0 pulseaudio-utils`<br>• **Gentoo**: `sudo emerge --ask dev-lang/python media-libs/opus media-sound/pulseaudio-daemon` |
 | **Không dán được ảnh (`Ctrl+V`)** | Thiếu công cụ clipboard cho Wayland / X11 | Cài đặt `wl-clipboard` (nếu dùng Wayland) hoặc `xclip` (nếu dùng X11). |
 | **Giao diện không tự đổi Dark/Light** | Ứng dụng mặc định giữ theme tĩnh | Đã hỗ trợ tự động nhận diện theo thời gian thực qua GNOME D-Bus và XDG Desktop Portal trong các bản build mới. |
-| **Không có icon trên menu ứng dụng** | Chạy AppImage trực tiếp chưa tích hợp | Dùng [Gear Lever](https://flathub.org/en/apps/it.mijorus.gearlever) để đưa vào Menu, hoặc tạo file `~/.local/share/applications/zalo.desktop`. |
+| **Không có icon trên menu ứng dụng** | Chạy AppImage trực tiếp chưa tích hợp | Nếu cài qua AM, chỉ cần chạy `am reinstall zalo`. Nếu chạy AppImage thủ công, dùng [Gear Lever](https://flathub.org/en/apps/it.mijorus.gearlever) để đưa vào Menu, hoặc tạo file `~/.local/share/applications/zalo.desktop`. |
 
 ---
 
 ## ⚠️ Các giới hạn hiện tại
 
-- **Cuộc gọi trên ARM64 (`aarch64`)**: Engine gọi điện chạy hoàn toàn bằng Node.js + Python (`zcall-native/`, không dùng Wine của x86), nhưng chưa được kiểm thử toàn diện trên thiết bị phần cứng ARM64 thực tế ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
-- **Giới hạn Sandbox trên Ubuntu 23.10+**: Do cơ chế AppArmor mới, cần chạy với `--no-sandbox` hoặc cấu hình profile AppArmor riêng cho `chrome-sandbox` ([Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72), [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143)).
+- **Cuộc gọi trên ARM64 (`aarch64`)**: Engine gọi điện chạy hoàn toàn bằng Node.js + Python (`zcall-native/`, không dùng Wine của x86) và đã được kiểm thử, xác nhận hoạt động trên phần cứng ARM64 bởi tester @lolmc0587 ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
+- **Giới hạn Sandbox trên Ubuntu 23.10+**: Do cơ chế AppArmor mới, cần chạy với `--no-sandbox` hoặc làm theo [hướng dẫn xử lý của AM](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) để cấu hình profile AppArmor ([Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72), [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143)).
 
 ---
 

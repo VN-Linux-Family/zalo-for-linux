@@ -26,7 +26,7 @@ Bản thân Zalo là phần mềm độc quyền. Không bao giờ commit binary
 - **Code** — patch JavaScript trong `scripts/patches/`, addon Rust trong `nativelibs/` và `zocr/`, Node.js và Python trong `zcall-native/`.
 - **Tài liệu** — hỗ trợ song ngữ (tiếng Anh và tiếng Việt) cho toàn bộ tài liệu (xem [Tài liệu](#tài-liệu)).
 - **Kiểm thử** — nhất là trên aarch64
-- **Đóng gói** — AppImage là bản build chính thức; repo cũng có Nix flake (xem mục NixOS trong [README.vi.md](./README.vi.md)).
+- **Đóng gói** — AppImage là bản build chính thức; repo cũng có Nix flake (xem mục NixOS trong [README.vi.md](./docs/user/README.vi.md)).
 
 ## Thiết lập môi trường phát triển
 

@@ -21,11 +21,10 @@ zalo-for-linux/
 ├── .github/          # GitHub workflows, issue templates và hướng dẫn
 ├── docs/             # Thư mục tài liệu tập trung (SSOT)
 │   ├── dev/          # Tài liệu kỹ thuật & phát triển (Kiến trúc, Viết patch, CI)
-│   └── user/         # Hướng dẫn người dùng (Tính năng, Bảng tra cứu lỗi)
+│   └── user/         # Hướng dẫn người dùng (Tính năng, Bảng tra cứu lỗi, README tiếng Việt)
 ├── LICENSE           # Giấy phép phần mềm (BSD 3-Clause)
 ├── main.js           # Điểm khởi chạy của Electron
-├── README.md         # Trang chủ dự án (Tiếng Anh)
-├── README.vi.md      # Trang chủ dự án (Tiếng Việt)
+├── README.md         # Trang chủ dự án
 ├── CONTRIBUTING.md   # Hướng dẫn đóng góp (Tiếng Anh)
 ├── CONTRIBUTING.vi.md# Hướng dẫn đóng góp (Tiếng Việt)
 ├── nativelibs        # Các native addon của Zalo được viết lại cho Linux

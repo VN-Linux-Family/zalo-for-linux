@@ -11,20 +11,25 @@ Tài liệu này hướng dẫn cách build Zalo for Linux từ mã nguồn, bao
 - Linux x86_64 hoặc aarch64
 - Node.js (phiên bản 22+) và npm
 - `7z` (`p7zip-full`) để giải nén gói ứng dụng macOS
-- Bộ công cụ biên dịch C++ và Rust cho các native addon (xem [nativelibs/README.vi.md](../../nativelibs/README.vi.md))
+- Bộ công cụ biên dịch C++ và Rust (`cargo` / `rustup`) cho các native addon (xem [nativelibs/README.vi.md](../../nativelibs/README.vi.md))
 
 - **Debian / Ubuntu**:
   ```bash
-  sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev clang libclang-dev llvm
+  sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev clang libclang-dev llvm cargo
   ```
 - **Arch Linux**:
   ```bash
-  sudo pacman -S p7zip base-devel openssl xz clang llvm
+  sudo pacman -S p7zip base-devel openssl xz clang llvm rust
   ```
 - **Fedora / RHEL**:
   ```bash
-  sudo dnf install p7zip p7zip-plugins @development-tools openssl-devel xz-devel clang llvm
+  sudo dnf install p7zip p7zip-plugins @development-tools openssl-devel xz-devel clang llvm cargo rust
   ```
+- **openSUSE**:
+  ```bash
+  sudo zypper install p7zip patterns-devel-base-devel_basis libopenssl-devel xz-devel clang llvm rust cargo
+  ```
+> *Hoặc cài đặt Rust qua [rustup](https://rustup.rs/): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`*
 
 ## Bắt đầu nhanh
 

@@ -10,23 +10,28 @@ reimplementation, see [nativelibs/README.md](../../nativelibs/README.md).
 
 ## Prerequisites
 
-- Linux x86_64
-- Node.js and npm
+- Linux x86_64 or aarch64
+- Node.js (version 22+) and npm
 - `7z` (`p7zip-full`) for extracting the macOS app
-- C++ build tools for native addons (see [nativelibs/README.md](../../nativelibs/README.md#requirements))
+- C++ and Rust build toolchains (`cargo` / `rustup`) for native addons (see [nativelibs/README.md](../../nativelibs/README.md#requirements))
 
 - **Debian / Ubuntu**:
   ```bash
-  sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev clang libclang-dev llvm
+  sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev clang libclang-dev llvm cargo
   ```
 - **Arch Linux**:
   ```bash
-  sudo pacman -S p7zip base-devel openssl xz clang llvm
+  sudo pacman -S p7zip base-devel openssl xz clang llvm rust
   ```
 - **Fedora / RHEL**:
   ```bash
-  sudo dnf install p7zip p7zip-plugins @development-tools openssl-devel xz-devel clang llvm
+  sudo dnf install p7zip p7zip-plugins @development-tools openssl-devel xz-devel clang llvm cargo rust
   ```
+- **openSUSE**:
+  ```bash
+  sudo zypper install p7zip patterns-devel-base-devel_basis libopenssl-devel xz-devel clang llvm rust cargo
+  ```
+> *Alternatively, install Rust via [rustup](https://rustup.rs/): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`*
 
 ## Quick Start
 

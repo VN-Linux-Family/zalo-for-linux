@@ -20,11 +20,10 @@ zalo-for-linux/
 ├── .github/          # GitHub workflows and contributing guidelines
 ├── docs/             # Centralized documentation (SSOT)
 │   ├── dev/          # Technical docs (Architecture, Development)
-│   └── user/         # End-user docs (Features, Known issues)
+│   └── user/         # End-user docs (Features, Known issues, Vietnamese README)
 ├── LICENSE           # License file, with disclaimer
 ├── main.js           # Electron entrypoint
-├── README.md         # Project homepage (English)
-├── README.vi.md      # Project homepage (Vietnamese)
+├── README.md         # Project homepage
 ├── nativelibs # Linux reimplementations of Zalo native addons
 │   ├── builder.js # CLI build helper
 │   ├── builder-rust.js # CLI build helper, for Rust-based addons

@@ -1,6 +1,6 @@
 # Zalo for Linux 🐧
 
-[English](./README.md) | **Tiếng Việt**
+[English](../../README.md) | **Tiếng Việt**
 
 [![Build Status](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml/badge.svg)](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml)
 
@@ -12,9 +12,9 @@ Cảm ơn **realdtn2** đã đưa ra giải pháp: [realdtn2/zalo-linux-2026](ht
 
 ## ⚡ Bắt đầu nhanh
 
-### 1. am
+### 1. AM
 
-Cài đặt và cập nhật trực tiếp qua [am](https://github.com/ivan-hc/AM):
+Cài đặt và cập nhật trực tiếp qua [AM](https://github.com/ivan-hc/AM) (nếu thích giao diện đồ họa, bạn có thể cài [AM-GUI](https://github.com/ivan-hc/AM-GUI)):
 
 ```bash
 # Cài đặt Zalo
@@ -25,7 +25,7 @@ am -u
 ```
 
 <p align="center">
-  <img width="600" alt="installer" src="./sample/am-guide.png" />
+  <img width="600" alt="installer" src="../../sample/am-guide.png" />
 </p>
 
 ---
@@ -99,6 +99,8 @@ chmod +x Zalo-*.AppImage
 > - **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`
 > - **Arch Linux**: `sudo pacman -S python opus pulseaudio`
 > - **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`
+> - **openSUSE**: `sudo zypper install python3 libopus0 pulseaudio-utils`
+> - **Gentoo**: `sudo emerge --ask dev-lang/python media-libs/opus media-sound/pulseaudio-daemon`
 
 </details>
 
@@ -114,7 +116,7 @@ git submodule update --init --recursive
 npm run main
 ```
 
-File AppImage hoàn chỉnh sẽ được lưu trong thư mục `dist/`. Chi tiết về các biến môi trường và quy trình build nằm trong [development.vi.md](./docs/dev/development.vi.md).
+File AppImage hoàn chỉnh sẽ được lưu trong thư mục `dist/`. Chi tiết về các biến môi trường và quy trình build nằm trong [development.vi.md](../dev/development.vi.md).
 
 </details>
 
@@ -124,13 +126,13 @@ File AppImage hoàn chỉnh sẽ được lưu trong thư mục `dist/`. Chi ti�
 
 | Tài liệu                                                          | Mục đích                                                                    |
 | :---------------------------------------------------------------- | :-------------------------------------------------------------------------- |
-| [**Lỗi thường gặp & Cách xử lý**](./docs/user/known-issues.vi.md) | Bảng tra cứu lỗi nhanh, cờ sandbox Ubuntu, và khắc phục âm thanh cuộc gọi.  |
-| [**Danh sách tính năng**](./docs/user/features.vi.md)             | Chế độ offline, khởi động ẩn khay hệ thống, userscript và giao diện ZaDark. |
-| [**Kiến trúc hệ thống**](./docs/dev/architecture.vi.md)           | Tổng quan kỹ thuật về Electron shell, patch pipeline và native addons.      |
-| [**Hướng dẫn phát triển**](./docs/dev/development.vi.md)          | Cài đặt môi trường code, build local và debug ứng dụng.                     |
-| [**Hướng dẫn viết Patch**](./docs/dev/patch-guide.vi.md)          | Quy chuẩn viết, kiểm thử và duy trì các bản vá JavaScript.                  |
-| [**Quy trình CI/CD & Release**](./docs/dev/ci-workflow.vi.md)     | Cơ chế thăm dò bản mới từ VNG, bot phát hành và cập nhật Nix hash.          |
-| [**Hướng dẫn đóng góp**](./CONTRIBUTING.vi.md)                    | Tiêu chuẩn mở PR, commit convention và quy định kiểm thử.                   |
+| [**Lỗi thường gặp & Cách xử lý**](./known-issues.vi.md)           | Bảng tra cứu lỗi nhanh, cờ sandbox Ubuntu, và khắc phục âm thanh cuộc gọi.  |
+| [**Danh sách tính năng**](./features.vi.md)                       | Chế độ offline, khởi động ẩn khay hệ thống, userscript và giao diện ZaDark. |
+| [**Kiến trúc hệ thống**](../dev/architecture.vi.md)               | Tổng quan kỹ thuật về Electron shell, patch pipeline và native addons.      |
+| [**Hướng dẫn phát triển**](../dev/development.vi.md)              | Cài đặt môi trường code, build local và debug ứng dụng.                     |
+| [**Hướng dẫn viết Patch**](../dev/patch-guide.vi.md)              | Quy chuẩn viết, kiểm thử và duy trì các bản vá JavaScript.                  |
+| [**Quy trình CI/CD & Release**](../dev/ci-workflow.vi.md)         | Cơ chế thăm dò bản mới từ VNG, bot phát hành và cập nhật Nix hash.          |
+| [**Hướng dẫn đóng góp**](../../CONTRIBUTING.vi.md)                | Tiêu chuẩn mở PR, commit convention và quy định kiểm thử.                   |
 
 ---
 
@@ -144,11 +146,11 @@ Dự án này không viết lại Zalo từ đầu. Cách làm như sau:
 4. Bọc ứng dụng đã giải nén trong một Electron shell tối giản, tương thích với Linux.
 5. Dùng `electron-builder`, sau đó là `quick-sharun` để đóng gói tất cả thành một file `AppImage` duy nhất, chạy được trên nhiều bản phân phối Linux.
 
-Tìm hiểu sâu hơn về build pipeline và cách patch trong [`architecture.md`](./docs/dev/architecture.md).
+Tìm hiểu sâu hơn về build pipeline và cách patch trong [`architecture.vi.md`](../dev/architecture.vi.md).
 
-Về các native addon (db-cross-v4, v.v.), xem [`nativelibs/README.md`](./nativelibs/README.md).
+Về các native addon (db-cross-v4, v.v.), xem [`nativelibs/README.vi.md`](../../nativelibs/README.vi.md).
 
-Về engine gọi điện native, xem [`zcall-native/README.md`](./zcall-native/README.md).
+Về engine gọi điện native, xem [`zcall-native/README.md`](../../zcall-native/README.md).
 
 ## 🐛 Xử lý sự cố và gỡ lỗi
 

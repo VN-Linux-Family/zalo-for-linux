@@ -81,7 +81,7 @@ Optional benchmarks: `npm run bench` and `npm run bench:patches`.
 Documentation is organized centrally with full bilingual support (English & Vietnamese):
 
 - **Developer & Technical Documentation** (`docs/dev/`): Architecture, development, patch guide, and CI workflow (`<doc>.md` and `<doc>.vi.md`).
-- **User Documentation** (`docs/user/` and root `README`): Available in English and Vietnamese (`README.md` / `README.vi.md`, `known-issues.md` / `known-issues.vi.md`, `features.md` / `features.vi.md`).
+- **User Documentation** (`docs/user/` and root `README`): Available in English and Vietnamese (`README.md` / `docs/user/README.vi.md`, `known-issues.md` / `known-issues.vi.md`, `features.md` / `features.vi.md`).
 - **Component Documentation**: Native addons in `nativelibs/` contain their own dedicated README files.
 
 ## Commits and pull requests

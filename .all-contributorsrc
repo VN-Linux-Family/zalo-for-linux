@@ -5,7 +5,7 @@
   "repoHost": "https://github.com",
   "files": [
     "README.md",
-    "README.vi.md"
+    "docs/user/README.vi.md"
   ],
   "imageSize": 100,
   "commit": false,

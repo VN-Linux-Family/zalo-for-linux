@@ -6,17 +6,17 @@ Quick diagnostic lookup table for common runtime and configuration issues on Lin
 
 | Symptom / Error | Root Cause | Quick Fix |
 | :--- | :--- | :--- |
-| **Crash on launch (Ubuntu 23.10+)** | Unprivileged user namespaces restricted by AppArmor | Add `--no-sandbox` to Zalo launcher command or `.desktop` entry. |
-| **Calls fail (Audio / Mic / Video)** | Missing system Opus codecs and PulseAudio utilities | Install required packages:<br>• **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`<br>• **Arch Linux**: `sudo pacman -S python opus pulseaudio`<br>• **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils` |
+| **Crash on launch (Ubuntu 23.10+)** | Unprivileged user namespaces restricted by AppArmor | Add `--no-sandbox` to Zalo launcher command or `.desktop` entry, or follow [AM Ubuntu Troubleshooting](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) to disable the restriction completely. |
+| **Calls fail (Audio / Mic / Video)** | Missing system Opus codecs and PulseAudio utilities | Install required packages:<br>• **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`<br>• **Arch Linux**: `sudo pacman -S python opus pulseaudio`<br>• **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`<br>• **openSUSE**: `sudo zypper install python3 libopus0 pulseaudio-utils`<br>• **Gentoo**: `sudo emerge --ask dev-lang/python media-libs/opus media-sound/pulseaudio-daemon` |
 | **Cannot paste images (`Ctrl+V`)** | Missing clipboard tool for Wayland/X11 | Install `wl-clipboard` (Wayland) or `xclip` (X11). |
 | **Dark mode does not follow system** | Application defaults to static theme | Built-in real-time detection via GNOME D-Bus and XDG Desktop Portal is enabled in current builds. |
-| **Missing desktop shortcut** | Manual AppImage execution without integration | Use [Gear Lever](https://flathub.org/en/apps/it.mijorus.gearlever) to integrate into desktop menu, or create `~/.local/share/applications/zalo.desktop`. |
+| **Missing desktop shortcut** | Manual AppImage execution without integration | If installed via AM, run `am reinstall zalo`. Otherwise, use [Gear Lever](https://flathub.org/en/apps/it.mijorus.gearlever) to integrate into desktop menu, or create `~/.local/share/applications/zalo.desktop`. |
 
 ---
 
 ## ⚠️ Active Limitations
 
-- **Calls on ARM64 (`aarch64`)**: The call engine runs on a native Node.js + Python stack (`zcall-native/`, eliminating x86-only Wine dependencies), but voice/video calls have not yet been fully tested on physical ARM64 hardware ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
+- **Calls on ARM64 (`aarch64`)**: The call engine runs on a native Node.js + Python stack (`zcall-native/`, eliminating x86-only Wine dependencies) and has been tested and verified working on ARM64 by community tester @lolmc0587 ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
 - **Ubuntu 23.10+ Sandbox Restrictions**: AppArmor blocks unprivileged user namespaces used by Electron's `chrome-sandbox`. Run with `--no-sandbox` or follow [AM Ubuntu Troubleshooting](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) ([Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72), [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143)).
 
 ---
