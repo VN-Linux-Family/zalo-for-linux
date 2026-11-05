@@ -228,35 +228,24 @@ jobs:
         tag_name: ${{ needs.build.outputs.zalo_version }}
         name: ${{ needs.build.outputs.zalo_version }}
         body: |
-          ## 🚀 How to use
-
-          It is recommended to use [Gear Lever](https://github.com/mijorus/gearlever) or [AM](https://github.com/ivan-hc/AM) to manage and integrate the AppImage.
-
-          Choose the appropriate AppImage for your system architecture below (x64 or aa64) and download it.
-
+          ### ⚡ Quick Run
           ```bash
-          # Install with Gear Lever
-          flatpak run it.mijorus.gearlever --integrate <downloaded-file>
+          chmod +x Zalo-*.AppImage && ./Zalo-*.AppImage
           ```
 
-          Or you can run the AppImage manually:
+          > 📞 **Voice & Video Calls**: Requires `python3`, `libopus`, and PulseAudio/PipeWire tools:  
+          > • **Debian/Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`  
+          > • **Arch Linux**: `sudo pacman -S python opus pulseaudio`
 
-          ```bash
-          chmod +x <downloaded-file> # Get the filename with ls, or you can use your file manager's GUI
-          ./<downloaded-file>
-          ```
+          ### 📦 Assets Guide
+          - **Architecture**: `x86_64` (Intel/AMD) or `aarch64` (ARM64).
+          - **Variants**: `Original` (standard theme) or `+ZaDark` (integrated dark mode & privacy).
+          - *Note: Download `.AppImage` files. Files ending in `.AppImage.zsync` are for delta updates only.*
 
-          > 📞 **Calls** (voice, video, screen sharing, group calls) run on a native Linux engine inside every AppImage: no Wine, no download. They need `python3`, libopus and the PulseAudio tools (Debian / Ubuntu: `sudo apt install python3 libopus0 pulseaudio-utils`); the first call says what is missing.
-
-          **NOTE: DO NOT download the files with `.AppImage.zsync`, they are only used for delta updates and cannot run directly.**
-
-          ## 📋 System Requirements
-          - Linux x64 or aa64
-          - GLIBC 2.35 or later
-
-          ## 🐛 Issues & Support
-          Please report issues in the [GitHub Issues](https://github.com/${{ github.repository }}/issues) section.
-
+          ### 📖 Documentation & Integration
+          - **Desktop Integration (Gear Lever, AM, NixOS)**: See [Quick Start Guide](https://github.com/${{ github.repository }}#readme).
+          - **Troubleshooting & Known Issues**: See [Known Issues & Fixes](https://github.com/${{ github.repository }}/blob/main/docs/user/known-issues.md).
+          - **Bug Reports**: Open an issue in [GitHub Issues](https://github.com/${{ github.repository }}/issues).
         files: dist/*.AppImage*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
