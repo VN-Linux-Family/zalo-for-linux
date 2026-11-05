@@ -17,7 +17,8 @@ async function main() {
   }
 
   const releaseDir = path.join(ZJXL_DIR, 'target', 'release');
-  const alreadyBuilt = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'));
+  const builtNode = path.join(releaseDir, 'zjxl.node');
+  const alreadyBuilt = fs.existsSync(builtNode);
 
   if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
     try {
