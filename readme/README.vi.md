@@ -226,7 +226,7 @@ Nếu gặp lỗi hoặc muốn xem ứng dụng đang hoạt động thế nào
 
 ### Giấy phép
 
-Dự án này được phát hành theo giấy phép BSD 3-Clause.
+Dự án này được phát hành theo giấy phép BSD 3-Clause "Mới" hoặc "Sửa đổi".
 
 ### Miễn trừ
 
@@ -234,4 +234,4 @@ Dự án này là bản port không chính thức và không liên kết với, 
 
 Zalo là thương hiệu của Tập đoàn VNG. Phần mềm này chỉ được cung cấp cho mục đích giáo dục và sử dụng cá nhân. Người dùng có trách nhiệm tuân thủ các điều khoản dịch vụ và pháp luật hiện hành.
 
-Dự án này không bảo trợ, xác minh hoặc chịu trách nhiệm cho bất kỳ bản fork nào từ bên thứ ba HOẶC các bản fork yêu cầu quyên góp; bất kỳ phiên bản chỉnh sửa hoặc bản fork nào chứa mã độc hoạt động hoàn toàn độc lập và không có sự ủy quyền của chúng mình, theo Điều khoản 3 của giấy phép BSD 3-Clause.
+Dự án này **không bảo trợ, xác minh hoặc chịu trách nhiệm** cho bất kỳ bản fork nào từ bên thứ ba HOẶC các bản fork yêu cầu quyên góp; bất kỳ phiên bản chỉnh sửa hoặc bản fork nào chứa mã độc hoạt động hoàn toàn độc lập và không có sự ủy quyền của chúng mình, theo Điều khoản 3 của giấy phép BSD 3-Clause.

@@ -227,7 +227,7 @@ If you encounter issues or want to inspect the app's behavior, you can easily op
 
 ### License
 
-This project is licensed under the BSD 3-Clause.
+This project is licensed under the BSD 3-Clause *“New” or “Revised”* License. 
 
 ### Disclaimer
 

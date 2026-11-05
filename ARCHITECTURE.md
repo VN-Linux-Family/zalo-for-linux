@@ -28,11 +28,14 @@ zalo-for-linux/
 │   ├── builder-rust.js # CLI build helper, for Rust-based addons
 │   ├── db-cross-v4 # Backup decryption & E2EE message synchronization addon
 │   ├── file-utilities # Asynchronous filesystem scanning & pattern matching addon
-│   ├── file-utils # Filesystem access and file management utilities addon 
-│   ├── mp4thumb # Video thumbnail extraction from MP4 files addon
+│   ├── file-utils # Filesystem access and file management utilities
+│   ├── mp4thumb # Video thumbnail extractor from MP4 files
+│   ├── v8-profiles # Native CPU profiler for Zalo
 │   ├── README.md # Contains info about the folder
-│   ├── zimage # Image processing, resizing, and format conversions addon
-│   └── zjxl # JPEG XL (JXL) image decoding and encoding support
+│   ├── zfile # Disk/volume info (free space, mount points) addon
+│   ├── zimage # Image processor, resizer, and format conversions
+│   ├── zjxl # JPEG XL (JXL) image decoder and encoder
+│   └── zwalker # Media-cache garbage collector
 ├── package.json  # Project metadata + build config
 ├── package-lock.json  # Project lock files
 ├── plugins # Zalo submodules/plugins
@@ -74,7 +77,7 @@ zalo-for-linux/
 `npm run main` runs the full pipeline:
 
 1. **check-versions** — Compares local vs latest Zalo release
-2. **download-dmg** — Downloads `ZaloSetup-universal-<version>.dmg` to `temp/`
+2. **download** — Downloads `ZaloSetup-universal-<version>.dmg` and `ZaloSetup-<version>.exe` to `temp/`
 3. **prepare-zadark** — Builds ZaDark assets (cloned from submodule)
 4. **prepare-app** — Extracts `app.asar` to `app/` and applies patches
    via `scripts/patches/`

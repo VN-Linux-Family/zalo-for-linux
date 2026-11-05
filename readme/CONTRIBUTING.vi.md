@@ -96,7 +96,10 @@ Pull request nhắm vào **`main`**.
 
 - Tên nhánh: `feat/<slug>`, `fix/<slug>`, `docs/<slug>`, `chore/<slug>`, tuyệt đối không pr từ nhánh `main` của repo fork để nhắm vào nhánh `main` của repo gốc.
 - Mỗi pull request một thay đổi logic, nếu sửa nhiều logic, vui lòng tách ra, việc tách mỗi pr 1 chức năng giúp cho reviewer dễ đọc code của bạn hơn.
-- Luôn rebase nhánh `main` trước khi mở pr
+- Luôn rebase nhánh `main` trước khi mở pr.
+- `app.setName` trong `main.js` và mục StartupWMClass trong phần `build` của `package.json` **luôn phải là `Zalo`**.
+- Nếu bạn phát triển một tính năng mới, vui lòng kiểm thử tính năng đó trên máy trước, sau đó chụp một ảnh màn hình về tính năng bạn mới thêm (nếu ảnh chụp chứa thông tin riêng tư/nhạy cảm của bạn, vui lòng làm mờ chúng, nếu không **chúng mình sẽ xóa ảnh chụp này vì quyền riêng tư của bạn**)
+- Nếu bạn thêm/cập nhật một Native addon, vui lòng cập nhật file [ARCHITECTURE.md](./ARCHITECTURE.md) and [nativelibs/README.md](./nativelibs/README.md) (kể cả bản tiếng Việt của chúng), để những người mới có thể hiểu rõ được addon của bạn sẽ làm gì.
 - Commit subject: tuân thủ convention, có thể tham khảo [link này](https://www.conventionalcommits.org/en/v1.0.0/).
 - Nội dung pull request: thay đổi gì và vì sao, `Closes #N` nếu sửa một issue, nền tảng bạn đã thử (x86_64 hay aarch64, X11 hay Wayland), và screenshot cho thay đổi UI.
 
@@ -105,6 +108,7 @@ Checklist trước khi mở:
 - [ ] `npm test` pass, và các test Rust ở trên pass nếu bạn sửa crate.
 - [ ] Không có file sinh ra khi build (`app/`, `temp/`, `dist/`, `node_modules/`).
 - [ ] Không có binary hay file `.node` dựng sẵn.
+- [ ] Đã kiểm thử trên máy bạn và chụp ảnh màn hình.
 - [ ] Tài liệu đã cập nhật cả hai ngôn ngữ.
 
 ## Báo cáo lỗi
@@ -119,6 +123,52 @@ Kèm theo:
 ## Đề xuất tính năng
 
 Kiểm tra [FEATURES.vi.md](./FEATURES.vi.md), [KNOWN_ISSUES.vi.md](./KNOWN_ISSUES.vi.md) và các issue hiện có trước. Mô tả use case và vì sao nó thuộc bản port này chứ không phải bản thân Zalo.
+
+## Sử dụng AI
+
+Chúng mình hoan nghênh việc sử dụng các công cụ AI một cách có trách nhiệm (như Codex, Claude Code, v.v.) để hỗ trợ viết các patch, tài liệu hoặc gỡ lỗi. Tuy nhiên, vui lòng tuân thủ các quy định sau:
+
+- **Rà soát lại mọi thứ:** Bạn chịu trách nhiệm hoàn toàn cho tất cả code và nội dung do mình gửi lên. Hãy đảm bảo bạn đã kiểm tra kỹ, kiểm thử và hiểu rõ bất kỳ kết quả nào do AI tạo ra trước khi mở pull request.
+- **Khai báo nếu sử dụng nhiều:** Nếu pull request hoặc một phần lớn của patch/tài liệu được tạo ra hoặc hỗ trợ chủ yếu bởi AI, vui lòng đề cập ngắn gọn trong phần mô tả của pull request để đảm bảo tính minh bạch.
+- **Không gửi code chưa qua kiểm chứng:** Không sao chép và dán mù quáng code do AI tạo ra, đặc biệt là đối với các addon gốc (`nativelibs/`, `zocr/`) hoặc các thành phần nhạy cảm về bảo mật, vì chúng có thể gây ra các lỗi an toàn bộ nhớ hoặc làm phát sinh lỗi cũ.
+
+## Code từ các repo khác
+
+Nếu bạn tích hợp mã nguồn từ một repo khác không sử dụng giấy phép BSD 3-Clause, vui lòng đính kèm thông tin giấy phép gốc như sau:
+
+- **Nếu là toàn bộ thư mục:** Thêm một file thông báo (vui lòng đặt tên là `LICENSE-<thư-mục>`) ở thư mục gốc của thư mục được mang sang:
+
+  ```text
+  This folder is licensed under the BSD 3-Clause LICENSE file at the project root.
+
+  --------------------------------------------------------------------------------
+
+  ORIGINAL CODE & PORTIONS NOTICE (<giấy-phép-gốc>)
+
+  The original code inside this directory was derived from:
+  <repo> (bạn có thể thêm "now deleted/hidden" nếu liên kết tới repo đã chết)
+
+  Copyright (c) 2024-2026 <tên> <email (nếu có)>
+
+  <văn-bản-giấy-phép-gốc>
+  ```
+
+- **Nếu là từng file riêng lẻ**: Thêm phần chú thích (comment header) ở ngay đầu file:
+
+  ```text
+  Original copyright
+  This file is derived from: <repo-gốc>
+  Copyright (c) 2026 <tên> <email>
+  Licensed under the <giấy-phép-gốc> License.
+  ---------------------------------------------------------------------------
+  Integration copyright
+  Copyright (c) 2026 doandat943 and Việt Nam Linux Family
+  Licensed under the BSD 3-Clause License.
+  ```
+
+- **Kiểm thử & Tính tương thích**: Giống như các đoạn code hay patch có sự hỗ trợ của AI, bạn chịu hoàn toàn trách nhiệm kiểm thử code ngoài để đảm bảo chúng hoạt động trong hệ thống build của chúng mình mà không gây ra lỗi hồi quy hay rò rỉ bộ nhớ.
+
+- **Ghi rõ nguồn**: Nêu rõ repo nguồn và xuất xứ chính xác trong phần mô tả pull request và lịch sử commit của bạn.
 
 ## Bảo mật
 

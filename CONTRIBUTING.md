@@ -15,16 +15,16 @@ Read the documents that explain how the project works:
 
 Then look through the [issues](https://github.com/VN-Linux-Family/zalo-for-linux/issues) and pull requests that already exist before starting: someone may be doing the same work.
 
-Zalo itself is proprietary. Never commit Zalo binaries, extracted `app.asar` contents, or prebuilt `.node` files — the native addons are always rebuilt from source and no proprietary code ships in this repository ([nativelibs/README.md](./nativelibs/README.md)).
+Zalo itself is proprietary. Please never commit Zalo binaries, extracted `app.asar` contents, or prebuilt `.node` files — the native addons are always rebuilt from source and no proprietary code ships in this repository ([nativelibs/README.md](./nativelibs/README.md)).
 
 ## Ways to contribute
 
 - **Bug reports** — see [Reporting bugs](#reporting-bugs).
 - **Feature requests** — see [Feature requests](#feature-requests).
-- **Code** — JavaScript patches in `scripts/patches/`, Rust addons in `nativelibs/` and `zocr/`, Node.js and Python in `zcall-native/`.
+- **Code** — JavaScript patches in `scripts/patches/`, Rust and gyp addons in `nativelibs/` and `zocr/`, Node.js and Python in `zcall-native/`.
 - **Documentation** — keep the English and Vietnamese versions in sync (see [Documentation](#documentation)).
 - **Testing** — especially on aarch64
-- **Packaging** — the AppImage is the official artefact; the repository also has a Nix flake (see the NixOS section in [README.md](./README.md)).
+- **Packaging** — the AppImage is the official artifact; the repository also has a Nix flake (see the NixOS section in [README.md](./README.md)).
 
 ## Development setup
 
@@ -97,6 +97,9 @@ Pull requests target **`main`**.
 - Branch names: `feat/<slug>`, `fix/<slug>`, `docs/<slug>`, `chore/<slug>` — never open a PR from your fork's `main` branch into the original repository's `main`.
 - One logical change per pull request; if you fix several, please split them — one feature per PR makes it easier for reviewers to read your code.
 - Always rebase on `main` before opening the PR.
+- The `app.setName` in `main.js` and the StartupWMClass entry in the `build` section of `package.json` **must be `Zalo`**.
+- If you develop a new feature, please test it locally first, then capture a screenshot (if it contains your private infomation, please blur them, otherwise **we will delete your screenshot for your privacy**).
+- If you add/update a new Native addon, please update [ARCHITECTURE.md](./ARCHITECTURE.md) and [nativelibs/README.md](./nativelibs/README.md) (including their Vietnamese version), so that newcomers can understand what your addon will do.
 - Commit subject: follow the convention — see [this link](https://www.conventionalcommits.org/en/v1.0.0/).
 - Pull request description: what changed and why, `Closes #N` when it fixes an issue, the platform you tested (x86_64 or aarch64, X11 or Wayland), and screenshots for UI changes.
 
@@ -105,7 +108,8 @@ Checklist before opening:
 - [ ] `npm test` passes, and the Rust tests above pass if you touched a crate.
 - [ ] No generated files (`app/`, `temp/`, `dist/`, `node_modules/`).
 - [ ] No prebuilt binaries or `.node` files.
-- [ ] Documentation updated in both languages.
+- [ ] Tested locally and captured the screenshot.
+- [ ] Documentation updated in both languages (if the changes are in `nativelibs`).
 
 ## Reporting bugs
 
@@ -119,6 +123,51 @@ Include:
 ## Feature requests
 
 Check [FEATURES.md](./FEATURES.md), [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) and the existing issues first. Describe the use case and why it belongs in this port rather than in Zalo itself.
+
+## AI usage
+
+We welcome the responsible use of AI tools (such as Codex, Claude Code, etc.) to assist with writing code patches, documentation, or debugging. However, please adhere to the following guidelines:
+
+- **Review everything:** You are fully responsible for all code and content you submit. Ensure you thoroughly review, test, and understand any AI-generated output before opening a pull request.
+- **Disclose significant use:** If a pull request or a major part of a patch/documentation is heavily generated or assisted by AI, please briefly mention it in the pull request description for transparency.
+- **No unverified code:** Do not blindly copy-paste AI-generated code, especially for native addons (`nativelibs/`, `zocr/`) or security-sensitive components, as they may introduce memory safety issues or regressions.
+
+## Code from other repositories
+
+If you incorporate code from another repository that does not use the BSD 3-Clause license, please include the original license information as follows:
+
+- **For an entire directory:** Add a notice file (please name it `LICENSE-<directory>`) at the root of the taken directory:
+
+  ```text
+  This folder is licensed under the BSD 3-Clause LICENSE file at the project root.
+
+  --------------------------------------------------------------------------------
+
+  ORIGINAL CODE & PORTIONS NOTICE (<original-license>)
+
+  The original code inside this directory was derived from:
+  <repo> (you can add "now deleted/hidden" if the link to the repository is dead)
+
+  Copyright (c) 2024-2026 <name> <email (if available)>
+
+  <original-license-text>
+  ```
+
+- **For an individual file**: Add a comment header at the very top of the file:
+
+  ```text
+  Original copyright
+  This file is derived from: <original-repo>
+  Copyright (c) 2026 <name> <email>
+  Licensed under the <original-license> License.
+  ---------------------------------------------------------------------------
+  Integration copyright
+  Copyright (c) 2026 doandat943 and Việt Nam Linux Family
+  Licensed under the BSD 3-Clause License.
+  ```
+
+- **Testing & Compatibility:** Just like code or patches assisted by AI, you are fully responsible for testing external code to ensure them works within our build pipeline without regressions or memory leaks.
+- **Explicit attribution:** Clearly specify the exact source repository and origin in your pull request description and commit history.
 
 ## Security
 
