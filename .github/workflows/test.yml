@@ -6,15 +6,25 @@ on:
       - main
     paths-ignore:
       - '**.md'
-      - 'readme/**'
+      - '**/.gitignore'
+      - '**/LICENSE'
       - '**/LICENSE*'
+      - 'readme/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'nix/**'
   pull_request:
     branches:
       - main
     paths-ignore:
       - '**.md'
-      - 'readme/**'
+      - '**/.gitignore'
+      - '**/LICENSE'
       - '**/LICENSE*'
+      - 'readme/**'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'nix/**'
   workflow_dispatch:
 
 concurrency:
