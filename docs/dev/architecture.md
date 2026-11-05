@@ -36,6 +36,7 @@ zalo-for-linux/
 │   ├── zfile # Disk/volume info (free space, mount points) addon
 │   ├── zimage # Image processor, resizer, and format conversions
 │   ├── zjxl # JPEG XL (JXL) image decoder and encoder
+│   ├── zlang # Natural language identification (whatlang)
 │   └── zwalker # Media-cache garbage collector
 ├── package.json  # Project metadata + build config
 ├── package-lock.json  # Project lock files
