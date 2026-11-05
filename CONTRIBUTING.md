@@ -1,6 +1,7 @@
 # Contributing to Zalo for Linux
 
 **English** | [Tiếng Việt](./CONTRIBUTING.vi.md)
+
 Thanks for taking the time to contribute. Zalo for Linux is a port that originates from the official macOS build and repackages it with patches for Linux.
 
 ## Before you start
@@ -82,6 +83,7 @@ Documentation is organized centrally with full bilingual support (English & Viet
 - **Developer & Technical Documentation** (`docs/dev/`): Architecture, development, patch guide, and CI workflow (`<doc>.md` and `<doc>.vi.md`).
 - **User Documentation** (`docs/user/` and root `README`): Available in English and Vietnamese (`README.md` / `README.vi.md`, `known-issues.md` / `known-issues.vi.md`, `features.md` / `features.vi.md`).
 - **Component Documentation**: Native addons in `nativelibs/` contain their own dedicated README files.
+
 ## Commits and pull requests
 
 Pull requests target **`main`**.

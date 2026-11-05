@@ -24,7 +24,9 @@ am -i zalo
 am -u
 ```
 
-<img width="600" alt="installer" src="./sample/am-guide.png" />
+<p align="center">
+  <img width="600" alt="installer" src="./sample/am-guide.png" />
+</p>
 
 ---
 
@@ -115,6 +117,7 @@ npm run main
 File AppImage hoàn chỉnh sẽ được lưu trong thư mục `dist/`. Chi tiết về các biến môi trường và quy trình build nằm trong [development.vi.md](./docs/dev/development.vi.md).
 
 </details>
+
 ---
 
 ## 📚 Danh mục tài liệu hướng dẫn

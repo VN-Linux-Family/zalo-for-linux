@@ -24,7 +24,9 @@ am -i zalo
 am -u
 ```
 
-<img width="600" alt="installer" src="./sample/am-guide.png" />
+<p align="center">
+  <img width="600" alt="installer" src="./sample/am-guide.png" />
+</p>
 
 ---
 
@@ -117,6 +119,7 @@ npm run main
 The compiled AppImage will be saved in `dist/`. For build pipeline details and environment variables, see [development.md](./docs/dev/development.md).
 
 </details>
+
 ---
 
 ## 📚 Documentation & Guides
