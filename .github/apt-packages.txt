@@ -1,0 +1,23 @@
+# System packages needed to build the AppImages.
+# Shared by the x86_64 and aarch64 jobs; also the cache key for apt archives.
+git
+curl
+wget
+ca-certificates
+xz-utils
+python3
+build-essential
+libssl-dev
+liblzma-dev
+p7zip-full
+gcc
+g++
+clang
+libclang-dev
+llvm
+libc6-dev
+libx11-dev
+libxcb1-dev
+libxext-dev
+zlib1g-dev
+zsync

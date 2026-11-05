@@ -140,3 +140,4 @@ profiles/
 *.cpuprofile
 *.heapprofile
 bun.lock
+graphify-out/

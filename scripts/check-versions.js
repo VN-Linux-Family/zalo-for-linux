@@ -58,6 +58,10 @@ async function getLatestZaloVersion() {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     }, (response) => {
+      // Node 19+ keeps sockets alive by default, which would make the one-shot
+      // --print-zalo-version run linger until the 10s timeout below.
+      response.destroy();
+
       if (response.statusCode === 302 || response.statusCode === 301) {
         const redirectUrl = response.headers.location;
         if (redirectUrl && redirectUrl.includes('.dmg')) {
@@ -161,7 +165,18 @@ async function getExistingCombinations() {
 }
 
 if (require.main === module) {
-  main();
+  if (process.argv.includes('--print-zalo-version')) {
+    // Used by the workflow to key caches on the installer version. Does not
+    // touch GITHUB_OUTPUT/GITHUB_ENV; main() still runs in the build step.
+    getLatestZaloVersion()
+      .then((version) => console.log(version))
+      .catch((error) => {
+        logger.error('Could not resolve Zalo version:', error.message);
+        process.exit(1);
+      });
+  } else {
+    main();
+  }
 }
 
-module.exports = { main };
+module.exports = { main, getLatestZaloVersion };
