@@ -1,6 +1,6 @@
 # Zalo for Linux 🐧
 
-[English](../README.md) | **Tiếng Việt**
+[English](../../README.md) | **Tiếng Việt**
 
 [![Build Status](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml/badge.svg)](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml)
 
@@ -10,189 +10,131 @@ Bản port Zalo desktop không chính thức, do cộng đồng phát triển, *
 
 Cảm ơn **realdtn2** đã đưa ra giải pháp: [realdtn2/zalo-linux-2026](https://github.com/DMKha241/zalo-linux-2026) (repo gốc đã bị xóa/ẩn, chúng mình đang dùng một repo dự phòng từ [DMKha241](https://github.com/DMKha241)).
 
-## ⚠️ Lưu ý quan trọng: Các lỗi đã biết
+## ⚡ Bắt đầu nhanh
 
-> 💡 **Danh sách đầy đủ các lỗi đã sửa, cách khắc phục tạm thời và ghi nhận đóng góp của cộng đồng nằm trong [KNOWN_ISSUES.vi.md](./KNOWN_ISSUES.vi.md).**
+### 1. AM
 
-Dự án này phù hợp nhất với những ai cần một ứng dụng Zalo chạy như ứng dụng gốc trên Linux và không ngại xử lý một vài thao tác kỹ thuật để dùng đầy đủ tính năng.
-
-## ✨ Tính năng bổ sung
-
-Dự án có thêm một số tính năng mà bản Zalo chính thức không có.
-
-✨ **Danh sách đầy đủ các tính năng có trong dự án nằm trong [FEATURES.vi.md](./FEATURES.vi.md).**
-
-## 🚀 Bắt đầu nhanh
-
-### Cài đặt và sử dụng
-
-Chúng mình khuyên bạn nên dùng **Gear Lever** hoặc **AM** để AppImage được tích hợp gọn gàng vào menu ứng dụng của hệ thống.
-
-**Lưu ý:** Zalo for Linux đã có sẵn thông tin cập nhật bên trong, bạn không cần tự cấu hình gì thêm để cập nhật ứng dụng.
-
-#### Nếu bạn dùng AM
-
-*Lưu ý: nếu bạn chọn cài `appman` thì thay `am` bằng `appman` trong tất cả các dòng chứa chuỗi này.*
-
-1. Cài **AM** theo [hướng dẫn của AM](https://github.com/ivan-hc/AM#using-the-am-installer-script-to-choose-between-local-and-system-wide-installation).
-2. Chạy lệnh sau để cài Zalo:
-   ```bash
-   am -i zalo
-   ```
-3. Một lời nhắc như hình dưới sẽ hiện ra:
-   <img width="747" height="600" alt="installer" src="../sample/am-guide.png" />
-
-   *Bạn chọn phiên bản mình muốn, AM sẽ tự tải đúng phiên bản.*
-4. Vậy là ứng dụng **đã được cài**. Bạn có thể mở Zalo từ menu ứng dụng của hệ thống.
-
-   Hoặc chạy từ dòng lệnh (terminal):
-   ```bash
-   zalo
-   ```
-5. Cách cập nhật:
-   Chỉ cần chạy lệnh dưới đây, AM sẽ **tự động cập nhật mọi ứng dụng đã cài qua AM (bao gồm Zalo)**:
-   ```bash
-   am -u
-   ```
-   *Mẹo: Bạn nên cài đặt `appimageupdatetool` từ AM bằng cách chạy lệnh `am -i appimageupdatetool` để cập nhật các ứng dụng nhanh hơn. Phiên bản đầu tiên (cái có số là 1) được khuyến nghị hơn phiên bản thứ hai (có số là 2).*
-
-#### Nếu bạn dùng Gear Lever
-
-1. Tải file `.AppImage` mới nhất ở trang [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases).
-2. Cài **Gear Lever** từ [Flathub](https://flathub.org/en/apps/it.mijorus.gearlever).
-3. Mở **Gear Lever**.
-4. Bấm nút **"Open"** ở góc trên bên trái rồi chọn file `.AppImage` vừa tải.
-5. Ứng dụng sẽ hiện trong Gear Lever. Bấm nút **"Unlock"**, sau đó chọn **"Move to the app menu"** để đưa Zalo vào menu ứng dụng của hệ thống.
-6. Cách cập nhật:
-   - Mở **Gear Lever**.
-   - Khi có bản cập nhật, nút **No updates available** sẽ chuyển thành **Update**. Bạn chỉ cần bấm vào là Zalo được cập nhật.
-
-#### Nếu bạn dùng NixOS
-
-Repo này là một flake, cài Zalo từ file AppImage của bản phát hành, kèm sẵn những thứ cần cho cuộc gọi (`python3`, libopus, bộ công cụ PulseAudio).
-
-1. Thêm flake vào `flake.nix` của hệ thống và import module của nó:
-   ```nix
-   {
-     inputs.zalo-for-linux = {
-       url = "github:VN-Linux-Family/zalo-for-linux";
-       inputs.nixpkgs.follows = "nixpkgs";
-     };
-
-     outputs = { nixpkgs, zalo-for-linux, ... }: {
-       nixosConfigurations.<hostname> = nixpkgs.lib.nixosSystem {
-         modules = [
-           zalo-for-linux.nixosModules.default
-           ./configuration.nix
-         ];
-       };
-     };
-   }
-   ```
-2. Bật Zalo trong `configuration.nix`:
-   ```nix
-   programs.zalo = {
-     enable = true;
-     # variant = "original";  # bản AppImage không có ZaDark
-   };
-   ```
-   Cuộc gọi cần âm thanh qua PipeWire (`services.pipewire.pulse.enable = true;`) hoặc PulseAudio.
-3. Áp dụng bằng lệnh `sudo nixos-rebuild switch`.
-4. Cách cập nhật:
-   ```bash
-   nix flake update zalo-for-linux
-   sudo nixos-rebuild switch
-   ```
-   *Lưu ý: mỗi lần build lại, file AppImage cũ trên trang Releases bị xoá. Nếu `nixos-rebuild` báo lỗi tải file (404), hãy chạy `nix flake update zalo-for-linux` để flake trỏ sang bản mới nhất rồi rebuild lại.*
-
-#### Nếu bạn dùng Home Manager
-
-Flake cũng có module cho Home Manager với các option `programs.zalo` giống hệt, cài Zalo cho riêng người dùng của bạn (trên NixOS hay distro nào cũng được).
-
-1. Thêm flake vào `flake.nix` và import module của nó:
-   ```nix
-   {
-     inputs.zalo-for-linux = {
-       url = "github:VN-Linux-Family/zalo-for-linux";
-       inputs.nixpkgs.follows = "nixpkgs";
-     };
-
-     outputs = { nixpkgs, home-manager, zalo-for-linux, ... }: {
-       homeConfigurations.<username> = home-manager.lib.homeManagerConfiguration {
-         pkgs = nixpkgs.legacyPackages.x86_64-linux;
-         modules = [
-           zalo-for-linux.homeModules.default
-           ./home.nix
-         ];
-       };
-     };
-   }
-   ```
-   Nếu bạn dùng Home Manager dưới dạng module của NixOS, hãy thêm `zalo-for-linux.homeModules.default` vào `home-manager.sharedModules` (hoặc vào `imports` trong config người dùng).
-2. Bật Zalo trong `home.nix`:
-   ```nix
-   programs.zalo = {
-     enable = true;
-     # variant = "original";  # bản AppImage không có ZaDark
-   };
-   ```
-3. Áp dụng bằng lệnh `home-manager switch` (hoặc `sudo nixos-rebuild switch` nếu Home Manager là module của NixOS).
-4. Cách cập nhật:
-   ```bash
-   nix flake update zalo-for-linux
-   home-manager switch
-   ```
-
-Muốn chạy thử mà không cài: `nix run github:VN-Linux-Family/zalo-for-linux`.
-
-#### Chạy thủ công (không khuyến khích)
-
-1. Tải file `.AppImage` mới nhất ở trang [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases).
-2. Cấp quyền thực thi cho file:
-   ```bash
-   chmod +x <tên-file-đã-tải> # Xem tên file bằng lệnh ls, hoặc dùng trình quản lý file
-   ```
-3. Chạy ứng dụng bằng lệnh:
-   ```bash
-   ./<tên-file-đã-tải>
-   ```
-4. Để cập nhật, bạn chỉ cần **tải lại file `.AppImage` mới nhất** ở trang **Releases**, rồi **làm lại bước 2 và 3**.
-
-*LƯU Ý: Sau khi cập nhật, hãy thoát hẳn ứng dụng rồi mở lại để thay đổi mới được áp dụng.*
-
-### Tự build từ mã nguồn
-
-Yêu cầu:
-
-- Linux x86_64 hoặc aarch64
-- Node.js và npm
-- 7z (p7zip-full) để giải nén ứng dụng macOS trong bước setup
-- C++ build tools (cho các native addon): `build-essential`, `libssl-dev`, `liblzma-dev`
-- Rust toolchain, `clang`, `libclang-dev`, `llvm` (cho các native addon viết bằng Rust)
-- Để gọi điện bằng bản đã build: `python3`, `libopus0`, `pulseaudio-utils` (không cần biên dịch gì, không Wine)
-
-Trên Debian/Ubuntu:
+Cài đặt và cập nhật trực tiếp qua [AM](https://github.com/ivan-hc/AM) (nếu thích giao diện đồ họa, bạn có thể cài [AM-GUI](https://github.com/ivan-hc/AM-GUI)):
 
 ```bash
-sudo apt update && sudo apt install -y build-essential liblzma-dev p7zip-full gcc g++ clang libclang-dev llvm libx11-dev libxcb1-dev libxext-dev zsync
+# Cài đặt Zalo
+am -i zalo
+
+# Cập nhật Zalo
+am -u
 ```
 
-Các bước:
+<p align="center">
+  <img width="600" alt="installer" src="../../sample/am-guide.png" />
+</p>
+
+---
+
+### 2. Nix
+
+Kho lưu trữ cung cấp sẵn một Nix flake đã đóng gói AppImage cùng các phụ thuộc gọi điện:
+
+**Cấu hình hệ thống NixOS (`flake.nix` + `configuration.nix`):**
+
+```nix
+# flake.nix
+{
+  inputs.zalo-for-linux = {
+    url = "github:VN-Linux-Family/zalo-for-linux";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  outputs = { nixpkgs, zalo-for-linux, ... }: {
+    nixosConfigurations.<hostname> = nixpkgs.lib.nixosSystem {
+      modules = [ zalo-for-linux.nixosModules.default ./configuration.nix ];
+    };
+  };
+}
+```
+
+```nix
+# configuration.nix
+programs.zalo = {
+  enable = true;
+  # variant = "original"; # bỏ chú thích nếu muốn dùng bản gốc không kèm ZaDark
+};
+```
+
+**Home Manager (`home.nix`):**
+
+```nix
+programs.zalo.enable = true;
+```
+
+**Chạy thử trực tiếp không cần cài đặt:**
 
 ```bash
-# Clone repository
+nix run github:VN-Linux-Family/zalo-for-linux
+```
+
+### 3. Các cách cài đặt khác
+
+<details>
+<summary><b>⚙️ Gear Lever (Khuyên dùng để thêm vào Menu ứng dụng)</b></summary>
+
+1. Tải file `.AppImage` từ mục [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases).
+2. Cài **Gear Lever** từ [Flathub](https://flathub.org/en/apps/it.mijorus.gearlever).
+3. Mở Gear Lever $\rightarrow$ bấm **Open** $\rightarrow$ chọn file `.AppImage` đã tải.
+4. Bấm **Move to the app menu** để đưa Zalo vào menu ứng dụng của máy tính.
+5. Các bản cập nhật tiếp theo sẽ được Gear Lever tự động nhận diện và cập nhật qua nút **Update**.
+
+</details>
+
+<details>
+<summary><b>📦 Chạy thủ công</b></summary>
+
+Tải file `.AppImage` mới nhất từ mục [**Releases**](https://github.com/VN-Linux-Family/zalo-for-linux/releases), cấp quyền thực thi và khởi chạy:
+
+```bash
+chmod +x Zalo-*.AppImage
+./Zalo-*.AppImage
+```
+
+> 📞 **Yêu cầu gọi thoại & video**: Cài đặt các gói âm thanh sau để sử dụng engine gọi native:
+>
+> - **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`
+> - **Arch Linux**: `sudo pacman -S python opus pulseaudio`
+> - **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`
+> - **openSUSE**: `sudo zypper install python3 libopus0 pulseaudio-utils`
+> - **Gentoo**: `sudo emerge --ask dev-lang/python media-libs/opus media-sound/pulseaudio-daemon`
+
+</details>
+
+<details>
+<summary><b>🛠️ Tự build từ mã nguồn</b></summary>
+
+Yêu cầu: Node.js 22+, npm, `7z` (`p7zip-full`), bộ công cụ C++ và Rust.
+
+```bash
 git clone https://github.com/VN-Linux-Family/zalo-for-linux.git
 cd zalo-for-linux
-# Khởi tạo hoặc cập nhật submodule
 git submodule update --init --recursive
-
-# Chạy setup + build (tải DMG, giải nén, patch, đóng gói)
 npm run main
 ```
 
-File AppImage hoàn chỉnh sẽ nằm trong thư mục `dist/`.
+File AppImage hoàn chỉnh sẽ được lưu trong thư mục `dist/`. Chi tiết về các biến môi trường và quy trình build nằm trong [development.vi.md](../dev/development.vi.md).
 
-> Hướng dẫn chi tiết về build pipeline, các script, biến môi trường và cách thêm patch mới nằm trong [`DEVELOPMENT.vi.md`](./DEVELOPMENT.vi.md).
+</details>
+
+---
+
+## 📚 Danh mục tài liệu hướng dẫn
+
+| Tài liệu                                                          | Mục đích                                                                    |
+| :---------------------------------------------------------------- | :-------------------------------------------------------------------------- |
+| [**Lỗi thường gặp & Cách xử lý**](./known-issues.vi.md)           | Bảng tra cứu lỗi nhanh, cờ sandbox Ubuntu, và khắc phục âm thanh cuộc gọi.  |
+| [**Danh sách tính năng**](./features.vi.md)                       | Chế độ offline, khởi động ẩn khay hệ thống, userscript và giao diện ZaDark. |
+| [**Kiến trúc hệ thống**](../dev/architecture.vi.md)               | Tổng quan kỹ thuật về Electron shell, patch pipeline và native addons.      |
+| [**Hướng dẫn phát triển**](../dev/development.vi.md)              | Cài đặt môi trường code, build local và debug ứng dụng.                     |
+| [**Hướng dẫn viết Patch**](../dev/patch-guide.vi.md)              | Quy chuẩn viết, kiểm thử và duy trì các bản vá JavaScript.                  |
+| [**Quy trình CI/CD & Release**](../dev/ci-workflow.vi.md)         | Cơ chế thăm dò bản mới từ VNG, bot phát hành và cập nhật Nix hash.          |
+| [**Hướng dẫn đóng góp**](../../CONTRIBUTING.vi.md)                | Tiêu chuẩn mở PR, commit convention và quy định kiểm thử.                   |
+
+---
 
 ## ⚙️ Cách hoạt động
 
@@ -204,25 +146,18 @@ Dự án này không viết lại Zalo từ đầu. Cách làm như sau:
 4. Bọc ứng dụng đã giải nén trong một Electron shell tối giản, tương thích với Linux.
 5. Dùng `electron-builder`, sau đó là `quick-sharun` để đóng gói tất cả thành một file `AppImage` duy nhất, chạy được trên nhiều bản phân phối Linux.
 
-Tìm hiểu sâu hơn về build pipeline và cách patch trong [`ARCHITECTURE.vi.md`](./ARCHITECTURE.vi.md).
+Tìm hiểu sâu hơn về build pipeline và cách patch trong [`architecture.vi.md`](../dev/architecture.vi.md).
 
-Về các native addon (db-cross-v4, v.v.), xem [`nativelibs.vi.md`](./nativelibs.vi.md).
+Về các native addon (db-cross-v4, v.v.), xem [`nativelibs/README.vi.md`](../../nativelibs/README.vi.md).
 
-Về engine gọi điện native, xem [`zcall-native/README.md`](../zcall-native/README.md).
+Về engine gọi điện native, xem [`zcall-native/README.md`](../../zcall-native/README.md).
 
 ## 🐛 Xử lý sự cố và gỡ lỗi
 
 Nếu gặp lỗi hoặc muốn xem ứng dụng đang hoạt động thế nào, bạn có thể mở Chrome Developer Tools (DevTools) bằng một trong hai cách:
+
 - **Phím tắt**: nhấn `Ctrl` + `Shift` + `I` khi đang ở cửa sổ Zalo.
 - **Menu ở khay hệ thống**: nhấp chuột phải vào biểu tượng Zalo ở khay hệ thống và chọn **"Toggle DevTools"**.
-
-## 📚 Tài liệu khác
-
-- [KNOWN_ISSUES.vi.md](./KNOWN_ISSUES.vi.md): các lỗi đã biết, cách khắc phục tạm thời và lịch sử các lỗi đã sửa
-- [ARCHITECTURE.vi.md](./ARCHITECTURE.vi.md): cách build pipeline và các patch hoạt động
-- [DEVELOPMENT.vi.md](./DEVELOPMENT.vi.md): build từ mã nguồn, các script, cách thêm patch
-- [nativelibs.vi.md](./nativelibs.vi.md): các native addon (db-cross-v4, v.v.)
-- [zcall-native/README.md](../zcall-native/README.md): engine gọi điện native
 
 ## Những người đóng góp
 

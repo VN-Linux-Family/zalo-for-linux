@@ -1,0 +1,96 @@
+name: 🐛 Bug Report
+description: Report unexpected behavior, crashes, or functional regressions in Zalo for Linux.
+title: "fix: <brief description of the issue>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue!
+        Before submitting, please review our [Known Issues & Workarounds](https://github.com/VN-Linux-Family/zalo-for-linux/blob/main/docs/user/known-issues.md) to see if a known fix already exists (e.g. Ubuntu sandbox flags, audio dependencies for calls).
+
+  - type: dropdown
+    id: variant
+    attributes:
+      label: Zalo Variant
+      description: Which build variant are you using?
+      options:
+        - "Zalo + ZaDark (Default)"
+        - "Zalo Original (Standard macOS theme without ZaDark)"
+        - "Custom build from source"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation Method
+      description: How did you install or run Zalo for Linux?
+      options:
+        - "Direct AppImage download"
+        - "Gear Lever"
+        - "AM / AppMan"
+        - "NixOS Flake / Home Manager"
+        - "AUR (Arch User Repository)"
+        - "Built from source via npm run main"
+        - "Other"
+    validations:
+      required: true
+
+  - type: input
+    id: system_info
+    attributes:
+      label: System Environment
+      description: Your Linux distribution, kernel version, and Desktop Environment.
+      placeholder: "e.g. Ubuntu 24.04 LTS / GNOME 46 / Kernel 6.8"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: display_server
+    attributes:
+      label: Display Server
+      description: What display server protocol are you running on?
+      options:
+        - "Wayland"
+        - "X11"
+        - "Unknown / Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Clear and concise description of what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the issue.
+      placeholder: |
+        1. Open Zalo
+        2. Click on ...
+        3. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal Logs & Output
+      description: Terminal output when launched with logging enabled (`ELECTRON_ENABLE_LOGGING=1 ./Zalo-*.AppImage`).
+      render: shell
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Validation Checklist
+      options:
+        - label: "I have checked [Known Issues & Troubleshooting](https://github.com/VN-Linux-Family/zalo-for-linux/blob/main/docs/user/known-issues.md) and confirmed this issue is not already documented with a known workaround."
+          required: true
+        - label: "I have searched existing [GitHub Issues](https://github.com/VN-Linux-Family/zalo-for-linux/issues) to ensure this is not a duplicate."
+          required: true
