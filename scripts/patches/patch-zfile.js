@@ -99,11 +99,17 @@ async function main() {
   if (!disks || typeof disks !== 'object' || Object.keys(disks).length === 0) {
     throw new Error('patch-zfile: post-condition failed — zfile.diskInfo() returned no drives');
   }
-  const probe = disks['/some/deep/nonexistent/path/for/postcondition'];
-  if (!probe || typeof probe.totalSpace !== 'number' || probe.totalSpace <= 0) {
-    throw new Error('patch-zfile: post-condition failed — diskInfo() Proxy did not resolve an absolute path to a mount entry (renderer by-path lookup would throw)');
+  const availableMounts = Object.keys(disks);
+  if (availableMounts.length > 0) {
+    // Get a mount point that found, then probe a deep nonexistent path under it. The wrapper should resolve that path to the mount point.
+    const baseMount = availableMounts[0];
+    const testPath = path.join(baseMount, 'deep/nonexistent/path/for/postcondition');
+    
+    const probe = disks[testPath];
+    if (!probe || typeof probe.totalSpace !== 'number' || probe.totalSpace <= 0) {
+      throw new Error('patch-zfile: post-condition failed — diskInfo() Proxy did not resolve an absolute path to a mount entry');
+    }
   }
-
   logger.success('zfile built and installed');
 }
 
