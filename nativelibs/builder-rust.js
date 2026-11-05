@@ -20,12 +20,21 @@ const ELECTRON_VERSION = PACKAGE_JSON.devDependencies.electron.replace(/^\^/, ''
 const repoRoot = path.resolve(__dirname, '..');
 const libDir = path.resolve(repoRoot, process.argv[2] || '');
 if (libDir !== repoRoot && !libDir.startsWith(repoRoot + path.sep)) {
-  throw new Error(`Lib dir must be inside the repository: ${libDir}`);
+ throw new Error(`Lib dir must be inside the repository: ${libDir}`);
 }
-const buildDir = path.join(libDir, 'target');
-const releaseBinary = path.join(buildDir, 'release');
 
-logger.dim(`Lib dir: ${libDir}`);
+const cargoTomlPath = path.join(libDir, 'Cargo.toml');
+if (!fs.existsSync(cargoTomlPath)) {
+ throw new Error(`Cargo.toml not found in ${libDir}`);
+}
+const cargoToml = fs.readFileSync(cargoTomlPath, 'utf8');
+const crateNameMatch = cargoToml.match(/name\s*=\s*"([^"]+)"/);
+const crateName = crateNameMatch ? crateNameMatch[1] : path.basename(libDir);
+
+const workspaceRelease = path.join(repoRoot, 'target', 'release');
+const localRelease = path.join(libDir, 'target', 'release');
+
+logger.dim(`Lib dir: ${libDir} (package: ${crateName})`);
 logger.dim(`Electron: ${ELECTRON_VERSION}`);
 
 // `openh264-sys2` compiles OpenH264's C++ through the `cc` crate, which
@@ -35,27 +44,29 @@ logger.dim(`Electron: ${ELECTRON_VERSION}`);
 // (the module then fails to dlopen). Drop LTO flags for this build.
 const env = { ...process.env };
 for (const key of ['CFLAGS', 'CXXFLAGS', 'LDFLAGS']) {
-  if (env[key]) env[key] = env[key].replace(/\s*-flto(=\S+)?/g, '');
+ if (env[key]) env[key] = env[key].replace(/\s*-flto(=\S+)?/g, '');
 }
 
 execSync(
-  `cargo build --release`,
-  { cwd: libDir, stdio: 'inherit', env }
+ `cargo build --release -p ${crateName}`,
+ { cwd: repoRoot, stdio: 'inherit', env }
 );
 
-const files = fs.readdirSync(releaseBinary).filter(f => f.endsWith('.so'));
-if (files.length === 0) {
-  throw new Error(`Build succeeded but binary not found in ${releaseBinary}`);
+const soFile = `lib${crateName.replace(/-/g, '_')}.so`;
+const nodeName = `${crateName}.node`;
+const workspaceSo = path.join(workspaceRelease, soFile);
+const localSo = path.join(localRelease, soFile);
+
+const sourceSo = fs.existsSync(workspaceSo) ? workspaceSo : (fs.existsSync(localSo) ? localSo : null);
+if (!sourceSo) {
+ throw new Error(`Build succeeded but binary ${soFile} not found in ${workspaceRelease} or ${localRelease}`);
 }
 
-for (const file of files) {
-  const newName = file.replace(/^lib/, '').replace(/\.so$/, '.node').replace(/_/g, '-');
-  fs.renameSync(
-    path.join(releaseBinary, file),
-    path.join(releaseBinary, newName)
-  );
-}
+const workspaceNode = path.join(workspaceRelease, nodeName);
+fs.copyFileSync(sourceSo, workspaceNode);
 
-const nodeFiles = fs.readdirSync(releaseBinary).filter(f => f.endsWith('.node'));
-const binaryPath = path.join(releaseBinary, nodeFiles[0]);
-logger.dim(`Binary: ${nodeFiles[0]} (${(fs.statSync(binaryPath).size / 1024).toFixed(1)} KB)`);
+// Ensure local target/release also has the .node binary for backwards compatibility with any legacy paths
+fs.ensureDirSync(localRelease);
+fs.copyFileSync(workspaceNode, path.join(localRelease, nodeName));
+
+logger.dim(`Binary: ${nodeName} (${(fs.statSync(workspaceNode).size / 1024).toFixed(1)} KB)`);

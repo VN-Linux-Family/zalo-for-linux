@@ -96,8 +96,9 @@ function build() {
     return false;
   }
 
+  const rootDir = path.join(__dirname, '..', '..');
   try {
-    execSync('cargo build --release', { cwd: ZOCR_DIR, stdio: 'pipe' });
+    execSync('cargo build --release -p zocr-host', { cwd: rootDir, stdio: 'pipe' });
   } catch (error) {
     logger.error('Failed to build zocr-host', error.message);
     if (error.stdout) logger.dim(error.stdout.toString());
@@ -105,10 +106,19 @@ function build() {
     throw new Error('Failed to build zocr-host');
   }
 
+  const rootBinary = path.join(rootDir, 'target', 'release', 'zocr-host');
+  const localBinary = path.join(ZOCR_DIR, 'target', 'release', 'zocr-host');
+  const sourceBinary = fs.existsSync(rootBinary) ? rootBinary : localBinary;
+
+  if (fs.existsSync(rootBinary)) {
+    fs.ensureDirSync(path.join(ZOCR_DIR, 'target', 'release'));
+    fs.copyFileSync(rootBinary, localBinary);
+  }
+
   const destDir = path.join(APP_DIR, 'native', 'ocr');
   fs.ensureDirSync(destDir);
   fs.copyFileSync(
-    path.join(ZOCR_DIR, 'target', 'release', 'zocr-host'),
+    sourceBinary,
     path.join(destDir, 'zocr-host')
   );
   const version = process.env.ZALO_WIN_VERSION;
@@ -162,7 +172,7 @@ function installOnnxRuntime() {
 function main() {
   if (!build()) return;
   installOnnxRuntime();
-  
+
   logger.info('Patching OCR runtime for Linux...');
   const file = path.join(APP_DIR, 'native', 'nativelibs', 'zocr', 'zocr.min.js');
   const source = fs.readFileSync(file, 'utf8');

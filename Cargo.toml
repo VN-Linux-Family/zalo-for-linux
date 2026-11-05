@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "nativelibs/file-utilities",
+    "nativelibs/file-utils",
+    "nativelibs/mp4thumb",
+    "nativelibs/zimage",
+    "nativelibs/zjxl",
+    "nativelibs/zwalker",
+    "zocr",
+]
+resolver = "2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

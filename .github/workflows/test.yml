@@ -42,7 +42,4 @@ jobs:
         run: npm test
 
       - name: Run Rust crate tests
-        run: |
-          for cargo in zocr/Cargo.toml nativelibs/*/Cargo.toml; do
-            cargo test --manifest-path "$cargo" --locked
-          done
+        run: cargo test --workspace --locked
