@@ -1,0 +1,12 @@
+{
+  "name": "re-impl-zlang",
+  "version": "1.0.0",
+  "description": "Re-implementation of zlang for Linux using whatlang",
+  "main": "build/Release/zlang.node",
+  "scripts": {
+    "build": "cargo build --release",
+    "test": "node test.js"
+  },
+  "author": "Việt Nam Linux Family",
+  "license": "BSD-3-Clause"
+}
