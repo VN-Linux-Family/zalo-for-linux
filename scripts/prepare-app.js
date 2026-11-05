@@ -324,6 +324,9 @@ async function extractAppAsar() {
   const { main: patchZwalker } = require('./patches/patch-zwalker');
   await patchZwalker();
 
+  const { main: patchZlang } = require('./patches/patch-zlang');
+  await patchZlang();
+
   // The call window's icons, sounds and fonts, from the macOS app.
   await require('./extract-zcall-assets').main();
 

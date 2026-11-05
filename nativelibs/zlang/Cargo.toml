@@ -1,0 +1,17 @@
+[package]
+name = "zlang"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+authors = ["ngxccc", "Việt Nam Linux Family"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", features = ["napi4", "async"] }
+napi-derive = "2"
+whatlang = "0.18.0"
+
+[build-dependencies]
+napi-build = "2"
