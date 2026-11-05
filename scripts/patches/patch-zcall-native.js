@@ -22,6 +22,7 @@
  * first message.
  */
 
+const { execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
@@ -118,7 +119,32 @@ function foundIn(content, from) {
  return ok;
 }
 
+function buildZcallAudio() {
+  const rootDir = path.join(__dirname, '..', '..');
+  const zcallAudioDir = path.join(rootDir, 'nativelibs', 'zcall-audio');
+  if (!fs.existsSync(path.join(zcallAudioDir, 'Cargo.toml'))) {
+    return false;
+  }
+  logger.info('Building zcall-audio native engine from source...');
+  try {
+    execSync('cargo build --release -p zcall-audio', { cwd: rootDir, stdio: 'pipe' });
+  } catch (error) {
+    logger.warn('Failed to build zcall-audio; audio engine will fall back to python3 audio-io.py: ' + error.message);
+    return false;
+  }
+  const rootBinary = path.join(rootDir, 'target', 'release', 'zcall-audio');
+  const destDir = path.join(rootDir, 'zcall-native', 'native-engine');
+  if (fs.existsSync(rootBinary)) {
+    fs.copyFileSync(rootBinary, path.join(destDir, 'zcall-audio'));
+    fs.chmodSync(path.join(destDir, 'zcall-audio'), 0o755);
+    logger.success('Deployed native zcall-audio engine to zcall-native/native-engine/zcall-audio');
+    return true;
+  }
+  return false;
+}
+
 async function main(mainJs = MAIN_JS) {
+  buildZcallAudio();
  if (!fs.existsSync(mainJs)) {
   throw new Error('native call patch: main.js not found');
  }

@@ -21,3 +21,5 @@ libxcb1-dev
 libxext-dev
 zlib1g-dev
 zsync
+libopus-dev
+libpulse-dev

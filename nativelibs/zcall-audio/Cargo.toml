@@ -1,0 +1,14 @@
+[package]
+name = "zcall-audio"
+version = "0.1.0"
+edition = "2021"
+description = "Native Linux audio engine for Zalo calls (eliminates Python and shell subprocesses)"
+license = "BSD-3-Clause"
+authors = ["ngxccc", "Việt Nam Linux Family"]
+
+[[bin]]
+name = "zcall-audio"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"

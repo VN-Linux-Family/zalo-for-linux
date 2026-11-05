@@ -36,6 +36,7 @@ zalo-for-linux/
 │   ├── os-sys-info        # Operating system and process information reader 
 │   ├── v8-profiles        # Native CPU profiler for Zalo
 │   ├── README.md          # Contains info about the folder
+│   ├── zcall-audio        # Native PulseAudio/PipeWire low-latency audio engine for calls
 │   ├── zfile              # Disk/volume info (free space, mount points) addon
 │   ├── zimage             # Image processor, resizer, and format conversions
 │   ├── zjxl               # JPEG XL (JXL) image decoder and encoder
