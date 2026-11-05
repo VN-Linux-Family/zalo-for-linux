@@ -21,7 +21,8 @@
         "code",
         "doc",
         "infra",
-        "maintenance"
+        "projectManagement",
+        "review"
       ]
     },
     {
@@ -32,7 +33,10 @@
       "contributions": [
         "code",
         "doc",
-        "infra"
+        "infra",
+        "maintenance",
+        "blog",
+        "review"
       ]
     },
     {
@@ -41,7 +45,8 @@
       "avatar_url": "https://avatars.githubusercontent.com/u/237471390?v=4",
       "profile": "https://github.com/DMKha241",
       "contributions": [
-        "code"
+        "code",
+        "infra"
       ]
     },
     {
@@ -61,7 +66,8 @@
       "profile": "https://github.com/imngkhang",
       "contributions": [
         "code",
-        "doc"
+        "doc",
+        "infra"
       ]
     },
     {
@@ -120,7 +126,8 @@
       "avatar_url": "https://avatars.githubusercontent.com/u/134080447?v=4",
       "profile": "https://github.com/mncc8337",
       "contributions": [
-        "code"
+        "code",
+        "infra"
       ]
     },
     {

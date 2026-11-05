@@ -15,6 +15,8 @@ function buildCommit() {
     'flake.nix',
     'flake.lock',
     'nix/**',
+    '.all-contributorsrc',
+    'scripts/utils/build-commit.js'
   ];
 
   const excludeArgs = excludePatterns
