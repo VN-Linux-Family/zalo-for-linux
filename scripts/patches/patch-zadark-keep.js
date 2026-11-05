@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 const APP_DIR = path.join(__dirname, '..', '..', 'app');
 
@@ -49,12 +50,39 @@ async function main(appDir = APP_DIR) {
   const raw = await fs.promises.readFile(file);
   if (!raw.includes(MARKER_BUF)) return;
   const content = raw.toString('utf8');
-  const updated = content.replace(REMOVER_RE, '$1return;$2');
+  if (content.includes('return;var') || content.includes('return;const') || content.includes('=()=>{return;')) {
+   return;
+  }
+
+  let updated = content;
+  try {
+   const root = parseAst(content);
+   const zadarkLiteral = root.find('"zadark"');
+   if (zadarkLiteral) {
+    let fn = zadarkLiteral;
+    while (fn && fn.kind() !== 'function_declaration' && fn.kind() !== 'arrow_function' && fn.kind() !== 'function') {
+     fn = fn.parent();
+    }
+    if (fn) {
+     const body = fn.field('body');
+     const edit = body.replace(`{return;${body.text().slice(1)}`);
+     updated = applyEdits(root, [edit]);
+     logger.dim(`Neutralized ZaDark remover via AST in ${path.basename(file)}`);
+    }
+   }
+  } catch (err) {
+   logger.warn(`AST zadark-keep failed on ${path.basename(file)}, falling back:`, err.message);
+  }
+
+  if (updated === content) {
+   updated = content.replace(REMOVER_RE, '$1return;$2');
+  }
+
   if (updated !== content) {
    await fs.promises.writeFile(file, updated, 'utf8');
    patched++;
    logger.dim(`Kept ZaDark in dark theme: ${path.relative(pcDistDir, file)}`);
-  } else if (!content.includes('=()=>{return;var')) {
+  } else {
    unmatched++;
   }
  }));

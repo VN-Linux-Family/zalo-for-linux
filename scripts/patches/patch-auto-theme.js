@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 let logger;
 try {
@@ -147,14 +148,31 @@ async function main() {
         logger.dim('Updated auto theme watcher in main.js');
       }
     } else if (!content.includes('zalo-linux-theme-change')) {
-      const anchor = 'Ae=m.createWithMultiWindow(i,o,gn,oe(),t),g(Ae),v(Ae.webContents),et.setMainWindow(Ae)';
-      if (content.includes(anchor)) {
-        content = content.replace(anchor, `${anchor};\n${THEME_MAIN_INJECTION}\n`);
-      } else {
-        content += '\n' + THEME_MAIN_INJECTION + '\n';
+      let injected = false;
+      try {
+        const root = parseAst(content);
+        // Look for setMainWindow($WIN) or createWithMultiWindow($$$ARGS)
+        const targetCall = root.find('$OBJ.setMainWindow($WIN)') || root.find('$OBJ.createWithMultiWindow($$$ARGS)');
+        if (targetCall) {
+          const edit = targetCall.replace(`${targetCall.text()};\n${THEME_MAIN_INJECTION}\n`);
+          content = applyEdits(root, [edit]);
+          injected = true;
+          logger.dim('Injected auto theme watcher into main.js via AST');
+        }
+      } catch (err) {
+        logger.warn('AST parse error in auto-theme patch, falling back:', err.message);
+      }
+
+      if (!injected) {
+        const anchor = 'Ae=m.createWithMultiWindow(i,o,gn,oe(),t),g(Ae),v(Ae.webContents),et.setMainWindow(Ae)';
+        if (content.includes(anchor)) {
+          content = content.replace(anchor, `${anchor};\n${THEME_MAIN_INJECTION}\n`);
+        } else {
+          content += '\n' + THEME_MAIN_INJECTION + '\n';
+        }
+        logger.dim('Injected auto theme watcher into main.js via fallback');
       }
       fs.writeFileSync(mainJsPath, content, 'utf8');
-      logger.dim('Injected auto theme watcher into main.js');
     }
   }
 

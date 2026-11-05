@@ -23,15 +23,16 @@
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 const PC_DIST = path.join(__dirname, '..', '..', 'app', 'pc-dist');
 
 // Hash part of the filenames changes per Zalo version — glob by prefix.
 const GLOB_TARGETS = [
-  path.join(PC_DIST, 'compact-app-pc.*.js'),
-  path.join(PC_DIST, 'search-worker.*.js'),
-  path.join(PC_DIST, 'sync-v2-sub-worker.*.js'),
-  path.join(PC_DIST, 'lazy', 'default-login-main-startup-shared-worker-znotification.*.js'),
+ path.join(PC_DIST, 'compact-app-pc.*.js'),
+ path.join(PC_DIST, 'search-worker.*.js'),
+ path.join(PC_DIST, 'sync-v2-sub-worker.*.js'),
+ path.join(PC_DIST, 'lazy', 'default-login-main-startup-shared-worker-znotification.*.js'),
 ];
 
 const ORIGINAL = 'let ae=()=>{{const e=$znode.os.release();if(e){if(Number(e.split(".")[0])<17)return ae=()=>!1,!1}}return ae=()=>!0,ae()};';
@@ -44,58 +45,86 @@ const DEFAULTS_ORIGINAL = 'enableCall:!1,enableTag:!0,enableVideoCall:!1';
 const DEFAULTS_PATCHED = 'enableCall:!0,enableTag:!0,enableVideoCall:!0';
 
 async function main() {
-  const missing = [];
-  let patchedCount = 0;
+ const missing = [];
+ let patchedCount = 0;
 
-  for (const pattern of GLOB_TARGETS) {
-    // resolve the first matching file (hashes change per Zalo version)
-    const dir = path.dirname(pattern);
-    const base = path.basename(pattern);
-    const [prefix, suffix] = base.split('*');
-    const file = fs.existsSync(dir)
-      ? (fs.readdirSync(dir).find(f => f.startsWith(prefix) && f.endsWith(suffix || '')) || null)
-      : null;
+ for (const pattern of GLOB_TARGETS) {
+  // resolve the first matching file (hashes change per Zalo version)
+  const dir = path.dirname(pattern);
+  const base = path.basename(pattern);
+  const [prefix, suffix] = base.split('*');
+  const file = fs.existsSync(dir)
+   ? (fs.readdirSync(dir).find(f => f.startsWith(prefix) && f.endsWith(suffix || '')) || null)
+   : null;
 
-    if (!file) {
-      missing.push(path.basename(pattern));
-      continue;
+  if (!file) {
+   missing.push(path.basename(pattern));
+   continue;
+  }
+  const filePath = path.join(dir, file);
+
+  let content = fs.readFileSync(filePath, 'utf8');
+  let changed = false;
+
+  if (content.includes('"linux"!==$znode.os.platform()') || content.includes('"linux" !== $znode.os.platform()')) {
+   // already patched
+  } else {
+   let astPatched = false;
+   try {
+    const root = parseAst(content);
+    const edits = [];
+    // 1. Kernel gate: Number(e.split(".")[0]) < 17
+    const kernelMatch = root.find('Number($E.split(".")[0]) < 17');
+    if (kernelMatch) {
+     edits.push(kernelMatch.replace(`("linux"!==$znode.os.platform()&&${kernelMatch.text()})`));
     }
-    const filePath = path.join(dir, file);
+    // 2. Default feature toggles
+    const callPair = root.findAll('!1').find(n => n.parent().kind() === 'pair' && n.parent().field('key').text() === 'enableCall');
+    if (callPair) edits.push(callPair.parent().replace('enableCall:!0'));
+    const videoPair = root.findAll('!1').find(n => n.parent().kind() === 'pair' && n.parent().field('key').text() === 'enableVideoCall');
+    if (videoPair) edits.push(videoPair.parent().replace('enableVideoCall:!0'));
 
-    let content = fs.readFileSync(filePath, 'utf8');
-    let changed = false;
+    if (edits.length > 0) {
+     content = applyEdits(root, edits);
+     changed = true;
+     astPatched = true;
+     logger.dim(`Patched callgate via AST in ${file} (${edits.length} edits)`);
+    }
+   } catch (err) {
+    logger.warn(`AST callgate patch skipped on ${file}, falling back:`, err.message);
+   }
 
-    if (content.includes(PATCHED)) {
-      // already applied
-    } else if (content.includes(ORIGINAL)) {
-      content = content.split(ORIGINAL).join(PATCHED);
-      changed = true;
+   if (!astPatched) {
+    if (content.includes(ORIGINAL)) {
+     content = content.split(ORIGINAL).join(PATCHED);
+     changed = true;
     } else {
-      missing.push(file + ': kernel gate');
-      continue;
+     missing.push(file + ': kernel gate');
+     continue;
     }
     if (content.includes(DEFAULTS_ORIGINAL)) {
-      content = content.split(DEFAULTS_ORIGINAL).join(DEFAULTS_PATCHED);
-      changed = true;
+     content = content.split(DEFAULTS_ORIGINAL).join(DEFAULTS_PATCHED);
+     changed = true;
     }
-
-    if (changed) {
-      fs.writeFileSync(filePath, content, 'utf8');
-      logger.dim('callgate patched: ' + file);
-    } else {
-      logger.dim('callgate already patched: ' + file);
-    }
-    patchedCount++;
+   }
   }
-
-  if (missing.length || patchedCount === 0) {
-    throw new Error('callgate patch not applied: ' + (missing.join('; ') || 'no targets'));
+  if (changed) {
+   fs.writeFileSync(filePath, content, 'utf8');
+   logger.dim('callgate patched: ' + file);
+  } else {
+   logger.dim('callgate already patched: ' + file);
   }
-  logger.success(`zcall callgate patched (${patchedCount} files)`);
+  patchedCount++;
+ }
+
+ if (missing.length || patchedCount === 0) {
+  throw new Error('callgate patch not applied: ' + (missing.join('; ') || 'no targets'));
+ }
+ logger.success(`zcall callgate patched (${patchedCount} files)`);
 }
 
 if (require.main === module) {
-  main();
+ main();
 }
 
 module.exports = { main };

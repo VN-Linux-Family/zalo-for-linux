@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 const APP_DIR = path.join(__dirname, '..', '..', 'app');
 const MAIN_DIST_DIR = path.join(APP_DIR, 'main-dist');
@@ -106,14 +107,37 @@ function replaceRequired(content, original, replacement, label) {
 }
 
 function patchAutoLaunch(content) {
+  if (content.includes('__zaloWrapLinuxLauncher') && content.includes('linux_auto_launch_error')) {
+    return content;
+  }
+
+  content = injectHelper(content);
+
+  // Attempt AST detection for getZaloLauncher variable
+  try {
+    const root = parseAst(content);
+    const getter = root.find('getZaloLauncher: () => $VAR');
+    if (getter) {
+      const varName = getter.getMatch('VAR').text();
+      const win32Assign = root.find(`else if ("win32" === process.platform) { $$$BODY } ${varName} = new $R($E)`);
+      if (win32Assign) {
+        const r = win32Assign.getMatch('R').text();
+        const e = win32Assign.getMatch('E').text();
+        const edit = win32Assign.replace(
+          `${win32Assign.text().replace(new RegExp(`${varName}\\s*=\\s*new\\s*${r}\\(${e}\\)$`), '')}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;${varName}=__zaloWrapLinuxLauncher(new ${r}(${e}))`
+        );
+        content = applyEdits(root, [edit]);
+        logger.dim(`Patched launcher initialization via AST for variable: ${varName}`);
+      }
+    }
+  } catch (err) {
+    logger.warn('AST launcher detection skipped, falling back:', err.message);
+  }
+
   const isMainVariant = content.includes(LAUNCHER_OPTIONS_ORIGINAL) ||
     content.includes(LAUNCHER_OPTIONS_PATCHED) || content.includes(GET_LAUNCHER_PATCHED);
   const isCompactVariant = content.includes(COMPACT_LAUNCHER_OPTIONS_ORIGINAL) ||
     content.includes(COMPACT_LAUNCHER_OPTIONS_PATCHED) || content.includes(COMPACT_GET_LAUNCHER_PATCHED);
-  if (!isMainVariant && !isCompactVariant) {
-    throw new Error('Auto-launch launcher module anchor not found; upstream Zalo bundle may have changed.');
-  }
-
   content = injectHelper(content);
 
   if (isMainVariant) {
