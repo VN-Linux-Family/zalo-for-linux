@@ -21,7 +21,7 @@ const ELECTRON_VERSION = PACKAGE_JSON.devDependencies.electron.replace(/^\^/, ''
 const repoRoot = path.resolve(__dirname, '..');
 const libDir = path.resolve(repoRoot, process.argv[2] || '');
 if (libDir !== repoRoot && !libDir.startsWith(repoRoot + path.sep)) {
-  throw new Error(`Lib dir must be inside the repository: ${libDir}`);
+ throw new Error(`Lib dir must be inside the repository: ${libDir}`);
 }
 const buildDir = path.join(libDir, 'build');
 const releaseBinary = path.join(buildDir, 'Release');
@@ -29,22 +29,15 @@ const releaseBinary = path.join(buildDir, 'Release');
 logger.dim(`Lib dir: ${libDir}`);
 logger.dim(`Electron: ${ELECTRON_VERSION}`);
 
-const nodeModules = path.join(libDir, 'node_modules');
-if (!fs.existsSync(nodeModules)) {
-  execSync('npm install --no-audit --no-fund --loglevel=error', {
-    cwd: libDir,
-    stdio: 'ignore'
-  });
-}
 
 execSync(
-  `npx node-gyp configure --target=${ELECTRON_VERSION} --arch=${arch} --dist-url=https://www.electronjs.org/headers build`,
-  { cwd: libDir, stdio: 'ignore' }
+ `npx node-gyp configure --target=${ELECTRON_VERSION} --arch=${arch} --dist-url=https://www.electronjs.org/headers build`,
+ { cwd: libDir, stdio: 'ignore' }
 );
 
 const files = fs.readdirSync(releaseBinary).filter(f => f.endsWith('.node'));
 if (files.length === 0) {
-  throw new Error(`Build succeeded but binary not found in ${releaseBinary}`);
+ throw new Error(`Build succeeded but binary not found in ${releaseBinary}`);
 }
 
 const binaryPath = path.join(releaseBinary, files[0]);

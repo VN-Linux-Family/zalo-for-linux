@@ -43,6 +43,7 @@ Yêu cầu:
 git clone https://github.com/VN-Linux-Family/zalo-for-linux.git
 cd zalo-for-linux
 git submodule update --init --recursive
+npm ci --prefer-offline --no-audit
 npm run main
 ```
 

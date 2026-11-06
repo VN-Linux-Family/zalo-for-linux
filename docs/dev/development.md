@@ -43,6 +43,9 @@ cd zalo-for-linux
 # Init submodules (ZaDark, etc.)
 git submodule update --init --recursive
 
+# Install dependencies
+npm ci --prefer-offline --no-audit
+
 # Setup + build (downloads DMG, extracts, patches, packages)
 npm run main
 ```

@@ -2,6 +2,11 @@
   "name": "zalo-for-linux",
   "version": "1.0.0",
   "description": "Unofficial Zalo port for Linux with ZaDark integration",
+  "workspaces": [
+    "nativelibs/db-cross-v4",
+    "nativelibs/v8-profiles",
+    "nativelibs/zfile"
+  ],
   "main": "main.js",
   "scripts": {
     "test": "node --test 'tests/**/*.test.js'",
@@ -41,6 +46,8 @@
     "@electron/asar": "^4.0.1",
     "electron": "^22.3.27",
     "electron-builder": "^26.0.12",
+    "nan": "^2.18.0",
+    "node-addon-api": "^8.9.2",
     "node-html-parser": "^7.0.1",
     "sqlite3": "^6.0.1"
   },

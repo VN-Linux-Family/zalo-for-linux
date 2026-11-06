@@ -41,7 +41,10 @@ cd zalo-for-linux
 # 2. Khởi tạo các submodule (ZaDark, v.v.)
 git submodule update --init --recursive
 
-# 3. Setup + build (tải DMG, giải nén, vá code, đóng gói AppImage)
+# 3. Cài đặt các gói phụ thuộc
+npm ci --prefer-offline --no-audit
+
+# 4. Setup + build (tải DMG, giải nén, vá code, đóng gói AppImage)
 npm run main
 ```
 
