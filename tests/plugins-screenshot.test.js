@@ -131,4 +131,31 @@ test('Screenshot Plugin - Built-in Linux Screen Capture', async (t) => {
       console.error = origError;
     }
   });
+
+  await t.test('verifies getScreenshotDelay returns proper values for withZalo and withoutZalo modes', () => {
+    const { getScreenshotDelay } = require('../plugins/screenshot');
+    const { createStore } = require('../plugins/advanced-settings/store');
+    const os = require('os');
+    const tmpAdv = path.join(os.tmpdir(), `test-screenshot-delay-${Date.now()}`);
+
+    const mockApp = {
+      getPath: () => tmpAdv
+    };
+
+    try {
+      // Default delays when no store exists yet
+      assert.strictEqual(getScreenshotDelay('withZalo', mockApp), 100);
+      assert.strictEqual(getScreenshotDelay('withoutZalo', mockApp), 500);
+
+      // Custom configured delays
+      const store = createStore(tmpAdv);
+      store.saveScreenshotDelay('withZalo', 350);
+      store.saveScreenshotDelay('withoutZalo', 850);
+
+      assert.strictEqual(getScreenshotDelay('withZalo', mockApp), 350);
+      assert.strictEqual(getScreenshotDelay('withoutZalo', mockApp), 850);
+    } finally {
+      fs.rmSync(tmpAdv, { recursive: true, force: true });
+    }
+  });
 });

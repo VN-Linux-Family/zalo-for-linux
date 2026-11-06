@@ -263,7 +263,7 @@ app.once('ready', () => {
 // Register plugins
   trayBadgePlugin.register({ app, tray, nativeImage, appDir, iconPath });
   launcherBadgePlugin.register({ app, ipcMain });
-  screenshotPlugin.register({ ipcMain });
+  screenshotPlugin.register({ app, ipcMain });
   const advancedSettings = advancedSettingsPlugin.register({ app, ipcMain, BrowserWindow, dialog, screenshotPlugin });
   userscriptsPlugin.register({ app, ipcMain, advancedSettings });
   require('./plugins/offline').register({ app, ipcMain, appDir });

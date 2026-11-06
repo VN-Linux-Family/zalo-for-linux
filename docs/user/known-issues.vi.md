@@ -66,6 +66,7 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
   - **Khắc phục:** Xây dựng công cụ chụp màn hình độc lập tích hợp sẵn trong ứng dụng, hoàn toàn không phụ thuộc vào ứng dụng chụp màn hình bên thứ ba:
     - **Hỗ trợ Wayland & X11:** Tự động chụp tĩnh ngầm qua XDG Desktop Portal (`org.freedesktop.portal.Screenshot` chế độ non-interactive), `grim` (trên wlroots/Sway/Hyprland) và fallback Electron/X11.
     - **Giao diện nguyên bản từ Zalo PC:** Overlay chụp màn hình sử dụng đúng bộ icon font gốc `zalo-pc-screencap` và phong cách Zalo, hỗ trợ kính lúp phóng to pixel, vùng chọn với 8 điểm neo tùy chỉnh, đầy đủ công cụ vẽ chú thích (chữ nhật, elip, mũi tên, đường thẳng, vẽ tự do, văn bản, làm mờ/mosaic), hoàn tác/làm lại (Undo/Redo), bảng màu, và tự động dán ảnh chụp vào khung chat khi hoàn tất.
+    - **Tùy chỉnh thời gian chờ (delay) chụp ảnh:** Trong "Cài đặt nâng cao", người dùng có thể tùy chỉnh thời gian chờ riêng biệt cho 2 chế độ "Chụp có Zalo" (mặc định 100 ms) và "Chụp không có Zalo" (mặc định 500 ms) để tránh việc Zalo chưa kịp ẩn hoặc hiệu ứng chuyển cảnh (minimize/fade effect) của Desktop Environment (DE) làm ảnh hưởng đến ảnh chụp.
   - **Đóng góp:** Giải pháp tích hợp ban đầu bởi [@hthienloc](https://github.com/hthienloc) (xem [Issue #19](https://github.com/VN-Linux-Family/zalo-for-linux/issues/19)). Cập nhật bộ công cụ chụp màn hình và UI độc lập bởi [@akimiya7742](https://github.com/akimiya7742).
 
 - **Treo ở màn hình đăng nhập:**

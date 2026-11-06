@@ -6,12 +6,14 @@
   const openButton = document.getElementById('open-userscripts');
   const backButton = document.getElementById('back-to-advanced');
   const forms = [...document.querySelectorAll('[data-sound]')];
+  const delayForms = [...document.querySelectorAll('[data-screenshot-delay]')];
   let preview = null;
   let previewButton = null;
   let previewRequest = 0;
 
   function message(form, text, error = false) {
-    const status = form.querySelector('.sound-status');
+    const status = form.querySelector('.sound-status, .screenshot-status');
+    if (!status) return;
     status.textContent = text;
     status.classList.toggle('error', error);
   }
@@ -108,8 +110,52 @@
     });
   }
 
+  for (const form of delayForms) {
+    const kind = form.dataset.screenshotDelay;
+    const input = form.elements.delay;
+    const reset = form.querySelector('[data-action="reset"]');
+    const defaultVal = kind === 'withZalo' ? 100 : 500;
+
+    async function save(value) {
+      const saved = await window.linuxSettings.saveScreenshotDelay(kind, value);
+      const key = kind === 'withZalo' ? 'screenshotDelayWithZalo' : 'screenshotDelayWithoutZalo';
+      input.value = saved[key] !== undefined ? saved[key] : defaultVal;
+      message(form, value !== '' ? 'Đã lưu. Áp dụng ngay cho lần chụp tiếp theo.' : 'Đã khôi phục thời gian chờ mặc định.');
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await save(input.value);
+      } catch (error) {
+        message(form, errorMessage(error), true);
+      }
+    });
+
+    input.addEventListener('input', () => {
+      message(form, 'Chưa lưu thay đổi.');
+    });
+
+    reset.addEventListener('click', async () => {
+      try {
+        await save('');
+      } catch (error) {
+        message(form, errorMessage(error), true);
+      }
+    });
+  }
+
   window.addEventListener('pagehide', stopPreview);
   window.linuxSettings.get().then((settings) => {
     for (const form of forms) form.elements.path.value = settings[form.dataset.sound] || '';
-  }).catch((error) => { for (const form of forms) message(form, errorMessage(error), true); });
+    for (const form of delayForms) {
+      const kind = form.dataset.screenshotDelay;
+      const key = kind === 'withZalo' ? 'screenshotDelayWithZalo' : 'screenshotDelayWithoutZalo';
+      const fallback = kind === 'withZalo' ? 100 : 500;
+      form.elements.delay.value = typeof settings[key] === 'number' ? settings[key] : fallback;
+    }
+  }).catch((error) => {
+    for (const form of forms) message(form, errorMessage(error), true);
+    for (const form of delayForms) message(form, errorMessage(error), true);
+  });
 })();

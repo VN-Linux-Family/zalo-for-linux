@@ -19,11 +19,39 @@ const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { captureScreen } = require('./capture');
+const { createStore, DEFAULT_SETTINGS } = require('../advanced-settings/store');
 
 let _mainWindow = null;
 let _overlayWindow = null;
 let _isCapturing = false;
 let _ipcMain = null;
+let _app = null;
+
+function setApp(app) {
+  _app = app;
+}
+
+function getScreenshotDelay(mode, customApp) {
+  try {
+    const app = customApp || _app || electron.app;
+    const userDataDir = (app && app.getPath)
+      ? app.getPath('userData')
+      : path.join(require('os').tmpdir(), 'zalo-screencap');
+    const store = createStore(userDataDir);
+    const settings = store.read();
+    if (mode === 'withZalo') {
+      return typeof settings.screenshotDelayWithZalo === 'number'
+        ? settings.screenshotDelayWithZalo
+        : (DEFAULT_SETTINGS ? DEFAULT_SETTINGS.screenshotDelayWithZalo : 100);
+    } else {
+      return typeof settings.screenshotDelayWithoutZalo === 'number'
+        ? settings.screenshotDelayWithoutZalo
+        : (DEFAULT_SETTINGS ? DEFAULT_SETTINGS.screenshotDelayWithoutZalo : 500);
+    }
+  } catch (_) {
+    return mode === 'withZalo' ? 100 : 500;
+  }
+}
 
 function ensureFont() {
   const fontPath = path.join(__dirname, 'ui', 'fonts', 'zalo-pc-screencap.ttf');
@@ -46,8 +74,9 @@ function ensureFont() {
   }
 }
 
-function register({ ipcMain: customIpcMain } = {}) {
+function register({ ipcMain: customIpcMain, app: customApp } = {}) {
   ensureFont();
+  if (customApp) _app = customApp;
   const ipc = customIpcMain || electron.ipcMain;
   if (!ipc) return;
   _ipcMain = ipc;
@@ -70,15 +99,27 @@ function register({ ipcMain: customIpcMain } = {}) {
         try {
           _isCapturing = true;
 
-          // Hide or minimize main window if requested
-          if (hideWindow && _mainWindow && !_mainWindow.isDestroyed()) {
-            if (global.__zaloNativeWayland || process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info')) {
-              _mainWindow.minimize();
-            } else {
-              _mainWindow.hide();
+          // Settle time depending on capture mode (with or without Zalo)
+          if (hideWindow) {
+            // Hide or minimize main window if requested (chế độ chụp không có Zalo)
+            if (_mainWindow && !_mainWindow.isDestroyed()) {
+              if (global.__zaloNativeWayland || process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info')) {
+                _mainWindow.minimize();
+              } else {
+                _mainWindow.hide();
+              }
             }
-            // Settle time for WM to unmap window from framebuffer
-            await new Promise((r) => setTimeout(r, 180));
+            // Wait for WM/DE to unmap window / finish minimize animations
+            const delay = getScreenshotDelay('withoutZalo', customApp);
+            if (delay > 0) {
+              await new Promise((r) => setTimeout(r, delay));
+            }
+          } else {
+            // Chế độ chụp có Zalo
+            const delay = getScreenshotDelay('withZalo', customApp);
+            if (delay > 0) {
+              await new Promise((r) => setTimeout(r, delay));
+            }
           }
 
           success = await startInteractiveScreenshot(event);
@@ -330,4 +371,10 @@ function setMainWindow(win) {
   _mainWindow = win;
 }
 
-module.exports = { register, setMainWindow };
+module.exports = {
+  register,
+  setMainWindow,
+  setApp,
+  getScreenshotDelay,
+  ensureFont
+};
