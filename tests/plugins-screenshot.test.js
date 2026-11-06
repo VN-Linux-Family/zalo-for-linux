@@ -22,12 +22,38 @@ test('Screenshot Plugin - Built-in Linux Screen Capture', async (t) => {
 
   await t.test('verifies extract-screenshot-assets script extracts font from app directory', async () => {
     assert.ok(fs.existsSync(extractScript), 'scripts/extract-screenshot-assets.js exists');
-    const { main } = require(extractScript);
+    const { main, findFont } = require(extractScript);
     assert.strictEqual(typeof main, 'function');
-    await main();
-    const extractedFont = path.join(pluginDir, 'ui', 'fonts', 'zalo-pc-screencap.ttf');
-    assert.ok(fs.existsSync(extractedFont), 'font extracted to plugins/screenshot/ui/fonts/zalo-pc-screencap.ttf');
-    assert.ok(fs.statSync(extractedFont).size > 1000, 'extracted font size > 1000 bytes');
+
+    // Test extraction logic with mock app directory structure (clean checkout compatibility)
+    const tempTestDir = path.join(pluginDir, 'mock-test-font');
+    const mockAppDir = path.join(tempTestDir, 'app', 'pc-dist', 'fonts');
+    const mockOutDir = path.join(tempTestDir, 'out');
+    fs.mkdirSync(mockAppDir, { recursive: true });
+    const dummyFontContent = Buffer.alloc(1024, 0x41);
+    fs.writeFileSync(path.join(mockAppDir, 'zalo-pc-screencap.26b46cc0d8549b2db2c3314913a3b308.ttf'), dummyFontContent);
+
+    try {
+      await main({ appDir: path.join(tempTestDir, 'app'), outDir: mockOutDir });
+      const copied = path.join(mockOutDir, 'zalo-pc-screencap.ttf');
+      assert.ok(fs.existsSync(copied), 'mock font was successfully extracted');
+      assert.strictEqual(fs.statSync(copied).size, 1024);
+    } finally {
+      fs.rmSync(tempTestDir, { recursive: true, force: true });
+    }
+
+    // If real app directory is present (e.g. after running prepare-app), also verify real extraction
+    const realPcFonts = path.join(__dirname, '..', 'app', 'pc-dist', 'fonts');
+    const hasRealFont = fs.existsSync(realPcFonts) || fs.existsSync(path.join(__dirname, '..', 'app'));
+    if (hasRealFont && findFont) {
+      const realFontFile = findFont(realPcFonts) || findFont(path.join(__dirname, '..', 'app'));
+      if (realFontFile) {
+        await main();
+        const extractedFont = path.join(pluginDir, 'ui', 'fonts', 'zalo-pc-screencap.ttf');
+        assert.ok(fs.existsSync(extractedFont), 'font extracted to plugins/screenshot/ui/fonts/zalo-pc-screencap.ttf');
+        assert.ok(fs.statSync(extractedFont).size > 1000, 'extracted font size > 1000 bytes');
+      }
+    }
   });
 
   await t.test('verifies python portal script syntax and compilation', () => {

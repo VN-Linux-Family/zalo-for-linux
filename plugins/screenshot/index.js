@@ -8,16 +8,13 @@
 
 'use strict';
 
-const {
-  app,
-  BrowserWindow,
-  clipboard,
-  desktopCapturer,
-  dialog,
-  ipcMain,
-  nativeImage,
-  screen
-} = require('electron');
+let electron = {};
+try {
+  const mod = require('electron');
+  if (mod && typeof mod === 'object') {
+    electron = mod;
+  }
+} catch (_) {}
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
@@ -26,6 +23,7 @@ const { captureScreen } = require('./capture');
 let _mainWindow = null;
 let _overlayWindow = null;
 let _isCapturing = false;
+let _ipcMain = null;
 
 function ensureFont() {
   const fontPath = path.join(__dirname, 'ui', 'fonts', 'zalo-pc-screencap.ttf');
@@ -41,7 +39,9 @@ function ensureFont() {
 
 function register({ ipcMain: customIpcMain } = {}) {
   ensureFont();
-  const ipc = customIpcMain || ipcMain;
+  const ipc = customIpcMain || electron.ipcMain;
+  if (!ipc) return;
+  _ipcMain = ipc;
 
   const originalHandle = ipc.handle.bind(ipc);
   ipc.handle = function (channel, handler) {
@@ -125,10 +125,13 @@ function restoreMainWindow(wasHidden) {
 }
 
 async function startInteractiveScreenshot(event) {
-  const targetDir = path.join(app.getPath('userData'), 'screenshot-cache');
+  const userDataDir = (electron.app && electron.app.getPath)
+    ? electron.app.getPath('userData')
+    : path.join(require('os').tmpdir(), 'zalo-screencap');
+  const targetDir = path.join(userDataDir, 'screenshot-cache');
   const capturePath = await captureScreen({
-    desktopCapturer,
-    screen,
+    desktopCapturer: electron.desktopCapturer,
+    screen: electron.screen,
     targetDir
   });
 
@@ -142,11 +145,17 @@ async function startInteractiveScreenshot(event) {
   return new Promise((resolve) => {
     let resolved = false;
 
-    const cursorPt = screen.getCursorScreenPoint();
-    const activeDisplay = screen.getDisplayNearestPoint(cursorPt) || screen.getPrimaryDisplay();
-    const bounds = activeDisplay.bounds;
+    const scr = electron.screen;
+    const cursorPt = scr && scr.getCursorScreenPoint ? scr.getCursorScreenPoint() : { x: 0, y: 0 };
+    const activeDisplay = scr && (scr.getDisplayNearestPoint ? scr.getDisplayNearestPoint(cursorPt) : (scr.getPrimaryDisplay ? scr.getPrimaryDisplay() : null));
+    const bounds = (activeDisplay && activeDisplay.bounds) || { x: 0, y: 0, width: 1920, height: 1080 };
 
-    _overlayWindow = new BrowserWindow({
+    if (!electron.BrowserWindow) {
+      resolve(false);
+      return;
+    }
+
+    _overlayWindow = new electron.BrowserWindow({
       x: bounds.x,
       y: bounds.y,
       width: bounds.width,
@@ -217,18 +226,23 @@ async function startInteractiveScreenshot(event) {
       if (!_overlayWindow || _overlayWindow.isDestroyed() || _evt.sender !== _overlayWindow.webContents) {
         return;
       }
-      ipcMain.removeListener(actionChannel, actionListener);
+      const ipc = _ipcMain || electron.ipcMain;
+      if (ipc && ipc.removeListener) {
+        ipc.removeListener(actionChannel, actionListener);
+      }
 
       const action = data && data.action;
       const dataUrl = data && data.dataUrl;
 
       if (action === 'accept' && dataUrl) {
         try {
-          const img = nativeImage.createFromDataURL(dataUrl);
-          if (img.isEmpty()) {
+          const img = electron.nativeImage && electron.nativeImage.createFromDataURL(dataUrl);
+          if (!img || img.isEmpty()) {
             throw new Error('Rendered screenshot dataURL yielded an empty NativeImage');
           }
-          clipboard.writeImage(img);
+          if (electron.clipboard) {
+            electron.clipboard.writeImage(img);
+          }
           resolved = true;
           cleanup();
           resolve(true);
@@ -239,11 +253,13 @@ async function startInteractiveScreenshot(event) {
         }
       } else if (action === 'copy' && dataUrl) {
         try {
-          const img = nativeImage.createFromDataURL(dataUrl);
-          if (img.isEmpty()) {
+          const img = electron.nativeImage && electron.nativeImage.createFromDataURL(dataUrl);
+          if (!img || img.isEmpty()) {
             throw new Error('Rendered screenshot dataURL yielded an empty NativeImage');
           }
-          clipboard.writeImage(img);
+          if (electron.clipboard) {
+            electron.clipboard.writeImage(img);
+          }
           resolved = true;
           cleanup();
           resolve(false); // copied to clipboard, but not pasting to chat
@@ -255,8 +271,8 @@ async function startInteractiveScreenshot(event) {
       } else if (action === 'save' && dataUrl) {
         try {
           cleanup(); // close overlay first before opening save dialog
-          const img = nativeImage.createFromDataURL(dataUrl);
-          if (img.isEmpty()) {
+          const img = electron.nativeImage && electron.nativeImage.createFromDataURL(dataUrl);
+          if (!img || img.isEmpty()) {
             throw new Error('Rendered screenshot dataURL yielded an empty NativeImage');
           }
           const pngBuffer = img.toPNG();
@@ -264,15 +280,20 @@ async function startInteractiveScreenshot(event) {
           const now = new Date();
           const pad = (n) => String(n).padStart(2, '0');
           const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-          const defaultPath = path.join(app.getPath('pictures') || app.getPath('documents'), `Zalo_Screenshot_${timestamp}.png`);
+          const picsDir = (electron.app && electron.app.getPath && (electron.app.getPath('pictures') || electron.app.getPath('documents'))) || require('os').homedir();
+          const defaultPath = path.join(picsDir, `Zalo_Screenshot_${timestamp}.png`);
 
-          const { canceled, filePath } = await dialog.showSaveDialog(_mainWindow, {
-            title: 'Lưu ảnh chụp màn hình',
-            defaultPath,
-            filters: [{ name: 'PNG Image', extensions: ['png'] }]
-          });
+          let filePath = null;
+          if (electron.dialog && electron.dialog.showSaveDialog) {
+            const res = await electron.dialog.showSaveDialog(_mainWindow, {
+              title: 'Lưu ảnh chụp màn hình',
+              defaultPath,
+              filters: [{ name: 'PNG Image', extensions: ['png'] }]
+            });
+            if (!res.canceled) filePath = res.filePath;
+          }
 
-          if (!canceled && filePath) {
+          if (filePath) {
             fs.writeFileSync(filePath, pngBuffer);
           }
           resolved = true;
@@ -289,7 +310,10 @@ async function startInteractiveScreenshot(event) {
       }
     };
 
-    ipcMain.on(actionChannel, actionListener);
+    const ipc = _ipcMain || electron.ipcMain;
+    if (ipc && ipc.on) {
+      ipc.on(actionChannel, actionListener);
+    }
   });
 }
 

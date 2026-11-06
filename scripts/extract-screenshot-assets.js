@@ -28,22 +28,25 @@ function findFont(dir) {
   return null;
 }
 
-async function main() {
-  const pcFontsDir = path.join(APP_DIR, 'pc-dist', 'fonts');
-  const fontFile = findFont(pcFontsDir) || findFont(APP_DIR);
+async function main(options = {}) {
+  const appDir = (options && options.appDir) || APP_DIR;
+  const outDir = (options && options.outDir) || OUT_DIR;
+
+  const pcFontsDir = path.join(appDir, 'pc-dist', 'fonts');
+  const fontFile = findFont(pcFontsDir) || findFont(appDir);
 
   if (!fontFile) {
     throw new Error('Screenshot font zalo-pc-screencap.*.ttf not found in app directory');
   }
 
-  fs.ensureDirSync(OUT_DIR);
-  const targetFile = path.join(OUT_DIR, 'zalo-pc-screencap.ttf');
+  fs.ensureDirSync(outDir);
+  const targetFile = path.join(outDir, 'zalo-pc-screencap.ttf');
   fs.copySync(fontFile, targetFile);
 
   logger.success(`Screenshot font extracted: ${path.basename(fontFile)} -> plugins/screenshot/ui/fonts/zalo-pc-screencap.ttf`);
 }
 
-module.exports = { main };
+module.exports = { main, findFont };
 
 if (require.main === module) {
   main().catch((e) => {
