@@ -41,3 +41,9 @@ body.show-userscripts #userscripts-view { transform: translateX(0); opacity: 1; 
   .settings-content { padding: 24px; }
   .userscripts-card { flex-wrap: wrap; }
 }
+.toggle-row { display: flex; align-items: flex-start; gap: 16px; }
+.toggle-row > div { flex: 1; }
+.toggle-row .section-description { margin-bottom: 0; }
+.toggle-label input:focus-visible + i { outline: 2px solid var(--primary); outline-offset: 3px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.toggle-hint { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }

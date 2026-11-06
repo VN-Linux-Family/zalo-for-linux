@@ -64,3 +64,16 @@ Native dark mode, privacy enhancements, and custom UI personalization powered by
 - **Privacy Protections**: Anti-peeking message blurring and optional hidden typing/read indicators.
 - **Customization**: Custom conversation wallpapers, font overrides, quick translation, and 80+ emoji reactions.
 - **Integration**: Pre-compiled and bundled directly into the AppImage during build.
+
+---
+
+### 🗂️ 6. Keep Recalled Messages
+
+Keeps the content of messages that others recall, so you can read them later. Off by default.
+
+- **How to enable**: Open **Settings → Nâng cao...** and turn on **Giữ tin nhắn đã thu hồi**. It applies immediately, without restarting Zalo.
+- **How to view**: When a message is recalled, a **Thu hồi** button appears above the message composer. The list has two tabs: the current conversation and all conversations. Photos show as thumbnails; click one to view it full size.
+- **Limitations**:
+  - Only messages recalled while Zalo is running on this computer are kept.
+  - Text, links and photos are kept. For photos only the link to Zalo's server is stored, so a photo that Zalo deletes from its server can no longer be shown.
+  - Stored on this computer, up to 500 messages. Turning the feature off deletes everything it kept.

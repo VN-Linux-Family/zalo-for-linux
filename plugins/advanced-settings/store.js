@@ -19,12 +19,13 @@ function createStore(userDataDir) {
   const filename = path.join(userDataDir, 'zalo-linux-settings.json');
 
   function read() {
-    const settings = { ringtone: '', ringback: '' };
+    const settings = { ringtone: '', ringback: '', keepRecalled: false };
     try {
       const saved = JSON.parse(fs.readFileSync(filename, 'utf8'));
       for (const kind of SOUND_KINDS) {
         if (typeof saved[kind] === 'string') settings[kind] = saved[kind];
       }
+      if (saved.keepRecalled === true) settings.keepRecalled = true;
     } catch (error) {
       if (error.code !== 'ENOENT') console.error('[advanced-settings] Cannot read settings:', error.message);
     }
@@ -51,15 +52,23 @@ function createStore(userDataDir) {
     return path.normalize(value);
   }
 
-  function save(kind, value) {
-    validateKind(kind);
-    const validated = validatePath(value);
-    const settings = { ...read(), [kind]: validated };
+  function write(settings) {
     fs.mkdirSync(userDataDir, { recursive: true });
     const temporary = filename + '.tmp';
     fs.writeFileSync(temporary, JSON.stringify(settings, null, 2), { mode: 0o600 });
     fs.renameSync(temporary, filename);
     return settings;
+  }
+
+  function save(kind, value) {
+    validateKind(kind);
+    const validated = validatePath(value);
+    return write({ ...read(), [kind]: validated });
+  }
+
+  function setKeepRecalled(value) {
+    if (typeof value !== 'boolean') throw new Error('Giá trị không hợp lệ.');
+    return write({ ...read(), keepRecalled: value });
   }
 
   function soundUrls() {
@@ -74,7 +83,7 @@ function createStore(userDataDir) {
     return urls;
   }
 
-  return { read, save, soundUrls, validateKind, validatePath };
+  return { read, save, setKeepRecalled, soundUrls, validateKind, validatePath };
 }
 
 module.exports = { createStore, AUDIO_EXTENSIONS, defaultSoundUrl };

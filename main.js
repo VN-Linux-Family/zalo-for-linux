@@ -267,6 +267,7 @@ app.once('ready', () => {
   const advancedSettings = advancedSettingsPlugin.register({ app, ipcMain, BrowserWindow, dialog, screenshotPlugin });
   userscriptsPlugin.register({ app, ipcMain, advancedSettings });
   require('./plugins/offline').register({ app, ipcMain, appDir });
+  require('./plugins/recalled-messages').register({ app, ipcMain, BrowserWindow, advancedSettings });
   waylandTitlebarPlugin.register({ app, ipcMain, BrowserWindow });
 
   const zadarkSyncPath = path.join(appDir, 'pc-dist', 'zadark', 'sync');
