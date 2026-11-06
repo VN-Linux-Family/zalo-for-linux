@@ -1,0 +1,322 @@
+@font-face {
+  font-family: 'zalo-pc-screencap';
+  src: url('fonts/zalo-pc-screencap.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+[class*=" icon-"], [class^="icon-"] {
+  font-family: 'zalo-pc-screencap' !important;
+  font-style: normal !important;
+  font-weight: normal !important;
+  font-variant: normal !important;
+  text-transform: none !important;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+.icon-check:before { content: "\61"; }
+.icon-capture-cancel:before { content: "\62"; }
+.icon-capture-undo:before { content: "\63"; }
+.icon-capture-arrow:before { content: "\64"; }
+.icon-capture-censored:before { content: "\65"; }
+.icon-capture-circle:before { content: "\66"; }
+.icon-capture-copy:before { content: "\67"; }
+.icon-capture-doodle:before { content: "\68"; }
+.icon-capture-line:before { content: "\69"; }
+.icon-capture-paint:before { content: "\6a"; }
+.icon-capture-rec:before { content: "\6b"; }
+.icon-capture-redo:before { content: "\6c"; }
+.icon-capture-save:before { content: "\6d"; }
+.icon-capture-text:before { content: "\6e"; }
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  user-select: none;
+  background: #000;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  cursor: crosshair;
+}
+
+#canvas-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#base-canvas {
+  z-index: 1;
+}
+
+#draw-canvas {
+  z-index: 2;
+}
+
+#mask-canvas {
+  z-index: 3;
+}
+
+/* Floating Toolbar */
+#toolbar {
+  position: absolute;
+  display: none;
+  align-items: center;
+  background: rgba(36, 38, 43, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  padding: 3px 6px;
+  gap: 3px;
+  z-index: 1000;
+  height: 38px;
+}
+
+.tool-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: #cfd4dc;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  outline: none;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tool-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.tool-btn.active {
+  background: #0068ff !important;
+  color: #ffffff !important;
+}
+
+.tool-btn.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.tool-btn.btn-accept {
+  color: #0068ff;
+  font-size: 18px;
+}
+
+.tool-btn.btn-accept:hover {
+  background: #0068ff;
+  color: #ffffff;
+}
+
+.tool-btn.btn-cancel {
+  color: #f44336;
+}
+
+.tool-btn.btn-cancel:hover {
+  background: #f44336;
+  color: #ffffff;
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 0 3px;
+}
+
+/* Sub-toolbar (color & size options) */
+#sub-toolbar {
+  position: absolute;
+  display: none;
+  align-items: center;
+  background: rgba(36, 38, 43, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  padding: 4px 10px;
+  gap: 10px;
+  z-index: 999;
+  height: 34px;
+}
+
+.size-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.size-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.size-dot:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.size-dot.active {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.size-dot-inner {
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.size-dot.small .size-dot-inner { width: 4px; height: 4px; }
+.size-dot.medium .size-dot-inner { width: 8px; height: 8px; }
+.size-dot.large .size-dot-inner { width: 12px; height: 12px; }
+
+.color-palette {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.1s ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.18);
+}
+
+.color-swatch.active {
+  border-color: #ffffff;
+  transform: scale(1.22);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Dimensions Badge */
+#size-badge {
+  position: absolute;
+  display: none;
+  background: rgba(20, 22, 26, 0.85);
+  color: #f0f2f5;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
+/* Guide Tooltip */
+#hint-tooltip {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(24, 26, 30, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #e5e8ec;
+  padding: 6px 18px;
+  border-radius: 20px;
+  font-size: 13px;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.25s ease;
+}
+
+/* Magnifier Loupe */
+#loupe {
+  position: absolute;
+  display: none;
+  width: 110px;
+  height: 110px;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: #000000;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 1001;
+  overflow: hidden;
+}
+
+#loupe-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+#loupe-crosshair {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#loupe-info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.75);
+  color: #ffffff;
+  font-size: 10px;
+  text-align: center;
+  padding: 2px 0;
+  font-family: monospace;
+}
+
+/* Text editor overlay */
+#text-editor {
+  position: absolute;
+  display: none;
+  background: transparent;
+  border: 1px dashed #0068ff;
+  color: #ff0000;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.25;
+  outline: none;
+  padding: 3px 5px;
+  resize: none;
+  overflow: hidden;
+  z-index: 1002;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
