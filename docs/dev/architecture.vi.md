@@ -19,8 +19,8 @@ Dự án này không viết lại Zalo từ đầu. Thay vào đó, dự án:
 ```text
 zalo-for-linux/
 ├── .github/          # GitHub workflows, issue templates và hướng dẫn
-├── CONTRIBUTING.md   # Quy định đóng góp
-├── CONTRIBUTING.vi.md# Bản tiếng Việt của quy định đóng góp
+├── CONTRIBUTING.md   # Hướng dẫn đóng góp
+├── CONTRIBUTING.vi.md# Bản tiếng Việt của hướng dẫn đóng góp
 ├── docs/             # Thư mục tài liệu tập trung (SSOT)
 │   ├── dev/          # Tài liệu kỹ thuật & phát triển (Kiến trúc, Viết patch, CI)
 │   └── user/         # Hướng dẫn người dùng (Tính năng, Bảng tra cứu lỗi, README tiếng Việt)

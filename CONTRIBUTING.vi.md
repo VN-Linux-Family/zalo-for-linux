@@ -96,12 +96,14 @@ Pull request gửi vào nhánh **`main`**.
 - Nếu phát triển tính năng mới, hãy kiểm thử trước và chụp ảnh màn hình (nhớ làm mờ thông tin cá nhân).
 - Tiêu đề commit: tuân thủ Conventional Commits (ví dụ: `feat(call): ...`, `fix(ui): ...`).
 - Mô tả PR: nêu rõ lý do thay đổi, `Closes #N` nếu sửa issue, nền tảng đã thử (x86_64 hay aarch64, X11 hay Wayland).
+- Không được có code hay nativelib đã dịch ngược nào vi phạm hướng dẫn của chúng mình; vui lòng xem [hướng dẫn dưới đây](#hướng-dẫn-re-và-rea-cho-nativelibs) để biết thêm
 
 Checklist trước khi mở PR:
 
 - [ ] `npm test` pass, và các test Rust ở trên pass nếu bạn sửa crate.
 - [ ] Không có file sinh ra khi build (`app/`, `temp/`, `dist/`, `node_modules/`).
 - [ ] Không có binary hay file `.node` dựng sẵn.
+- [ ] Không được có code hay nativelib đã dịch ngược nào vi phạm hướng dẫn (bắt buộc)
 - [ ] Đã kiểm thử trên máy bạn và chụp ảnh màn hình (nếu sửa UI).
 - [ ] Tài liệu đã được cập nhật tương ứng.
 
@@ -119,15 +121,61 @@ Kiểm tra [features.vi.md](./docs/user/features.vi.md), [known-issues.vi.md](./
 
 ## Sử dụng AI
 
-Dự án hoan nghênh việc sử dụng các công cụ AI một cách có trách nhiệm (như Codex, Claude Code, v.v.) để hỗ trợ viết code, patch hoặc tài liệu. Tuy nhiên, vui lòng tuân thủ:
+Chúng mình hoan nghênh việc sử dụng các công cụ AI một cách có trách nhiệm (như Codex, Claude Code, v.v.) để hỗ trợ viết code, patch hoặc tài liệu. Tuy nhiên, vui lòng tuân thủ:
 
 - **Rà soát lại mọi thứ:** Bạn chịu trách nhiệm hoàn toàn cho tất cả code và nội dung do mình gửi lên. Đảm bảo đã kiểm tra kỹ, kiểm thử và hiểu rõ bất kỳ kết quả nào do AI tạo ra.
 - **Khai báo nếu sử dụng nhiều:** Nếu pull request hoặc một phần lớn của patch/tài liệu được tạo ra chủ yếu bởi AI, vui lòng đề cập ngắn gọn trong phần mô tả của pull request.
 - **Không gửi code chưa qua kiểm chứng:** Không sao chép mù quáng code do AI tạo ra, đặc biệt là đối với các addon native (`nativelibs/`, `zocr/`) để tránh lỗi an toàn bộ nhớ.
 
+## Hướng dẫn RE và REA cho `nativelibs`
+
+Dự án này hoan nghênh các nỗ lực dịch ngược (RE) và Reverse Engineer Anything (REA) để giúp tích hợp lại các native addon hoặc khắc phục issue. Tuy nhiên, để bảo vệ dự án khỏi việc nhiễm mã độc quyền và các rủi ro pháp lý, các nguyên tắc nghiêm ngặt sau đây phải được tuân thủ:
+
+- **Môi trường phòng sạch (clean room):** 
+  - Các hoạt động RE và REA phải tuân thủ nghiêm ngặt các tiêu chuẩn clean room. Nếu dùng chung một mô hình AI, bạn **bắt buộc** phải bắt đầu một phiên trò chuyện hoàn toàn mới và xóa phiên cũ đi (*khuyến khích sử dụng hai mô hình AI khác nhau để tránh tình trạng nhiễm chéo kiến thức*).
+  - Bên trong thư mục làm việc của bạn, chỉ được phép tồn tại các tài liệu xuất phát từ phiên trò chuyện trước đó.
+  - Khi giai đoạn "bẩn" (code hoặc phân tích thô chưa qua làm sạch sau dịch ngược) kết thúc, toàn bộ các tệp nhị phân và mã nguồn liên quan phải được xóa sạch hoàn toàn để ngăn các mô hình AI xử lý nội dung độc quyền.
+- **Ghi nhận AI cho REA:** Nếu bất kỳ đoạn code hoặc bản vá nào được tạo ra thông qua REA, bạn phải nêu rõ rằng nó được tạo bởi AI (tham khảo phần [Sử dụng AI](#sử-dụng-ai) ở trên).
+- **Các điều cấm:** 
+  - **TUYỆT ĐỐI CẤM:** Thực hiện REA trong cùng một phiên trò chuyện/phiên chung; sử dụng binary hoặc mã nguồn độc quyền hoặc thuộc "All Rights Reserved" cho mã nguồn sau giai đoạn bẩn; hoặc thực hiện RE bằng cách sao chép trực tiếp mã nguồn. (Nếu mã nguồn gốc mở nhưng bị hạn chế, vui lòng tạo patch `.js` thay thế — xem [phần này](./docs/dev/development.vi.md#thêm-một-bản-vá-mới-adding-a-new-patch)).
+- **Thực thi:** Nếu các quy tắc này không được tuân thủ nghiêm ngặt, **Các bạn maintainer phía chúng mình có quyền đóng pull request của bạn ngay lập tức mà không cần thông báo trước.**
+
 ## Code từ các repo khác
 
-Nếu bạn tích hợp mã nguồn từ một repo khác không sử dụng giấy phép BSD 3-Clause, vui lòng đính kèm thông tin giấy phép gốc và ghi rõ nguồn gốc xuất xứ.
+Nếu bạn tích hợp mã nguồn từ một repo khác không sử dụng giấy phép BSD 3-Clause, vui lòng đính kèm thông tin giấy phép gốc và ghi rõ nguồn gốc xuất xứ:
+
+- **Nếu là toàn bộ thư mục:** Thêm một file thông báo (vui lòng đặt tên là `LICENSE-<thư-mục>`) ở gốc của thư mục được mang sang:
+
+  ```text
+  This folder is licensed under the BSD 3-Clause LICENSE file at the project root.
+
+  --------------------------------------------------------------------------------
+
+  ORIGINAL CODE & PORTIONS NOTICE (<giấy-phép-gốc>)
+
+  The original code inside this directory was derived from:
+  <repo> (bạn có thể thêm "now deleted/hidden" nếu liên kết tới repo đã chết)
+
+  Copyright (c) 2024-2026 <tên> <email (nếu có)>
+
+  <văn-bản-giấy-phép-gốc>
+  ```
+
+- **Nếu là từng file riêng lẻ**: Thêm phần chú thích (comment header) ở ngay đầu file:
+
+  ```text
+  Original copyright
+  This file is derived from: <repo-gốc>
+  Copyright (c) 2026 <tên> <email>
+  Licensed under the <giấy-phép-gốc> License.
+  ---------------------------------------------------------------------------
+  Integration copyright
+  Copyright (c) 2026 doandat943 and Việt Nam Linux Family
+  Licensed under the BSD 3-Clause License.
+  ```
+
+- **Kiểm thử & Tính tương thích**: Giống như các đoạn code hay patch có sự hỗ trợ của AI, bạn chịu hoàn toàn trách nhiệm kiểm thử code ngoài để đảm bảo chúng hoạt động trong hệ thống build của chúng mình mà không gây ra lỗi hồi quy hay rò rỉ bộ nhớ.
+- **Ghi rõ nguồn**: Nêu rõ repo nguồn và xuất xứ chính xác trong phần mô tả pull request và lịch sử commit của bạn.
 
 ## Bảo mật
 
