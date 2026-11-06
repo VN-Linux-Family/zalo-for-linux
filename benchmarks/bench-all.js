@@ -1,8 +1,9 @@
 'use strict';
 
 const path = require('path');
-const srtp = require(path.join(__dirname, '..', 'zcall-native', 'native-engine', 'srtp-aes'));
-const zrtp = require(path.join(__dirname, '..', 'zcall-native', 'native-engine', 'zrtp-packet'));
+const { ZCALL_DIR } = require('../scripts/utils/paths');
+const srtp = require(path.join(ZCALL_DIR, 'native-engine', 'srtp-aes'));
+const zrtp = require(path.join(ZCALL_DIR, 'native-engine', 'zrtp-packet'));
 const { renderTrayBadge, encodePng, decodePng } = require(path.join(__dirname, '..', 'plugins', 'tray-badge', 'badge-icon'));
 
 function runBench(name, fn, iterations = 1000) {

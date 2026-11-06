@@ -3,7 +3,8 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const zrtp = require(path.join(__dirname, '..', 'zcall-native', 'native-engine', 'zrtp-packet'));
+const { ZCALL_DIR } = require('../scripts/utils/paths');
+const zrtp = require(path.join(ZCALL_DIR, 'native-engine', 'zrtp-packet'));
 
 describe('ZRTP Packet Protocol', () => {
   it('wraps and unwraps media packets correctly', () => {

@@ -562,9 +562,9 @@ class ZrtcMediaBackend extends EventEmitter {
   _startAudio() {
     const nativeCandidates = [
       path.join(__dirname, '..', 'zcall-audio'),
+      path.join(__dirname, '..', '..', 'audio', 'target', 'release', 'zcall-audio'),
+      path.join(__dirname, '..', '..', '..', '..', 'target', 'release', 'zcall-audio'),
       path.join(__dirname, '..', '..', 'target', 'release', 'zcall-audio'),
-      path.join(__dirname, '..', '..', '..', 'target', 'release', 'zcall-audio'),
-      path.join(__dirname, '..', '..', '..', 'nativelibs', 'zcall-audio', 'target', 'release', 'zcall-audio'),
     ];
     const nativeBin = nativeCandidates.find(p => fs.existsSync(p));
     let execCmd = 'python3';

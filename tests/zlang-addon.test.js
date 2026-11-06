@@ -5,7 +5,11 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const fs = require('fs');
 
-const ZLANG_NODE = path.join(__dirname, '..', 'nativelibs', 'zlang', 'target', 'release', 'zlang.node');
+const { ROOT, NATIVE_ADDONS_DIR } = require('../scripts/utils/paths');
+const ZLANG_NODE = [
+  path.join(ROOT, 'target', 'release', 'zlang.node'),
+  path.join(NATIVE_ADDONS_DIR, 'zlang', 'target', 'release', 'zlang.node')
+].find(p => fs.existsSync(p)) || path.join(ROOT, 'target', 'release', 'zlang.node');
 const hasBinary = fs.existsSync(ZLANG_NODE);
 
 describe('zlang Native Language Detection Addon', () => {

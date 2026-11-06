@@ -3,8 +3,9 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const rtp = require(path.join(__dirname, '..', 'zcall-native', 'native-engine', 'rtp'));
-const { SendRate, DEFAULT_LADDER } = require(path.join(__dirname, '..', 'zcall-native', 'native-engine', 'send-rate'));
+const { ZCALL_DIR } = require('../scripts/utils/paths');
+const rtp = require(path.join(ZCALL_DIR, 'native-engine', 'rtp'));
+const { SendRate, DEFAULT_LADDER } = require(path.join(ZCALL_DIR, 'native-engine', 'send-rate'));
 
 describe('RTP & SendRate Adaptation', () => {
   it('builds and parses audio RTP headers accurately', () => {
