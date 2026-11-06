@@ -51,6 +51,9 @@ test('Native zcall-audio engine full IPC protocol and state transitions', async 
   assert.equal(typeof initialFrame.level, 'number', 'Audio level must be a number');
   assert.ok(initialFrame.level < 100, `Tone frame level (${initialFrame.level} dBov) must reflect audible signal (<100)`);
   assert.ok(initialFrame.len > 0, 'Opus payload must not be empty');
+  // Verify that zcall-audio announced initial mic volume at startup (required for call UI slider)
+  assert.match(stderrLogs, /\[audio-io\] mic volume: \d+%/, 'Engine must announce initial mic volume at startup');
+
 
   // 2. Test Volume adjustment 'V' (percent: 75)
   proc.stdin.write(Buffer.from([0x56, 75]));

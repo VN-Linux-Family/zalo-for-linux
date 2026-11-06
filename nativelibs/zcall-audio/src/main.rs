@@ -85,6 +85,37 @@ fn parse_args() -> Config {
         test_tone,
     }
 }
+fn get_mic_volume(source: Option<&str>) -> u8 {
+    let source_name = source.unwrap_or("@DEFAULT_SOURCE@");
+    let output = std::process::Command::new("pactl")
+        .args(&["get-source-volume", source_name])
+        .output();
+    if let Ok(out) = output {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Some(pos) = s.find('%') {
+                let prefix = &s[..pos];
+                if let Some(slash_pos) = prefix.rfind('/') {
+                    let num_str = prefix[slash_pos + 1..].trim();
+                    if let Ok(val) = num_str.parse::<u8>() {
+                        return val.min(100);
+                    }
+                }
+            }
+        }
+    }
+    100
+}
+
+fn set_mic_volume(source: Option<&str>, pct: u8) {
+    let source_name = source.unwrap_or("@DEFAULT_SOURCE@");
+    let pct = pct.min(100);
+    let raw = (65536.0 * (pct as f64) / 100.0).round() as u32;
+    let _ = std::process::Command::new("pactl")
+        .args(&["set-source-volume", source_name, &raw.to_string()])
+        .spawn();
+}
+
 
 fn main() {
     let config = parse_args();
@@ -95,7 +126,9 @@ fn main() {
 
     let is_muted = Arc::new(AtomicBool::new(false));
     let speaker_off = Arc::new(AtomicBool::new(false));
-    let mic_volume = Arc::new(AtomicU8::new(100));
+    let initial_mic_vol = get_mic_volume(config.mic_device.as_deref());
+    let mic_volume = Arc::new(AtomicU8::new(initial_mic_vol));
+    eprintln!("[audio-io] mic volume: {}%", initial_mic_vol);
     let running = Arc::new(AtomicBool::new(true));
 
     // 1. Microphone capture thread
@@ -267,8 +300,9 @@ fn main() {
                 if stdin.read_exact(&mut arg).is_err() {
                     break;
                 }
-                let pct = arg[0];
+                let pct = arg[0].min(100);
                 mic_volume.store(pct, Ordering::Relaxed);
+                set_mic_volume(config.mic_device.as_deref(), pct);
                 eprintln!("[audio-io] mic volume: {}%", pct);
             }
             CMD_IN_DEVICE => {
@@ -284,6 +318,12 @@ fn main() {
                 let name = String::from_utf8_lossy(&dev_name);
                 let kind_str = if hdr[0] == b'i' { "microphone" } else { "speaker" };
                 eprintln!("[audio-io] Requested {} device change to: {}", kind_str, name);
+                if hdr[0] == b'i' {
+                    let dev_str = if name.is_empty() { None } else { Some(name.as_ref()) };
+                    let new_vol = get_mic_volume(dev_str);
+                    mic_volume.store(new_vol, Ordering::Relaxed);
+                    eprintln!("[audio-io] mic volume: {}%", new_vol);
+                }
             }
             _ => {
                 // Unknown command tag, ignore or resync
