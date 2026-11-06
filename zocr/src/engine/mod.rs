@@ -75,13 +75,17 @@ impl Engine {
             Some(Models { detector, recognizer, classifier, dictionary });
         Ok(start.elapsed().as_secs_f64() * 1000.)
     }
-    pub fn release_idle(&mut self) {
+    /// Drops the model sessions once idle for the configured TTL. Returns
+    /// whether anything was released.
+    pub fn release_idle(&mut self) -> bool {
         if self.models.is_some() &&
                 self.cfg.session_ttl.is_some_and(|ttl|
                         self.last_active.elapsed() >= ttl) {
             self.models = None;
             eprintln!("[zocr-host] idle: released OCR model sessions");
+            return true;
         }
+        false
     }
     pub fn recognize(&mut self, source: RgbImage) -> Result<Value> {
         let started = Instant::now();

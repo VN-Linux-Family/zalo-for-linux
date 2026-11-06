@@ -1,6 +1,10 @@
 use anyhow::{bail, Context, Result};
 use std::{env, path::PathBuf, time::Duration};
 
+// The loaded models hold roughly 450 MB and OCR is used in short bursts, so
+// drop them after a short idle period; the next request reloads them.
+const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(120);
+
 #[derive(Clone)]
 pub struct Config {
     pub auth_token: String,
@@ -51,8 +55,9 @@ impl Config {
                 det_min: probability("ZOCR_LINE_SCORE_DET_MIN", 0.741)?,
                 rec_min: probability("ZOCR_LINE_SCORE_REC_MIN", 0.840)?,
                 rec_keep: probability("ZOCR_LINE_SCORE_REC_KEEP", 0.925)?,
-                trim_interval: duration("ZOCR_WORKING_SET_TRIM_MS")?,
-                session_ttl: duration("ZOCR_SESSION_IDLE_TTL_MS")?,
+                trim_interval: duration("ZOCR_WORKING_SET_TRIM_MS", None)?,
+                session_ttl: duration("ZOCR_SESSION_IDLE_TTL_MS",
+                        Some(DEFAULT_SESSION_TTL))?,
                 affinity: env::var("ZOCR_ORT_TOPOLOGY_AFFINITY").unwrap_or_else(|_|
                         "auto".into()),
                 profile_dir: env::var_os("ZOCR_ORT_PROFILE_DIR").filter(|x|
@@ -99,15 +104,57 @@ fn probability(name: &str, default: f32) -> Result<f32> {
     }
     Ok(n)
 }
-fn duration(name: &str) -> Result<Option<Duration>> {
-    match env::var(name).as_deref() {
-        Err(env::VarError::NotPresent) | Ok("off") => Ok(None),
-        Ok(v) => {
+fn duration(name: &str, default: Option<Duration>)
+    -> Result<Option<Duration>> {
+    match env::var(name) {
+        Ok(v) => parse_duration(name, Some(&v), default),
+        Err(env::VarError::NotPresent) => parse_duration(name, None, default),
+        Err(e) => Err(anyhow::anyhow!("{name}: {e}")),
+    }
+}
+// Zalo fills these from its remote config and sends 0 when the key is
+// missing, so 0 means "no preference" rather than "never". Use "off" to
+// disable.
+fn parse_duration(name: &str, raw: Option<&str>, default: Option<Duration>)
+    -> Result<Option<Duration>> {
+    match raw {
+        Some("off") => Ok(None),
+        None => Ok(default),
+        Some(v) => {
             let n =
                 v.parse::<u64>().with_context(|| format!("invalid {name}"))?;
-            if n == 0 { return Ok(None); }
+            if n == 0 { return Ok(default); }
             Ok(Some(Duration::from_millis(n)))
         }
-        Err(e) => Err(anyhow::anyhow!("{name}: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DEFAULT: Option<Duration> = Some(Duration::from_secs(120));
+
+    #[test]
+    fn zero_uses_default() {
+        // Zalo's remote config sends 0 when it has no value.
+        assert_eq!(parse_duration("X", Some("0"), DEFAULT).unwrap(), DEFAULT);
+    }
+
+    #[test]
+    fn unset_uses_default() {
+        assert_eq!(parse_duration("X", None, DEFAULT).unwrap(), DEFAULT);
+    }
+
+    #[test]
+    fn off_disables() {
+        assert_eq!(parse_duration("X", Some("off"), DEFAULT).unwrap(), None);
+    }
+
+    #[test]
+    fn explicit_value() {
+        assert_eq!(parse_duration("X", Some("1500"), DEFAULT).unwrap(),
+            Some(Duration::from_millis(1500)));
+        assert!(parse_duration("X", Some("soon"), DEFAULT).is_err());
     }
 }
