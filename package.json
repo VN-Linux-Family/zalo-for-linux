@@ -18,6 +18,7 @@
     "download": "node scripts/download.js",
     "prepare-zadark": "node scripts/prepare-zadark.js",
     "prepare-app": "node scripts/prepare-app.js",
+    "extract-screenshot-assets": "node scripts/extract-screenshot-assets.js",
     "clean-unused": "node scripts/clean-unused.js",
     "build": "node scripts/build.js",
     "main": "SETUP=true BUILD=true node scripts/main.js",
@@ -86,7 +87,8 @@
       }
     ],
     "asarUnpack": [
-      "**/*.node"
+      "**/*.node",
+      "plugins/screenshot/portal.py"
     ],
     "buildDependenciesFromSource": false,
     "nodeGypRebuild": false,

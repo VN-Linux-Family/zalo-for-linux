@@ -58,6 +58,10 @@ function register({ app, ipcMain, BrowserWindow, dialog }) {
     assertSender(event);
     return store.save(kind, value);
   });
+  ipcMain.handle('linux-settings:save-screenshot-delay', (event, kind, value) => {
+    assertSender(event);
+    return store.saveScreenshotDelay(kind, value);
+  });
   ipcMain.handle('linux-settings:pick-sound', async (event, kind) => {
     assertSender(event);
     store.validateKind(kind);
@@ -94,7 +98,7 @@ function register({ app, ipcMain, BrowserWindow, dialog }) {
     });
   });
 
-  return { getWindow, assertSender };
+  return { getWindow, assertSender, store };
 }
 
 module.exports = { register };
