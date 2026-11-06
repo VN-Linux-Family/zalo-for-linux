@@ -114,4 +114,13 @@ describe('Plugins Orchestrator', () => {
       console.error = originalError;
     }
   });
+
+  it('verifies zadark plugin adapter interface and installation detection', () => {
+    const zadarkPlugin = require(path.join(__dirname, '..', 'plugins', 'zadark'));
+    assert.strictEqual(typeof zadarkPlugin.register, 'function');
+    assert.strictEqual(typeof zadarkPlugin.isZaDarkInstalled, 'function');
+
+    assert.strictEqual(zadarkPlugin.isZaDarkInstalled(null), false);
+    assert.strictEqual(zadarkPlugin.isZaDarkInstalled('/non/existent/path'), false);
+  });
 });
