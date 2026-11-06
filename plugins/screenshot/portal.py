@@ -1,8 +1,11 @@
-"""Screenshot portal client using the Flatpak runtime's GIO (no PyGObject)."""
+"""Silent screenshot portal client using GIO/GLib ctypes (no PyGObject or external tools)."""
 
 import ctypes as c
-import uuid
+import os
+import shutil
 import sys
+import urllib.parse
+import uuid
 from pathlib import Path
 
 gio = c.CDLL('libgio-2.0.so.0')
@@ -36,106 +39,139 @@ loop_run = bind(glib, 'g_main_loop_run', None, ptr)
 loop_quit = bind(glib, 'g_main_loop_quit', None, ptr)
 timeout_add = bind(glib, 'g_timeout_add', uint, uint, ptr, ptr)
 
-bus = bus_get(2, None, None)  # G_BUS_TYPE_SESSION; keep this connection alive.
-if not bus:
-    raise RuntimeError('Cannot connect to the session bus')
 
-if len(sys.argv) == 3 and sys.argv[1] == '--spectacle':
-    output = Path(sys.argv[2])
+def capture(output_path=None, interactive=False, timeout_ms=10000):
+    error = ptr()
+    bus = bus_get(2, None, c.byref(error))  # G_BUS_TYPE_SESSION
+    if not bus:
+        err_msg = 'Unknown error'
+        if error:
+            class GError(c.Structure):
+                _fields_ = [('domain', uint), ('code', c.c_int), ('message', string)]
+            err_msg = c.cast(error, c.POINTER(GError)).contents.message.decode('utf-8', errors='ignore')
+        raise RuntimeError(f'Cannot connect to session bus: {err_msg}')
+
+    destination = b'org.freedesktop.portal.Desktop'
+    token = 'zalo_screenshot_' + uuid.uuid4().hex
+    sender = unique_name(bus).decode()[1:].replace('.', '_')
+    request = f'/org/freedesktop/portal/desktop/request/{sender}/{token}'.encode()
     loop = loop_new(None, False)
+    result_path = None
+    response_code = None
+    timed_out = False
+
     callback_type = c.CFUNCTYPE(None, ptr, string, string, string, string, ptr, ptr)
     timer_type = c.CFUNCTYPE(c.c_int, ptr)
 
     @callback_type
-    def owner_changed(connection, sender, object_path, interface, signal, parameters, data):
-        owner = child(parameters, 2)
-        if not get_string(owner, None):
-            loop_quit(loop)  # Spectacle exits on cancellation.
-        unref(owner)
+    def on_response(connection, sender_name, object_path, interface, signal, parameters, data):
+        nonlocal result_path, response_code
+        if object_path != request:
+            return
+        response = child(parameters, 0)
+        response_code = get_uint(response)
+        if response_code == 0:
+            results = child(parameters, 1)
+            value = lookup(results, b'uri', None)
+            if value:
+                uri = get_string(value, None).decode()
+                if uri.startswith('file://'):
+                    result_path = urllib.parse.unquote(urllib.parse.urlparse(uri).path)
+                else:
+                    result_path = uri
+                unref(value)
+            unref(results)
+        unref(response)
+        loop_quit(loop)
 
     @timer_type
-    def image_ready(data):
-        try:
-            # Wait for the complete PNG, not just creation of its output file.
-            with output.open('rb') as image:
-                image.seek(-12, 2)
-                complete = image.read() == b'\x00\x00\x00\x00IEND\xaeB`\x82'
-            if complete:
-                loop_quit(loop)
-                return False
-        except OSError:
-            pass
-        return True
+    def on_timeout(data):
+        nonlocal timed_out
+        timed_out = True
+        loop_quit(loop)
+        return False
 
-    subscribe(bus, b'org.freedesktop.DBus', b'org.freedesktop.DBus', b'NameOwnerChanged',
-              b'/org/freedesktop/DBus', b'org.kde.Spectacle', 0, owner_changed, None, None)
-    # GVariant text strings need single quotes/backslashes escaped.
-    escaped = str(output).replace('\\', '\\\\').replace("'", "\\'")
+    subscribe(bus, destination, b'org.freedesktop.portal.Request', b'Response',
+              None, None, 0, on_response, None, None)
+
+    inter_str = 'true' if interactive else 'false'
     parameters = parse(None, (
-        "(['spectacle', '--background', '--region', '--nonotify', '--output', '%s'], '', @a{sv} {})" % escaped
+        "('', {'handle_token': <'%s'>, 'interactive': <%s>})" % (token, inter_str)
     ).encode(), None, None, None)
-    error = ptr()
-    reply = call(bus, b'org.kde.Spectacle', b'/org/kde/spectacle',
-                 b'org.kde.KDBusService', b'CommandLine', parameters, None, 0, 10000, None, c.byref(error))
+
+    call_err = ptr()
+    reply = call(bus, destination, b'/org/freedesktop/portal/desktop',
+                 b'org.freedesktop.portal.Screenshot', b'Screenshot',
+                 parameters, None, 0, 10000, None, c.byref(call_err))
     if not reply:
-        if error:
+        err_msg = 'Unknown D-Bus call error'
+        if call_err:
             class GError(c.Structure):
                 _fields_ = [('domain', uint), ('code', c.c_int), ('message', string)]
-            print(c.cast(error, c.POINTER(GError)).contents.message.decode(), file=sys.stderr)
-        sys.exit(3)  # Not installed, not permitted, or incompatible API: portal fallback.
-    status = child(reply, 0)
-    get_int = bind(glib, 'g_variant_get_int32', c.c_int, ptr)
-    if get_int(status) != 0:
-        sys.exit(2)
-    unref(status)
+            err_msg = c.cast(call_err, c.POINTER(GError)).contents.message.decode('utf-8', errors='ignore')
+        raise RuntimeError(f'Screenshot portal request failed: {err_msg}')
+
+    handle = child(reply, 0)
+    unref(handle)
     unref(reply)
-    timeout_add(100, image_ready, None)
+
+    timeout_add(timeout_ms, on_timeout, None)
     loop_run(loop)
-    if output.is_file():
-        print(output.as_uri())
-    sys.exit(0)
 
-destination = b'org.freedesktop.portal.Desktop'
-token = 'zalo_screenshot_' + uuid.uuid4().hex
-sender = unique_name(bus).decode()[1:].replace('.', '_')
-request = f'/org/freedesktop/portal/desktop/request/{sender}/{token}'.encode()
-loop = loop_new(None, False)
-uri = None
-callback_type = c.CFUNCTYPE(None, ptr, string, string, string, string, ptr, ptr)
+    if timed_out:
+        raise TimeoutError(f'Screenshot portal timed out after {timeout_ms}ms waiting for response')
+
+    if response_code is not None and response_code != 0:
+        desc = {1: 'User cancelled', 2: 'Request failed/denied'}.get(response_code, f'Error code {response_code}')
+        raise RuntimeError(f'Portal response returned non-zero code {response_code}: {desc}')
+
+    if not result_path or not os.path.isfile(result_path):
+        raise FileNotFoundError(f'Portal did not produce a valid image file (got: {result_path})')
+
+    if output_path:
+        dest = Path(output_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(result_path, str(dest))
+            # Delete original from user's Pictures directory if it was saved there
+            try:
+                os.unlink(result_path)
+            except OSError:
+                pass
+            return str(dest)
+        except Exception as copy_err:
+            sys.stderr.write(f'Warning: failed to move portal output to {output_path}: {copy_err}\n')
+            return result_path
+
+    return result_path
 
 
-@callback_type
-def on_response(connection, sender_name, object_path, interface, signal, parameters, data):
-    global uri
-    if object_path != request:
-        return
-    response = child(parameters, 0)
-    if get_uint(response) == 0:
-        results = child(parameters, 1)
-        value = lookup(results, b'uri', None)
-        if value:
-            uri = get_string(value, None).decode()
-            unref(value)
-        unref(results)
-    unref(response)
-    loop_quit(loop)
+def main():
+    output_path = None
+    interactive = False
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == '--output' and i + 1 < len(args):
+            output_path = args[i + 1]
+            i += 2
+        elif args[i] == '--interactive':
+            interactive = True
+            i += 1
+        else:
+            i += 1
+
+    try:
+        path = capture(output_path=output_path, interactive=interactive)
+        if path:
+            print(path)
+            sys.exit(0)
+        else:
+            sys.exit(1)
+    except Exception as e:
+        sys.stderr.write(f'Portal error: {e}\n')
+        sys.exit(1)
 
 
-# Subscribe before calling to avoid losing a fast Response signal.
-subscribe(bus, destination, b'org.freedesktop.portal.Request', b'Response',
-          None, None, 0, on_response, None, None)
-parameters = parse(None, (
-    "('', {'handle_token': <'%s'>, 'interactive': <true>})" % token
-).encode(), None, None, None)
-reply = call(bus, destination, b'/org/freedesktop/portal/desktop',
-             b'org.freedesktop.portal.Screenshot', b'Screenshot',
-             parameters, None, 0, 10000, None, None)
-if not reply:
-    raise RuntimeError('Screenshot portal request failed')
-handle = child(reply, 0)
-request = get_string(handle, None)
-unref(handle)
-unref(reply)
-loop_run(loop)
-if uri:
-    print(uri)
+if __name__ == '__main__':
+    main()

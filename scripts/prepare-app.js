@@ -333,6 +333,9 @@ async function extractAppAsar() {
   // The call window's icons, sounds and fonts, from the macOS app.
   await require('./extract-zcall-assets').main();
 
+  // The screenshot tool's icon font, from pc-dist.
+  await require('./extract-screenshot-assets').main();
+
   // Without it Zalo would look for ZaloCall.exe / ZaloHelper.app: no calls at all.
   const mainJs = path.join(APP_DIR, 'main-dist', 'main.js');
   if (!fs.existsSync(mainJs) || !fs.readFileSync(mainJs, 'utf8').includes('ZCALL_ENGINE_JS')) {

@@ -65,17 +65,48 @@ describe('Plugin Stores & Persistence', () => {
   });
 
   describe('Advanced Settings Store', () => {
-    it('reads and initializes settings with empty values', () => {
+    it('reads and initializes settings with empty values and default screenshot delays', () => {
       const store = advancedStore.createStore(path.join(tmpDir, 'adv'));
       const settings = store.read();
       assert.ok(settings !== undefined);
       assert.strictEqual(typeof settings.ringtone, 'string');
       assert.strictEqual(typeof settings.ringback, 'string');
+      assert.strictEqual(settings.screenshotDelayWithZalo, 100);
+      assert.strictEqual(settings.screenshotDelayWithoutZalo, 500);
     });
 
     it('validates sound kinds properly', () => {
       const store = advancedStore.createStore(path.join(tmpDir, 'adv'));
       assert.throws(() => store.save('invalid_kind', '/dummy/path.mp3'));
+    });
+
+    it('saves and reads custom screenshot delays for withZalo and withoutZalo', () => {
+      const advDir = path.join(tmpDir, 'adv-delay');
+      const store = advancedStore.createStore(advDir);
+
+      const savedWith = store.saveScreenshotDelay('withZalo', 250);
+      assert.strictEqual(savedWith.screenshotDelayWithZalo, 250);
+
+      const savedWithout = store.saveScreenshotDelay('withoutZalo', 750);
+      assert.strictEqual(savedWithout.screenshotDelayWithoutZalo, 750);
+
+      const readBack = store.read();
+      assert.strictEqual(readBack.screenshotDelayWithZalo, 250);
+      assert.strictEqual(readBack.screenshotDelayWithoutZalo, 750);
+    });
+
+    it('validates screenshot delay input values and kinds', () => {
+      const store = advancedStore.createStore(path.join(tmpDir, 'adv-val'));
+      assert.throws(() => store.saveScreenshotDelay('unknownKind', 100));
+      assert.throws(() => store.saveScreenshotDelay('withZalo', -50));
+      assert.throws(() => store.saveScreenshotDelay('withoutZalo', 15000));
+      assert.throws(() => store.saveScreenshotDelay('withZalo', 'not_a_number'));
+
+      // Empty string resets to default
+      const resetWith = store.saveScreenshotDelay('withZalo', '');
+      assert.strictEqual(resetWith.screenshotDelayWithZalo, 100);
+      const resetWithout = store.saveScreenshotDelay('withoutZalo', '');
+      assert.strictEqual(resetWithout.screenshotDelayWithoutZalo, 500);
     });
   });
 });

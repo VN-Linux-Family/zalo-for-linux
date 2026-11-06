@@ -49,6 +49,37 @@
         </form>
         <p class="sound-hint">MP3, WAV, OGG, M4A, AAC, FLAC, OPUS, WEBM. Thay đổi áp dụng từ lần phát tiếp theo. Hãy giữ tệp ở đường dẫn đã chọn.</p>
       </section>
+      <section class="settings-card" aria-labelledby="screenshot-title">
+        <h2 id="screenshot-title">Chụp màn hình</h2>
+        <p class="section-description">Tùy chỉnh thời gian chờ (delay) trước khi chụp ảnh màn hình để tránh hiệu ứng chuyển cảnh của Desktop Environment (DE) hoặc cửa sổ chưa kịp ẩn.</p>
+        <form class="screenshot-setting" data-screenshot-delay="withZalo">
+          <label for="delay-with-zalo">Chế độ chụp có Zalo <span>(mili-giây)</span></label>
+          <p id="delay-with-zalo-desc">Thời gian chờ khi chụp kèm cửa sổ Zalo trên màn hình.</p>
+          <div class="delay-row">
+            <input type="number" id="delay-with-zalo" name="delay" min="0" max="10000" step="50" placeholder="100" aria-describedby="delay-with-zalo-desc" autocomplete="off">
+            <span class="unit">ms</span>
+            <div class="delay-actions">
+              <button type="button" class="button" data-action="reset">Mặc định</button>
+              <button type="submit" class="button primary">Lưu</button>
+            </div>
+          </div>
+          <span class="screenshot-status" role="status" aria-live="polite"></span>
+        </form>
+        <form class="screenshot-setting" data-screenshot-delay="withoutZalo">
+          <label for="delay-without-zalo">Chế độ chụp không có Zalo <span>(mili-giây)</span></label>
+          <p id="delay-without-zalo-desc">Thời gian chờ sau khi ẩn/thu nhỏ cửa sổ Zalo để compositor hoàn tất hiệu ứng chuyển cảnh.</p>
+          <div class="delay-row">
+            <input type="number" id="delay-without-zalo" name="delay" min="0" max="10000" step="50" placeholder="500" aria-describedby="delay-without-zalo-desc" autocomplete="off">
+            <span class="unit">ms</span>
+            <div class="delay-actions">
+              <button type="button" class="button" data-action="reset">Mặc định</button>
+              <button type="submit" class="button primary">Lưu</button>
+            </div>
+          </div>
+          <span class="screenshot-status" role="status" aria-live="polite"></span>
+        </form>
+        <p class="sound-hint">Giá trị từ 0 đến 10000 mili-giây (1000 ms = 1 giây). Thay đổi áp dụng ngay cho lần chụp tiếp theo.</p>
+      </section>
       <section class="settings-card" aria-labelledby="recalled-title">
         <div class="toggle-row">
           <div>

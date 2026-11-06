@@ -1,70 +1,139 @@
 /**
  * plugins/screenshot/index.js
  *
- * Screenshot plugin - intercepts Zalo's screenshot IPC calls and
- * delegates to native Linux screenshot tools.
+ * Built-in Zalo screenshot plugin for Linux (Wayland & X11).
+ * Features standalone silent screen capture and native Zalo screenshot UI
+ * without any third-party screenshot software dependencies.
  */
 
 'use strict';
 
-const { exec, execSync, execFile } = require('child_process');
+let electron = {};
+try {
+  const mod = require('electron');
+  if (mod && typeof mod === 'object') {
+    electron = mod;
+  }
+} catch (_) {}
 const fs = require('fs');
 const path = require('path');
-const { fileURLToPath } = require('url');
-
-// Screenshot tools (in priority order)
-const SCREENSHOT_TOOLS = [
-  { name: 'cosmic-screenshot',      cmd: 'cosmic-screenshot' },
-  { name: 'deepin-screen-recorder', cmd: 'deepin-screen-recorder' },
-  { name: 'spectacle',              cmd: 'spectacle -rbcn' },
-  { name: 'flameshot',              cmd: 'flameshot gui' },
-  { name: 'gnome-screenshot',       cmd: 'gnome-screenshot -ac' },
-  { name: 'xfce4-screenshooter',    cmd: 'xfce4-screenshooter -rc' },
-  { name: 'mate-screenshot',        cmd: 'mate-screenshot -i' },
-  { name: 'ksnapshot',              cmd: 'ksnapshot' },
-  { name: 'scrot',                  cmd: 'scrot' }
-];
+const { pathToFileURL } = require('url');
+const { captureScreen } = require('./capture');
+const { createStore, DEFAULT_SETTINGS } = require('../advanced-settings/store');
 
 let _mainWindow = null;
-let _ipcMain    = null;
+let _overlayWindow = null;
+let _isCapturing = false;
+let _ipcMain = null;
+let _app = null;
 
-function register({ ipcMain }) {
-  _ipcMain = ipcMain;
+function setApp(app) {
+  _app = app;
+}
 
-  const originalHandle = ipcMain.handle.bind(ipcMain);
-  ipcMain.handle = function (channel, handler) {
+function getScreenshotDelay(mode, customApp) {
+  try {
+    const app = customApp || _app || electron.app;
+    const userDataDir = (app && app.getPath)
+      ? app.getPath('userData')
+      : path.join(require('os').tmpdir(), 'zalo-screencap');
+    const store = createStore(userDataDir);
+    const settings = store.read();
+    if (mode === 'withZalo') {
+      return typeof settings.screenshotDelayWithZalo === 'number'
+        ? settings.screenshotDelayWithZalo
+        : (DEFAULT_SETTINGS ? DEFAULT_SETTINGS.screenshotDelayWithZalo : 100);
+    } else {
+      return typeof settings.screenshotDelayWithoutZalo === 'number'
+        ? settings.screenshotDelayWithoutZalo
+        : (DEFAULT_SETTINGS ? DEFAULT_SETTINGS.screenshotDelayWithoutZalo : 500);
+    }
+  } catch (_) {
+    return mode === 'withZalo' ? 100 : 500;
+  }
+}
+
+function ensureFont() {
+  const fontPath = path.join(__dirname, 'ui', 'fonts', 'zalo-pc-screencap.ttf');
+  if (fs.existsSync(fontPath)) return;
+
+  const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'extract-screenshot-assets.js');
+  if (fs.existsSync(scriptPath)) {
+    try {
+      const extractor = require(scriptPath);
+      if (typeof extractor.main === 'function') {
+        const res = extractor.main();
+        // Bắt unhandled rejection nếu main() trả về Promise
+        if (res && typeof res.catch === 'function') {
+          res.catch((_err) => {
+            // The Github Actions doesn't extract the app (prepare-app)
+          });
+        }
+      }
+    } catch (_) {}
+  }
+}
+
+function register({ ipcMain: customIpcMain, app: customApp } = {}) {
+  ensureFont();
+  if (customApp) _app = customApp;
+  const ipc = customIpcMain || electron.ipcMain;
+  if (!ipc) return;
+  _ipcMain = ipc;
+
+  const originalHandle = ipc.handle.bind(ipc);
+  ipc.handle = function (channel, handler) {
     if (channel === 'screen-capture') {
       const wrappedHandler = async (event, ...args) => {
-        const opts = args[0];
+        if (_isCapturing) {
+          if (_overlayWindow && !_overlayWindow.isDestroyed()) {
+            _overlayWindow.focus();
+          }
+          return true;
+        }
+
+        const opts = args[0] || {};
         const hideWindow = opts && opts.captureMode === false;
 
         let success = false;
         try {
-          // hide() makes Zalo close background windows after 10s. Portal dialogs
-          // can take longer; Wayland also crashes on hide()/show() in Electron 22.
-          if (hideWindow && _mainWindow && !_mainWindow.isDestroyed()) {
-            if (global.__zaloNativeWayland || process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info')) {
-              _mainWindow.minimize();
-            } else {
-              _mainWindow.hide();
+          _isCapturing = true;
+
+          // Settle time depending on capture mode (with or without Zalo)
+          if (hideWindow) {
+            // Hide or minimize main window if requested (chế độ chụp không có Zalo)
+            if (_mainWindow && !_mainWindow.isDestroyed()) {
+              if (global.__zaloNativeWayland || process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info')) {
+                _mainWindow.minimize();
+              } else {
+                _mainWindow.hide();
+              }
+            }
+            // Wait for WM/DE to unmap window / finish minimize animations
+            const delay = getScreenshotDelay('withoutZalo', customApp);
+            if (delay > 0) {
+              await new Promise((r) => setTimeout(r, delay));
+            }
+          } else {
+            // Chế độ chụp có Zalo
+            const delay = getScreenshotDelay('withZalo', customApp);
+            if (delay > 0) {
+              await new Promise((r) => setTimeout(r, delay));
             }
           }
-          success = await _triggerScreenshot();
+
+          success = await startInteractiveScreenshot(event);
+          if (!success) {
+            console.warn('[Screenshot Plugin] Screenshot session ended without accepting image');
+          }
         } catch (e) {
-          console.error('[Screenshot Plugin]', e.message);
+          console.error('[Screenshot Plugin] Critical failure in screenshot session:', e.stack || e);
         } finally {
-          if (hideWindow && _mainWindow && !_mainWindow.isDestroyed()) {
-            if (_mainWindow.isMinimized()) _mainWindow.restore();
-            _mainWindow.show();
-            _mainWindow.focus();
-            _mainWindow.moveTop();
-            if (!_mainWindow.webContents.isDestroyed()) {
-              _mainWindow.webContents.send('show-from-tray');
-            }
-          }
+          _isCapturing = false;
+          restoreMainWindow(hideWindow);
         }
 
-        // Auto-paste captured screenshot into chat
+        // Auto-paste captured screenshot into chat if accepted
         if (success) {
           const targetSender = (event && event.sender && !event.sender.isDestroyed())
             ? event.sender
@@ -89,63 +158,212 @@ function register({ ipcMain }) {
   };
 }
 
-async function _triggerScreenshot() {
-  if (process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info')) {
-    if ((process.env.XDG_CURRENT_DESKTOP || '').split(':').some(de => de.toUpperCase() === 'KDE')) {
-      const success = await _triggerPortalScreenshot(true);
-      if (success !== null) return success; // Cancellation must not open the portal.
+function restoreMainWindow(wasHidden) {
+  if (wasHidden && _mainWindow && !_mainWindow.isDestroyed()) {
+    try {
+      if (_mainWindow.isMinimized()) _mainWindow.restore();
+      _mainWindow.show();
+      _mainWindow.focus();
+      _mainWindow.moveTop();
+      if (!_mainWindow.webContents.isDestroyed()) {
+        _mainWindow.webContents.send('show-from-tray');
+      }
+    } catch (e) {
+      console.error('[Screenshot Plugin] Restore error:', e);
     }
-    return _triggerPortalScreenshot();
   }
-  return new Promise((resolve) => {
-    for (const tool of SCREENSHOT_TOOLS) {
-      try {
-        execSync(`which ${tool.name}`, { stdio: 'ignore' });
-        console.log(`[Screenshot Plugin] Using ${tool.name}`);
-        exec(tool.cmd, (err) => {
-          if (err) console.error(`[Screenshot Plugin] ${tool.name} error:`, err.message);
-          resolve(!err);
-        });
-        return;
-      } catch (e) { /* tool not found, try next */ }
-    }
-    console.warn('[Screenshot Plugin] No screenshot tool found');
-    resolve(false);
-  });
 }
 
-function _triggerPortalScreenshot(spectacle = false) {
-  // Read through Electron's ASAR support; python cannot open files inside ASAR.
-  const script = fs.readFileSync(path.join(__dirname, 'portal.py'), 'utf8');
-  // This Flatpak app directory has the same path on the host. Spectacle can
-  // write here without granting access to Pictures or arbitrary host commands.
-  const directory = spectacle
-    ? fs.mkdtempSync(path.join(require('electron').app.getPath('userData'), 'screenshot-'))
-    : null;
-  const args = ['-c', script];
-  if (spectacle) args.push('--spectacle', path.join(directory, 'capture.png'));
+async function startInteractiveScreenshot(event) {
+  const userDataDir = (electron.app && electron.app.getPath)
+    ? electron.app.getPath('userData')
+    : path.join(require('os').tmpdir(), 'zalo-screencap');
+  const targetDir = path.join(userDataDir, 'screenshot-cache');
+  const capturePath = await captureScreen({
+    desktopCapturer: electron.desktopCapturer,
+    screen: electron.screen,
+    targetDir
+  });
+
+  if (!capturePath || !fs.existsSync(capturePath)) {
+    console.error('[Screenshot Plugin] Screen capture failed: no valid screenshot image was produced.');
+    return false;
+  }
+
+  const fileUrl = pathToFileURL(capturePath).href;
+
   return new Promise((resolve) => {
-    execFile('python3', args, { timeout: 120000 }, (err, stdout) => {
-      if (err) {
-        console.error('[Screenshot Plugin] Portal error:', err.message);
-        // Only an unavailable API falls back; timeout/failure after launch stops.
-        return resolve(spectacle && err.code === 3 ? null : false);
-      }
-      const uri = stdout.trim();
-      if (!uri) return resolve(false); // User cancelled.
-      try {
-        const { clipboard, nativeImage } = require('electron');
-        const image = nativeImage.createFromPath(fileURLToPath(uri));
-        if (image.isEmpty()) return resolve(false);
-        clipboard.writeImage(image);
-        resolve(true);
-      } catch (e) {
-        console.error('[Screenshot Plugin] Portal image error:', e.message);
-        resolve(false);
+    let resolved = false;
+
+    const scr = electron.screen;
+    const cursorPt = scr && scr.getCursorScreenPoint ? scr.getCursorScreenPoint() : { x: 0, y: 0 };
+    const activeDisplay = scr && (scr.getDisplayNearestPoint ? scr.getDisplayNearestPoint(cursorPt) : (scr.getPrimaryDisplay ? scr.getPrimaryDisplay() : null));
+    const bounds = (activeDisplay && activeDisplay.bounds) || { x: 0, y: 0, width: 1920, height: 1080 };
+
+    if (!electron.BrowserWindow) {
+      resolve(false);
+      return;
+    }
+
+    _overlayWindow = new electron.BrowserWindow({
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      frame: false,
+      transparent: false,
+      backgroundColor: '#000000',
+      alwaysOnTop: true,
+      fullscreen: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      hasShadow: false,
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'ui', 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false
       }
     });
-  }).finally(() => {
-    if (directory) fs.rmSync(directory, { recursive: true, force: true });
+
+    _overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+
+    _overlayWindow.webContents.on('did-fail-load', (_evt, errorCode, errorDescription, validatedURL) => {
+      console.error(`[Screenshot Plugin] Overlay UI failed to load: (${errorCode}) ${errorDescription} at ${validatedURL}`);
+    });
+
+    _overlayWindow.webContents.on('render-process-gone', (_evt, details) => {
+      console.error('[Screenshot Plugin] Overlay render process terminated unexpectedly:', details);
+    });
+
+    const htmlPath = path.join(__dirname, 'ui', 'index.html');
+    _overlayWindow.loadFile(htmlPath, { query: { img: fileUrl } });
+
+    _overlayWindow.once('ready-to-show', () => {
+      if (_overlayWindow && !_overlayWindow.isDestroyed()) {
+        _overlayWindow.show();
+        _overlayWindow.focus();
+        try {
+          _overlayWindow.webContents.send('screencap:init', { imageSrc: fileUrl });
+        } catch (err) {
+          console.error('[Screenshot Plugin] Failed to dispatch screencap:init to overlay:', err);
+        }
+      }
+    });
+
+    const cleanup = () => {
+      if (!resolved) {
+        resolved = true;
+        resolve(false);
+      }
+      try {
+        if (fs.existsSync(capturePath)) {
+          fs.unlinkSync(capturePath);
+        }
+      } catch (_) {}
+      if (_overlayWindow && !_overlayWindow.isDestroyed()) {
+        _overlayWindow.destroy();
+        _overlayWindow = null;
+      }
+    };
+
+    _overlayWindow.on('closed', cleanup);
+
+    // Listen to actions from the overlay window
+    const actionChannel = 'screencap:action';
+    const actionListener = async (_evt, data) => {
+      if (!_overlayWindow || _overlayWindow.isDestroyed() || _evt.sender !== _overlayWindow.webContents) {
+        return;
+      }
+      const ipc = _ipcMain || electron.ipcMain;
+      if (ipc && ipc.removeListener) {
+        ipc.removeListener(actionChannel, actionListener);
+      }
+
+      const action = data && data.action;
+      const dataUrl = data && data.dataUrl;
+
+      if (action === 'accept' && dataUrl) {
+        try {
+          const img = electron.nativeImage && electron.nativeImage.createFromDataURL(dataUrl);
+          if (!img || img.isEmpty()) {
+            throw new Error('Rendered screenshot dataURL yielded an empty NativeImage');
+          }
+          if (electron.clipboard) {
+            electron.clipboard.writeImage(img);
+          }
+          resolved = true;
+          cleanup();
+          resolve(true);
+        } catch (e) {
+          console.error('[Screenshot Plugin] Failed to process accepted screenshot image:', e.stack || e);
+          cleanup();
+          resolve(false);
+        }
+      } else if (action === 'copy' && dataUrl) {
+        try {
+          const img = electron.nativeImage && electron.nativeImage.createFromDataURL(dataUrl);
+          if (!img || img.isEmpty()) {
+            throw new Error('Rendered screenshot dataURL yielded an empty NativeImage');
+          }
+          if (electron.clipboard) {
+            electron.clipboard.writeImage(img);
+          }
+          resolved = true;
+          cleanup();
+          resolve(false); // copied to clipboard, but not pasting to chat
+        } catch (e) {
+          console.error('[Screenshot Plugin] Failed to copy screenshot image to clipboard:', e.stack || e);
+          cleanup();
+          resolve(false);
+        }
+      } else if (action === 'save' && dataUrl) {
+        try {
+          cleanup(); // close overlay first before opening save dialog
+          const img = electron.nativeImage && electron.nativeImage.createFromDataURL(dataUrl);
+          if (!img || img.isEmpty()) {
+            throw new Error('Rendered screenshot dataURL yielded an empty NativeImage');
+          }
+          const pngBuffer = img.toPNG();
+
+          const now = new Date();
+          const pad = (n) => String(n).padStart(2, '0');
+          const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+          const picsDir = (electron.app && electron.app.getPath && (electron.app.getPath('pictures') || electron.app.getPath('documents'))) || require('os').homedir();
+          const defaultPath = path.join(picsDir, `Zalo_Screenshot_${timestamp}.png`);
+
+          let filePath = null;
+          if (electron.dialog && electron.dialog.showSaveDialog) {
+            const res = await electron.dialog.showSaveDialog(_mainWindow, {
+              title: 'Lưu ảnh chụp màn hình',
+              defaultPath,
+              filters: [{ name: 'PNG Image', extensions: ['png'] }]
+            });
+            if (!res.canceled) filePath = res.filePath;
+          }
+
+          if (filePath) {
+            fs.writeFileSync(filePath, pngBuffer);
+          }
+          resolved = true;
+          resolve(false);
+        } catch (e) {
+          console.error('[Screenshot Plugin] Failed to save screenshot image to disk:', e.stack || e);
+          cleanup();
+          resolve(false);
+        }
+      } else {
+        // cancel
+        cleanup();
+        resolve(false);
+      }
+    };
+
+    const ipc = _ipcMain || electron.ipcMain;
+    if (ipc && ipc.on) {
+      ipc.on(actionChannel, actionListener);
+    }
   });
 }
 
@@ -153,4 +371,10 @@ function setMainWindow(win) {
   _mainWindow = win;
 }
 
-module.exports = { register, setMainWindow };
+module.exports = {
+  register,
+  setMainWindow,
+  setApp,
+  getScreenshotDelay,
+  ensureFont
+};

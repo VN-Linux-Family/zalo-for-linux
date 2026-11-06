@@ -23,6 +23,18 @@ body { display: block; }
 .sound-status { display: block; min-height: 16px; margin-top: 8px; color: var(--muted); font-size: 12px; }
 .sound-status:empty { display: none; }
 .sound-status.error { color: var(--danger); }
+.screenshot-setting + .screenshot-setting { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.screenshot-setting > label { font-weight: 650; }
+.screenshot-setting > label span { color: var(--muted); font-size: 12px; font-weight: 400; }
+.screenshot-setting > p { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
+.delay-row { display: flex; align-items: center; gap: 10px; }
+.delay-row input { width: 130px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: var(--bg); color: var(--text); font-family: ui-monospace, monospace; font-size: 13px; }
+.delay-row input:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+.delay-row .unit { color: var(--muted); font-size: 13px; font-weight: 500; }
+.delay-actions { display: flex; gap: 8px; margin-left: auto; }
+.screenshot-status { display: block; min-height: 16px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.screenshot-status:empty { display: none; }
+.screenshot-status.error { color: var(--danger); }
 .sound-hint { margin: 16px 0 0; font-size: 11px; }
 .userscripts-card { display: flex; align-items: center; gap: 14px; }
 .userscripts-card .brand-icon { flex: none; }

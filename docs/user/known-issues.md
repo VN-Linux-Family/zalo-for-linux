@@ -62,9 +62,12 @@ Quick diagnostic lookup table for common runtime and configuration issues on Lin
   - **Credits:** [@akimiya7742](https://github.com/akimiya7742) ([PR #43](https://github.com/VN-Linux-Family/zalo-for-linux/pull/43)), [@namtao](https://github.com/namtao) ([PR #151](https://github.com/VN-Linux-Family/zalo-for-linux/pull/151)).
 
 - **In-App Screenshot Tool:**
-  - **Issue:** Built-in screen capture failed on Linux.
-  - **Solution:** Integrated native Linux screenshot tools (`spectacle`, `flameshot`, `gnome-screenshot`, `scrot`).
-  - **Credits:** [@hthienloc](https://github.com/hthienloc). See [Issue #19](https://github.com/VN-Linux-Family/zalo-for-linux/issues/19).
+  - **Issue:** Built-in screen capture failed on Linux (originally depended on a Windows/macOS helper binary `ZaloCap`). An earlier workaround delegated capture to third-party desktop utilities (`spectacle`, `flameshot`, `gnome-screenshot`, etc.), which required external packages and provided an inconsistent user experience.
+  - **Solution:** Built a standalone native screenshot tool directly into the application with no third-party screenshot software dependencies:
+    - **Wayland & X11 capture:** Supports silent capture via XDG Desktop Portal (`org.freedesktop.portal.Screenshot` with non-interactive mode), `grim` (wlroots/Sway/Hyprland), and Electron/X11 fallbacks.
+    - **Native Zalo PC UI:** Built-in screenshot overlay utilizing the original `zalo-pc-screencap` icon font and UI design, complete with magnification loupe, region selection with 8 resize handles, annotation tools (rectangle, ellipse, arrow, line, freehand doodle, text, and mosaic blur), undo/redo history, stroke/color palette, and direct auto-paste into chat.
+    - **Configurable Capture Delays:** In Advanced Settings ("Cài đặt nâng cao"), users can configure individual delay timings for both "Capture with Zalo" (default 100 ms) and "Capture without Zalo" (default 500 ms) to avoid capturing residual desktop animations or unhidden window frames on slow/effect-heavy desktop environments.
+  - **Credits:** Initial integration by [@hthienloc](https://github.com/hthienloc) (see [Issue #19](https://github.com/VN-Linux-Family/zalo-for-linux/issues/19)). Standalone native screenshot engine and UI update by [@akimiya7742](https://github.com/akimiya7742).
 
 - **Freeze on Login Screen:**
   - **Issue:** App hung when displaying the login window.
