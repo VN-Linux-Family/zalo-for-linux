@@ -32,4 +32,5 @@
 
 - [ ] `npm test` passes locally.
 - [ ] No proprietary binaries or generated files (`app/`, `dist/`, `temp/`, `node_modules/`) are committed.
+- [ ] No RE codes or nativelibs may violate the RE and REA guidelines in CONTRIBUTING.md (if this PR is for adding a new nativelib)
 - [ ] Documentation updated if introducing new features, flags, or configuration options.

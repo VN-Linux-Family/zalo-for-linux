@@ -9,7 +9,6 @@ pub const PIPE_ERR: u8 = 0x84;
 pub const PIPE_EVENT: u8 = 0x85;
 pub const ERR_DECODE: u8 = OK;
 pub const ERR_INFER: u8 = OK;
-pub const ERR_INTERNAL: u8 = OK;
 pub const MAX_CONTROL: usize = 1024 * 1024;
 pub const MAX_IMAGE: usize = 134217728;
 fn invalid(message: &str) -> io::Error {

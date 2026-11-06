@@ -211,8 +211,8 @@ Dự án này được phát hành theo giấy phép BSD 3-Clause "Mới" hoặc
 
 ### Miễn trừ
 
-Dự án này là bản port không chính thức và không liên kết với, không được xác nhận bởi, hoặc được bảo trợ bởi Zalo hay Tập đoàn VNG.
+Dự án này là **bản port không chính thức và không liên kết với, không được xác nhận bởi, hoặc được bảo trợ bởi Zalo hay Tập đoàn VNG**.
 
-Zalo là thương hiệu của Tập đoàn VNG. Phần mềm này chỉ được cung cấp cho mục đích giáo dục và sử dụng cá nhân. Người dùng có trách nhiệm tuân thủ các điều khoản dịch vụ và pháp luật hiện hành.
+Zalo là thương hiệu của Tập đoàn VNG. Phần mềm này **chỉ được cung cấp cho mục đích giáo dục và sử dụng cá nhân**. **Người dùng có trách nhiệm tuân thủ các điều khoản dịch vụ và pháp luật hiện hành**.
 
 Dự án này **không bảo trợ, xác minh hoặc chịu trách nhiệm** cho bất kỳ bản fork nào từ bên thứ ba HOẶC các bản fork yêu cầu quyên góp; bất kỳ phiên bản chỉnh sửa hoặc bản fork nào chứa mã độc hoạt động hoàn toàn độc lập và không có sự ủy quyền của chúng mình, theo Điều khoản 3 của giấy phép BSD 3-Clause.

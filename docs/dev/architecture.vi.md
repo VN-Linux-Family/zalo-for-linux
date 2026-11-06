@@ -19,6 +19,8 @@ Dự án này không viết lại Zalo từ đầu. Thay vào đó, dự án:
 ```text
 zalo-for-linux/
 ├── .github/          # GitHub workflows, issue templates và hướng dẫn
+├── CONTRIBUTING.md   # Hướng dẫn đóng góp
+├── CONTRIBUTING.vi.md# Bản tiếng Việt của hướng dẫn đóng góp
 ├── docs/             # Thư mục tài liệu tập trung (SSOT)
 │   ├── dev/          # Tài liệu kỹ thuật & phát triển (Kiến trúc, Viết patch, CI)
 │   └── user/         # Hướng dẫn người dùng (Tính năng, Bảng tra cứu lỗi, README tiếng Việt)
@@ -34,6 +36,7 @@ zalo-for-linux/
 │   ├── file-utilities# Addon quét hệ thống file bất đồng bộ
 │   ├── file-utils    # Tiện ích truy cập và quản lý file
 │   ├── mp4thumb      # Trích xuất ảnh thu nhỏ từ video MP4
+│   ├── os-sys-info   # Bộ đọc thông tin hệ điều hành và ID tiến trình
 │   ├── v8-profiles   # Phân tích hiệu năng CPU native cho Zalo
 │   ├── README.md     # Tài liệu tổng quan về nativelibs
 │   ├── zfile         # Đọc thông tin ổ đĩa (dung lượng trống, mount point)

@@ -17,60 +17,62 @@ This project is not a from-scratch rewrite of Zalo. Instead, it:
 
 ```
 zalo-for-linux/
-├── .github/          # GitHub workflows and contributing guidelines
-├── docs/             # Centralized documentation (SSOT)
-│   ├── dev/          # Technical docs (Architecture, Development)
-│   └── user/         # End-user docs (Features, Known issues, Vietnamese README)
-├── LICENSE           # License file, with disclaimer
-├── main.js           # Electron entrypoint
-├── README.md         # Project homepage
-├── nativelibs # Linux reimplementations of Zalo native addons
-│   ├── builder.js # CLI build helper
-│   ├── builder-rust.js # CLI build helper, for Rust-based addons
-│   ├── db-cross-v4 # Backup decryption & E2EE message synchronization addon
-│   ├── file-utilities # Asynchronous filesystem scanning & pattern matching addon
-│   ├── file-utils # Filesystem access and file management utilities
-│   ├── mp4thumb # Video thumbnail extractor from MP4 files
-│   ├── v8-profiles # Native CPU profiler for Zalo
-│   ├── README.md # Contains info about the folder
-│   ├── zfile # Disk/volume info (free space, mount points) addon
-│   ├── zimage # Image processor, resizer, and format conversions
-│   ├── zjxl # JPEG XL (JXL) image decoder and encoder
-│   ├── zlang # Natural language identification (whatlang)
-│   └── zwalker # Media-cache garbage collector
-├── package.json  # Project metadata + build config
-├── package-lock.json  # Project lock files
-├── plugins # Zalo submodules/plugins
-│   ├── launcher-badge # Displays the unread messages
-│   ├── screenshot # Calls the native screenshots module to capture the screen
-│   ├── start-hidden # Allows the app to start hidden in the tray
-│   ├── tray-badge # Draws the unread count onto the tray icon
-│   ├── tray-host # Check if the host have a system tray, if it doesn't have, quit the app immediately
-│   ├── advanced-settings # Linux settings window, call sounds and navigation
-│   ├── userscripts # Userscript storage, injection and editor
-│   ├── window-state # Check the window state for avoid disappearing window
-│   ├── zadark # Dark mode, privacy features, and additional functionality extension
-│   └── zcall # Engine launcher, call window (window.js + ui/call.*) and incoming notice (incoming.js + ui/incoming.*), laid out as Zalo for macOS
-├── README.md # Contains info about the project
-├── sample # Pictures for guide
+├── .github/               # GitHub workflows
+├── CONTRIBUTING.md        # Contributing guidelines
+├── CONTRIBUTING.vi.md     # Contributing guidelines, Vietnamese version
+├── docs/                  # Centralized documentation (SSOT)
+│   ├── dev/               # Technical docs (Architecture, Development)
+│   └── user/              # End-user docs (Features, Known issues, Vietnamese README)
+├── LICENSE                # License file, with disclaimer
+├── main.js                # Electron entrypoint
+├── README.md              # Project homepage
+├── nativelibs             # Linux reimplementations of Zalo native addons
+│   ├── builder.js         # CLI build helper
+│   ├── builder-rust.js    # CLI build helper, for Rust-based addons
+│   ├── db-cross-v4        # Backup decryption & E2EE message synchronization addon
+│   ├── file-utilities     # Asynchronous filesystem scanning & pattern matching addon
+│   ├── file-utils         # Filesystem access and file management utilities
+│   ├── mp4thumb           # Video thumbnail extractor from MP4 files
+│   ├── os-sys-info        # Operating system and process information reader 
+│   ├── v8-profiles        # Native CPU profiler for Zalo
+│   ├── README.md          # Contains info about the folder
+│   ├── zfile              # Disk/volume info (free space, mount points) addon
+│   ├── zimage             # Image processor, resizer, and format conversions
+│   ├── zjxl               # JPEG XL (JXL) image decoder and encoder
+│   ├── zlang              # Natural language identification (whatlang)
+│   └── zwalker            # Media-cache garbage collector
+├── package.json           # Project metadata + build config
+├── package-lock.json      # Project lock files
+├── plugins                # Zalo submodules/plugins
+│   ├── launcher-badge     # Displays the unread messages
+│   ├── screenshot         # Calls the native screenshots module to capture the screen
+│   ├── start-hidden       # Allows the app to start hidden in the tray
+│   ├── tray-badge         # Draws the unread count onto the tray icon
+│   ├── tray-host          # Check if the host have a system tray, if it doesn't have, quit the app immediately
+│   ├── advanced-settings  # Linux settings window, call sounds and navigation
+│   ├── userscripts        # Userscript storage, injection and editor
+│   ├── window-state       # Check the window state for avoid disappearing window
+│   ├── zadark             # Dark mode, privacy features, and additional functionality extension
+│   └── zcall              # Engine launcher, call window (window.js + ui/call.*) and incoming notice (incoming.js + ui/incoming.*), laid out as Zalo for macOS
+├── sample                 # Pictures for guide
 ├── scripts
 │   ├── build.js 
 │   ├── build-stage2.sh
-│   ├── check-versions.js # Check for newer Zalo versions
-│   ├── download-dmg.js # Download macOS DMG
-│   ├── main.js # Orchestrator (runs setup + build)
-│   ├── patches # Individual patch scripts
-│   ├── prepare-app.js # Extract app.asar + apply patches
-│   ├── prepare-zadark.js # Build ZaDark plugin
-│   └── utils # Utilities
-│       └── logger.js # Logger file
-└── zcall-native # Native call engine (no Wine): signalling, ZRTP / SRTP media, Opus audio
-│   ├── native-engine # zcall-native.js (spawned by the patched main process), audio-io.py
-│   ├── README.md # How the engine works
-│   └── tools # Shared Python helpers (Opus playback)
-├── app/                     # Extracted app (gitignored, regenerated by build)
-├── temp/                    # DMG download cache
-└── dist/                    # Build output (AppImage, etc.)
+│   ├── check-versions.js  # Check for newer Zalo versions
+│   ├── download-dmg.js    # Download macOS DMG
+│   ├── main.js            # Orchestrator (runs setup + build)
+│   ├── patches            # Individual patch scripts
+│   ├── prepare-app.js     # Extract app.asar + apply patches
+│   ├── prepare-zadark.js  # Build ZaDark plugin
+│   └── utils              # Utilities
+│       └── logger.js      # Logger file
+└── zcall-native           # Native call engine (no Wine): signalling, ZRTP / SRTP media, Opus audio
+│   ├── native-engine      # zcall-native.js (spawned by the patched main process), audio-io.py
+│   ├── README.md          # How the engine works
+│   └── tools              # Shared Python helpers (Opus playback)
+├── app/                   # Extracted app (gitignored, regenerated by build)
+├── temp/                  # DMG download cache
+└── dist/                  # Build output (AppImage, etc.)
 
 ```
 

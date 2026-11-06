@@ -1,0 +1,17 @@
+[package]
+name = "os-sys-info"
+version = "0.1.0"
+edition = "2021"
+description = "Linux OS architecture and process snapshots"
+
+[lib]
+name = "os_sys_info"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi5"] }
+napi-derive = "2"
+
+[build-dependencies]
+napi-build = "2.1.3"
