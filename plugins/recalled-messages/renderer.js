@@ -15,14 +15,20 @@
     setTimeout(() => {
       const previous = document.title;
       document.title = FLUSH_TITLE;
-      // Restored on a later task so the change reaches the main process.
-      setTimeout(() => {
-        if (document.title === FLUSH_TITLE) document.title = previous;
-        flushQueued = false;
-      }, 100);
+      // Restoring in the same task still notifies the main process (measured),
+      // and leaves no window where another title trigger could be overwritten.
+      document.title = previous;
+      flushQueued = false;
     }, 0);
   }
-  const log = createRecallLog(window.localStorage, Date.now, requestFlush);
+  // Set once the recall-state module is found; it holds the logged-in account.
+  let account = null;
+  const log = createRecallLog(window.localStorage, {
+    onWrite: requestFlush,
+    owner: () => {
+      try { return account && typeof account.userId === 'string' ? account.userId : ''; } catch (_) { return ''; }
+    }
+  });
 
   let unseen = 0;
   let open = false;
@@ -78,22 +84,35 @@
     }
   }
 
+  // Each piece is hooked once, as soon as its module has loaded; returns true
+  // when all three are in place. The modules load lazily and independently.
+  let recallHooked = false;
+  let recallStateHooked = false;
   function hook() {
     const req = getRequire();
-    const recall = req && findModule(req, (h) => typeof h.convertToRecalled === 'function');
-    if (!recall) return false;
-    wrap(recall, 'convertToRecalled', (msg) => {
-      if (log.remember(msg)) { unseen += 1; render(); }
-    });
-    // Optional: without these, entries still show under "Tất cả".
-    const recallState = findModule(req, (h) => typeof h.setRecallMessage === 'function');
-    if (recallState) {
-      wrap(recallState, 'setRecallMessage', (info) => {
-        if (info && log.assignConversation(info.msgId, info.conversationId)) render();
-      });
+    if (!req) return false;
+    if (!recallHooked) {
+      const recall = findModule(req, (h) => typeof h.convertToRecalled === 'function');
+      if (recall) {
+        wrap(recall, 'convertToRecalled', (msg) => {
+          if (log.remember(msg)) { unseen += 1; render(); }
+        });
+        recallHooked = true;
+      }
     }
-    conversations = findModule(req, (h) => 'activeConversationId' in h);
-    return true;
+    // Without these two, entries still show under "Tất cả".
+    if (!recallStateHooked) {
+      const recallState = findModule(req, (h) => typeof h.setRecallMessage === 'function');
+      if (recallState) {
+        wrap(recallState, 'setRecallMessage', (info) => {
+          if (info && log.assignConversation(info.msgId, info.conversationId)) render();
+        });
+        recallStateHooked = true;
+        account = recallState;
+      }
+    }
+    if (!conversations) conversations = findModule(req, (h) => 'activeConversationId' in h);
+    return recallHooked && recallStateHooked && !!conversations;
   }
 
   const style = document.createElement('style');
@@ -358,9 +377,12 @@
         !viewer.contains(event.target)) setOpen(false);
   }
   function onKeyDown(event) {
-    if (event.key !== 'Escape') return;
+    if (event.key !== 'Escape' || (viewer.hidden && !open)) return;
+    // Keep Zalo from also acting on the same Escape (closing a reply, search…).
+    event.preventDefault();
+    event.stopPropagation();
     if (!viewer.hidden) hideImage();
-    else if (open) setOpen(false);
+    else setOpen(false);
   }
   document.addEventListener('pointerdown', onPointerDown, true);
   document.addEventListener('keydown', onKeyDown, true);
@@ -382,18 +404,23 @@
     if (open) placePanel();
   }, 300));
 
-  // Chat modules load lazily after login.
+  // Chat modules load lazily. Poll every second for the first five minutes,
+  // then every ten seconds, and stop only once everything is hooked.
   let tries = 0;
-  const hookTimer = setInterval(() => {
-    tries += 1;
-    if (hook() || tries > 300) clearInterval(hookTimer);
-  }, 1000);
-  timers.push(hookTimer);
+  let hookTimer = null;
+  function scheduleHook() {
+    hookTimer = setTimeout(() => {
+      tries += 1;
+      if (!stopped && !hook()) scheduleHook();
+    }, tries < 300 ? 1000 : 10000);
+  }
+  scheduleHook();
 
   window.__zaloLinuxRecalled = {
     stop() {
       stopped = true;
       for (const timer of timers) clearInterval(timer);
+      clearTimeout(hookTimer);
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown, true);
       // Leave a function alone if a userscript wrapped it after us.
@@ -404,7 +431,7 @@
       button.remove();
       panel.remove();
       viewer.remove();
-      log.clear();
+      log.clearAll();
       delete window.__zaloLinuxRecalled;
     }
   };

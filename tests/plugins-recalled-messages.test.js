@@ -24,11 +24,11 @@ const textMessage = (msgId, message = 'xin chào') => ({
 
 describe('Recalled messages log', () => {
   it('stores a recalled text message once even when Zalo converts it twice', () => {
-    const log = createRecallLog(memoryStorage(), () => 42);
+    const log = createRecallLog(memoryStorage(), { now: () => 42 });
     assert.equal(log.remember(textMessage('m1')), true);
     assert.equal(log.remember(textMessage('m1')), false);
     assert.deepEqual(log.load(), [{
-      msgId: 'm1', fromUid: '1', toUid: '2', name: 'An', text: 'xin chào', image: '', imageFull: '', video: '',
+      msgId: 'm1', owner: '', fromUid: '1', toUid: '2', name: 'An', text: 'xin chào', image: '', imageFull: '', video: '',
       sentAt: 1700000000000, recalledAt: 42
     }]);
   });
@@ -113,14 +113,48 @@ describe('Recalled messages log', () => {
 
   it('asks for a flush after every change', () => {
     let flushes = 0;
-    const log = createRecallLog(memoryStorage(), Date.now, () => { flushes += 1; });
+    const log = createRecallLog(memoryStorage(), { onWrite: () => { flushes += 1; } });
     log.remember(textMessage('m1'));
     log.remember(textMessage('m1'));
     assert.equal(flushes, 1);
     log.assignConversation('m1', 'c1');
     log.clearConversation('c1');
-    log.clear();
+    log.clear(); // nothing left to remove, so nothing is written
+    log.clearAll();
     assert.equal(flushes, 4);
+  });
+
+  it('drops the oldest entries when storage is full instead of losing the new one', () => {
+    const storage = memoryStorage();
+    const setItem = storage.setItem;
+    storage.setItem = (key, value) => {
+      if (value.length > 600) throw new Error('QuotaExceededError');
+      setItem(key, value);
+    };
+    const log = createRecallLog(storage);
+    for (let i = 0; i < 10; i++) log.remember(textMessage(`m${i}`));
+    const ids = log.load().map((item) => item.msgId);
+    assert.equal(ids[ids.length - 1], 'm9');
+    assert.ok(ids.length < 10);
+  });
+
+  it('shows and clears only the logged-in account\'s entries', () => {
+    const storage = memoryStorage();
+    let me = 'A';
+    const log = createRecallLog(storage, { owner: () => me });
+    log.remember(textMessage('a1'));
+    log.assignConversation('a1', 'c1');
+    me = 'B';
+    log.remember(textMessage('b1'));
+    log.assignConversation('b1', 'c1');
+    assert.deepEqual(log.load().map((item) => item.msgId), ['b1']);
+    assert.deepEqual(log.forConversation('c1').map((item) => item.msgId), ['b1']);
+    assert.equal(log.clearConversation('c1'), 1);
+    assert.equal(log.clear(), 0);
+    me = 'A';
+    assert.deepEqual(log.load().map((item) => item.msgId), ['a1']);
+    log.clearAll();
+    assert.equal(storage.getItem(STORAGE_KEY), null);
   });
 
   it('recovers from corrupt storage and clears its key', () => {
