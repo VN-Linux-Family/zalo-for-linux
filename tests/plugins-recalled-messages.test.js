@@ -100,6 +100,29 @@ describe('Recalled messages log', () => {
     assert.deepEqual(log.load().map((item) => item.msgId), ['m3']);
   });
 
+  it('ignores messages Zalo has already turned into a recall placeholder', () => {
+    const storage = memoryStorage();
+    const log = createRecallLog(storage);
+    assert.equal(log.remember(textMessage('r1', '[Tin nhắn đã được thu hồi]')), false);
+    assert.equal(log.remember(textMessage('r2', '[Tin nhắn đã bị xóa]')), false);
+    assert.equal(log.remember(textMessage('r3', { catId: 0, id: 0 })), false);
+    // Entries captured by an earlier version are dropped on load.
+    storage.setItem(STORAGE_KEY, JSON.stringify([{ msgId: 'old', text: '[Tin nhắn đã được thu hồi]' }, { msgId: 'ok', text: 'hi' }]));
+    assert.deepEqual(log.load().map((item) => item.msgId), ['ok']);
+  });
+
+  it('asks for a flush after every change', () => {
+    let flushes = 0;
+    const log = createRecallLog(memoryStorage(), Date.now, () => { flushes += 1; });
+    log.remember(textMessage('m1'));
+    log.remember(textMessage('m1'));
+    assert.equal(flushes, 1);
+    log.assignConversation('m1', 'c1');
+    log.clearConversation('c1');
+    log.clear();
+    assert.equal(flushes, 4);
+  });
+
   it('recovers from corrupt storage and clears its key', () => {
     const storage = memoryStorage();
     storage.setItem(STORAGE_KEY, '{not json');

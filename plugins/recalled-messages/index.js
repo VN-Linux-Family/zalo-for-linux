@@ -18,15 +18,33 @@ function register({ app, ipcMain, BrowserWindow, advancedSettings }) {
     else window.localStorage.removeItem(${JSON.stringify(STORAGE_KEY)});
   })();`;
 
+  // Chromium commits localStorage a few seconds late; flush so a deletion
+  // survives an immediate SIGTERM (logout, shutdown).
+  function flush(contents) {
+    if (contents.isDestroyed()) return;
+    try {
+      contents.session.flushStorageData();
+    } catch (error) {
+      console.error('[recalled-messages] Cannot flush storage:', error.message);
+    }
+  }
+
   function apply(contents, enabled) {
     if (contents.isDestroyed() || !MAIN_PAGE.test(contents.getURL())) return;
-    contents.executeJavaScript(enabled ? enableScript : disableScript, true).catch((error) => {
-      console.error('[recalled-messages] Cannot apply setting:', error.message);
-    });
+    contents.executeJavaScript(enabled ? enableScript : disableScript, true)
+      .then(() => { if (!enabled) flush(contents); })
+      .catch((error) => {
+        console.error('[recalled-messages] Cannot apply setting:', error.message);
+      });
   }
 
   app.on('browser-window-created', (_event, win) => {
     win.webContents.on('dom-ready', () => apply(win.webContents, store.read().keepRecalled));
+    win.on('page-title-updated', (event, title) => {
+      if (title !== 'LINUX_RECALLED_FLUSH' || !MAIN_PAGE.test(win.webContents.getURL())) return;
+      event.preventDefault();
+      flush(win.webContents);
+    });
   });
 
   ipcMain.handle('linux-settings:set-keep-recalled', (event, enabled) => {

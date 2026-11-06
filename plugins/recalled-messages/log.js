@@ -7,6 +7,15 @@
   const MAX_ITEMS = 500;
   const MAX_TEXT = 4000;
 
+  // What convertToRecalled leaves behind. Zalo calls it again for messages
+  // that were already recalled (e.g. when reloading a conversation), and
+  // those must not be stored as if they were the original content.
+  const PLACEHOLDERS = ['[Tin nhắn đã được thu hồi]', '[Tin nhắn đã bị xóa]'];
+  function alreadyRecalled(message) {
+    if (typeof message === 'string') return PLACEHOLDERS.includes(message);
+    return !!message && typeof message === 'object' && message.catId === 0 && message.id === 0;
+  }
+
   // Text messages carry a string; links, photos and files carry an object.
   function summarize(message) {
     if (typeof message === 'string') return message.slice(0, MAX_TEXT);
@@ -43,11 +52,15 @@
     };
   }
 
-  function createRecallLog(storage, now = Date.now) {
+  // onWrite runs after every change so the caller can flush it to disk;
+  // Chromium otherwise commits localStorage a few seconds later and a
+  // SIGTERM in between (logout, shutdown) silently undoes a deletion.
+  function createRecallLog(storage, now = Date.now, onWrite = () => {}) {
     function load() {
       try {
         const items = JSON.parse(storage.getItem(STORAGE_KEY) || '[]');
-        return Array.isArray(items) ? items : [];
+        // Older entries may hold a placeholder captured before it was filtered.
+        return Array.isArray(items) ? items.filter((item) => item && !PLACEHOLDERS.includes(item.text)) : [];
       } catch (_) {
         return [];
       }
@@ -55,12 +68,13 @@
 
     function save(items) {
       storage.setItem(STORAGE_KEY, JSON.stringify(items.slice(-MAX_ITEMS)));
+      onWrite();
     }
 
     // Returns true when a new entry was stored. Zalo converts the same
     // message more than once per recall, so entries are keyed by msgId.
     function remember(msg) {
-      if (!msg || !msg.msgId) return false;
+      if (!msg || !msg.msgId || alreadyRecalled(msg.message)) return false;
       const text = summarize(msg.message);
       const { image, imageFull, video } = media(msg.message);
       if (!text && !image && !video) return false;
@@ -111,6 +125,7 @@
 
     function clear() {
       storage.removeItem(STORAGE_KEY);
+      onWrite();
     }
 
     return { load, remember, assignConversation, forConversation, clearConversation, clear };

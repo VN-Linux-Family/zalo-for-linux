@@ -5,7 +5,24 @@
 
   if (window.__zaloLinuxRecalled) return;
   const { createRecallLog } = window.__zaloLinuxRecallLog;
-  const log = createRecallLog(window.localStorage);
+  // The main process flushes storage to disk when it sees this title, the
+  // same channel advanced-settings uses to open its window.
+  const FLUSH_TITLE = 'LINUX_RECALLED_FLUSH';
+  let flushQueued = false;
+  function requestFlush() {
+    if (flushQueued) return;
+    flushQueued = true;
+    setTimeout(() => {
+      const previous = document.title;
+      document.title = FLUSH_TITLE;
+      // Restored on a later task so the change reaches the main process.
+      setTimeout(() => {
+        if (document.title === FLUSH_TITLE) document.title = previous;
+        flushQueued = false;
+      }, 100);
+    }, 0);
+  }
+  const log = createRecallLog(window.localStorage, Date.now, requestFlush);
 
   let unseen = 0;
   let open = false;
