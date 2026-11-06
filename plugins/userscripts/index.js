@@ -3,7 +3,6 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { dialog } = require('electron');
 
 const MAX_SCRIPT_SIZE = 2 * 1024 * 1024;
 const IPC = {
@@ -16,6 +15,7 @@ const IPC = {
 
 let advancedSettings;
 let storePath;
+let injectedDialog;
 
 function parseMetadata(code) {
   const metadata = {};
@@ -224,7 +224,11 @@ function registerIpc(ipcMain) {
   });
   ipcMain.handle(IPC.importFile, async (event) => {
     assertManagerSender(event);
-    const result = await dialog.showOpenDialog(advancedSettings.getWindow(), {
+    const activeDialog = injectedDialog || (() => {
+      try { return require('electron').dialog; } catch (_) { return null; }
+    })();
+    if (!activeDialog) return null;
+    const result = await activeDialog.showOpenDialog(advancedSettings.getWindow(), {
       title: 'Import userscript',
       properties: ['openFile'],
       filters: [
@@ -241,8 +245,9 @@ function registerIpc(ipcMain) {
   });
 }
 
-function register({ app, ipcMain, advancedSettings: settings }) {
+function register({ app, ipcMain, advancedSettings: settings, dialog }) {
   advancedSettings = settings;
+  if (dialog) injectedDialog = dialog;
   storePath = path.join(app.getPath('userData'), 'userscripts.json');
   registerIpc(ipcMain);
 
