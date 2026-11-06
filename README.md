@@ -195,6 +195,7 @@ Thanks goes to these wonderful people
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/brucenguyen1102"><img src="https://avatars.githubusercontent.com/u/49108434?v=4&size=100" width="100px" height="100px" alt="Bruce Nguyen"/><br /><sub><b>Bruce Nguyen</b></sub></a><br /><a href="https://github.com/VN-Linux-Family/zalo-for-linux/commits?author=brucenguyen1102" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/lolmc0587"><img src="https://avatars.githubusercontent.com/u/59377673?v=4&size=100" width="100px" height="100px" alt="Tom"/><br /><sub><b>Tom</b></sub></a><br /><a href="https://github.com/VN-Linux-Family/zalo-for-linux/commits?author=lolmc0587" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/mrd9999"><img src="https://avatars.githubusercontent.com/u/224975069?v=4&size=100" width="100px" height="100px" alt="MrD"/><br /><sub><b>MrD</b></sub></a><br /><a href="#promotion-mrd9999" title="Promotion">📣</a> <a href="#maintenance-mrd9999" title="Maintenance">🚧</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/nguyenphivn"><img src="https://avatars.githubusercontent.com/u/19565657?v=4&size=100" width="100px" height="100px" alt="nguyenphivn"/><br /><sub><b>nguyenphivn</b></sub></a><br /><a href="https://github.com/VN-Linux-Family/zalo-for-linux/commits?author=nguyenphivn" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
