@@ -222,17 +222,23 @@ jobs:
     - name: Get the commit the build is named after
       run: echo "COMMIT_HASH=$(node scripts/utils/build-commit.js)" >> "$GITHUB_ENV"
 
+    - name: Generate Categorized Release Notes
+      run: node scripts/utils/generate-release-notes.js "${{ needs.build.outputs.zalo_version }}" dist/release-body.md
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ needs.build.outputs.zalo_version }}
         name: ${{ needs.build.outputs.zalo_version }}
-        body_path: .github/release-template.md
-        generate_release_notes: true
+        body_path: dist/release-body.md
+        generate_release_notes: false
         files: dist/*.AppImage*
+        overwrite_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Cleanup old release assets
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
