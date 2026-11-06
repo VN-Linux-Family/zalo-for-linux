@@ -81,7 +81,7 @@
 
   const style = document.createElement('style');
   style.textContent = `
-    #zalo-linux-recalled-btn { position: fixed; left: 50%; top: 8px; transform: translateX(-50%); z-index: 99999;
+    #zalo-linux-recalled-btn { position: fixed; left: 50%; top: 8px; visibility: hidden; transform: translateX(-50%); z-index: 99999;
       height: 24px; padding: 0 12px; border-radius: 12px; border: 1px solid #b8d4ff; cursor: pointer;
       background: #e8f1ff; color: #0058d6; font: 600 12px system-ui, sans-serif;
       box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
@@ -235,18 +235,17 @@
   }
 
   // Sit like Zalo's date pill: centred over the message list, just above the
-  // composer toolbar. Without an open conversation, use the top centre.
+  // composer toolbar.
   function placeButton() {
     if (button.hidden) return;
     const visible = (selector) => [...document.querySelectorAll(selector)]
       .map((el) => el.getBoundingClientRect())
       .filter((rect) => rect.width > 0 && rect.height > 0);
+    // Without an open conversation there is no good spot, and a fallback
+    // position makes the pill jump once the chat pane appears.
     const listRect = visible('#messageViewContainer')[0];
-    if (!listRect) {
-      button.style.left = '50%';
-      button.style.top = '8px';
-      return;
-    }
+    button.style.visibility = listRect ? 'visible' : 'hidden';
+    if (!listRect) return;
     const tops = visible('.chat-box-input__tools__btn, #chatInput').map((rect) => rect.top);
     const bottom = Math.min(listRect.bottom, ...tops);
     button.style.left = listRect.left + listRect.width / 2 + 'px';
