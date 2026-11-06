@@ -32,6 +32,11 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libopus-dev libpulse-dev
+
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 

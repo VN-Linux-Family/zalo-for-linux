@@ -120,7 +120,7 @@ class RocTracker {
 }
 
 class ZrtcMediaBackend extends EventEmitter {
-  constructor({ log = () => {}, onAudioPacket = null, sendUdp = false, audio = true } = {}) {
+  constructor({ log = () => { }, onAudioPacket = null, sendUdp = false, audio = true } = {}) {
     super();
     this.log = log;
     this.onAudioPacket = onAudioPacket;
@@ -301,7 +301,7 @@ class ZrtcMediaBackend extends EventEmitter {
   async _prepareGroup() {
     const saved = process.env.ZCALL_LOG_DIR ? path.join(process.env.ZCALL_LOG_DIR, 'group-init-layout') : null;
     let first = process.env.ZCALL_GROUP_INIT_LAYOUT || '';
-    if (!first && saved) try { first = fs.readFileSync(saved, 'utf8').trim(); } catch (_) {}
+    if (!first && saved) try { first = fs.readFileSync(saved, 'utf8').trim(); } catch (_) { }
     const layouts = process.env.ZCALL_GROUP_INIT_LAYOUT ? [first]
       : [...new Set([first, ...GROUP_INIT_LAYOUTS].filter((l) => GROUP_INIT_LAYOUTS.includes(l)))];
     for (const layout of layouts) {
@@ -318,7 +318,7 @@ class ZrtcMediaBackend extends EventEmitter {
       }));
       if (best) {
         this.log(`media: group InitZRTP accepted with layout "${layout}"`);
-        if (saved && layout !== first) try { fs.writeFileSync(saved, layout + '\n'); } catch (_) {}
+        if (saved && layout !== first) try { fs.writeFileSync(saved, layout + '\n'); } catch (_) { }
         return best;
       }
       if (!this.refusals.length) return null; // no answer at all: network, not the layout
@@ -534,14 +534,14 @@ class ZrtcMediaBackend extends EventEmitter {
     this._onInitReply = null;
     this._clearTimers();
     if (this.audio) {
-      try { this.audio.stdin.end(); } catch (_) {}
+      try { this.audio.stdin.end(); } catch (_) { }
       const a = this.audio;
-      setTimeout(() => { try { a.kill(); } catch (_) {} }, 1000);
+      setTimeout(() => { try { a.kill(); } catch (_) { } }, 1000);
       this.audio = null;
     }
     const sock = this.socket;
     this.socket = null;
-    if (sock) setTimeout(() => { try { sock.close(); } catch (_) {} }, 100); // let EndCall leave
+    if (sock) setTimeout(() => { try { sock.close(); } catch (_) { } }, 100); // let EndCall leave
   }
 
   stats() {
@@ -560,8 +560,23 @@ class ZrtcMediaBackend extends EventEmitter {
   }
 
   _startAudio() {
-    const script = path.join(__dirname, '..', 'audio-io.py');
-    const args = [script];
+    const nativeCandidates = [
+      path.join(__dirname, '..', 'zcall-audio'),
+      path.join(__dirname, '..', '..', 'target', 'release', 'zcall-audio'),
+      path.join(__dirname, '..', '..', '..', 'target', 'release', 'zcall-audio'),
+      path.join(__dirname, '..', '..', '..', 'nativelibs', 'zcall-audio', 'target', 'release', 'zcall-audio'),
+    ];
+    const nativeBin = nativeCandidates.find(p => fs.existsSync(p));
+    let execCmd = 'python3';
+    let args = [];
+
+    if (nativeBin && process.env.ZCALL_USE_PYTHON !== '1') {
+      execCmd = nativeBin;
+      this.log(`media: using native Rust audio engine (${nativeBin})`);
+    } else {
+      args.push(path.join(__dirname, '..', 'audio-io.py'));
+      this.log('media: using python audio-io engine');
+    }
     if (this.devices.mic) args.push('--mic', this.devices.mic);
     if (this.devices.speaker) args.push('--speaker', this.devices.speaker);
     if (this.group) args.push('--mix');
@@ -590,7 +605,7 @@ class ZrtcMediaBackend extends EventEmitter {
         }
       }
     }
-    const audio = spawn('python3', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const audio = spawn(execCmd, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     this.audio = audio;
     // audio-io's own messages go to the engine log. "fault: mic" / "fault:
     // speaker" (the device stopped for good) and an audio-io that dies during
@@ -616,12 +631,12 @@ class ZrtcMediaBackend extends EventEmitter {
     });
     if (this.muted) this.setMute(true);
     if (this.speakerOff) this.setSpeaker(true);
-    this.audio.stdin.on('error', () => {});
+    this.audio.stdin.on('error', () => { });
     let buf = Buffer.alloc(0);
     this.audio.stdout.on('data', (d) => {
       buf = Buffer.concat([buf, d]);
       // 'A' u16 len, Opus (older audio-io) or 'L' u8 level, u16 len, Opus.
-      for (;;) {
+      for (; ;) {
         if (buf.length >= 3 && buf[0] === 0x41) {
           const n = buf.readUInt16BE(1);
           if (buf.length < 3 + n) break;
@@ -806,8 +821,10 @@ class ZrtcMediaBackend extends EventEmitter {
     if (this.share && this.share.uid === shareId) return;
     this.stopShare();
     const sock = dgram.createSocket('udp4');
-    const sh = { uid: shareId, sock, token: 0, timers: [], seq: Math.floor(Math.random() * 0x8000), twSeq: 1, layerSeq: 0, ctlSeq: 0,
-      keySent: false, queue: [], draining: false, tsBase: Math.floor(Math.random() * 0x7fffffff), start: 0, tx: 0, w: 0, h: 0, cfgLogged: false, unknown: new Set() };
+    const sh = {
+      uid: shareId, sock, token: 0, timers: [], seq: Math.floor(Math.random() * 0x8000), twSeq: 1, layerSeq: 0, ctlSeq: 0,
+      keySent: false, queue: [], draining: false, tsBase: Math.floor(Math.random() * 0x7fffffff), start: 0, tx: 0, w: 0, h: 0, cfgLogged: false, unknown: new Set()
+    };
     this.share = sh;
     sock.on('error', (err) => this.log('media: share socket error:', err.message));
     sock.on('message', (msg) => this._onShareMessage(sh, msg));
@@ -834,7 +851,7 @@ class ZrtcMediaBackend extends EventEmitter {
       this._shareSend(sh, buildEndCallPacket({ uid: sh.uid, token: sh.token, callId: (this.params && this.params.callId) || 0 }), 'share EndCall');
     }
     this.log(`media: share peer ${sh.uid} stopped, ${sh.tx} frame(s) sent`);
-    setTimeout(() => { try { sh.sock.close(); } catch (_) {} }, 100);
+    setTimeout(() => { try { sh.sock.close(); } catch (_) { } }, 100);
   }
 
   _shareSend(sh, packet, what) {
@@ -1294,7 +1311,7 @@ class ZrtcMediaBackend extends EventEmitter {
       h.writeUInt16BE(seq, 4);
       h.writeUInt32BE(ts, 6);
       h[10] = pt | (marker ? 0x80 : 0);
-      try { fs.appendFileSync(require('path').join(process.env.ZCALL_LOG_DIR, this.group ? `video-dump-${got.ssrc}.bin` : 'video-dump.bin'), Buffer.concat([h, got.opus])); } catch (_) {}
+      try { fs.appendFileSync(require('path').join(process.env.ZCALL_LOG_DIR, this.group ? `video-dump-${got.ssrc}.bin` : 'video-dump.bin'), Buffer.concat([h, got.opus])); } catch (_) { }
     }
     this.emit('video', { seq, ts, pt, marker, payload: got.opus, roc, ssrc: got.ssrc });
     if (this.group) this._noteVideoMember(got.ssrc);

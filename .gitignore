@@ -142,6 +142,6 @@ profiles/
 *.heapprofile
 bun.lock
 graphify-out/
-
 # Extracted screenshot plugin assets
 plugins/screenshot/ui/fonts/
+zcall-native/native-engine/zcall-audio
