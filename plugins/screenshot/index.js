@@ -32,7 +32,16 @@ function ensureFont() {
   const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'extract-screenshot-assets.js');
   if (fs.existsSync(scriptPath)) {
     try {
-      require(scriptPath).main();
+      const extractor = require(scriptPath);
+      if (typeof extractor.main === 'function') {
+        const res = extractor.main();
+        // Bắt unhandled rejection nếu main() trả về Promise
+        if (res && typeof res.catch === 'function') {
+          res.catch((_err) => {
+            // The Github Actions doesn't extract the app (prepare-app)
+          });
+        }
+      }
     } catch (_) {}
   }
 }
