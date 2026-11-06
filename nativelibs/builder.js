@@ -15,10 +15,9 @@ const path = require('path');
 const logger = require('../scripts/utils/logger');
 const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
 
-const PACKAGE_JSON = require(path.join(__dirname, '..', 'package.json'));
+const { ROOT: repoRoot } = require('../scripts/utils/paths');
+const PACKAGE_JSON = require(path.join(repoRoot, 'package.json'));
 const ELECTRON_VERSION = PACKAGE_JSON.devDependencies.electron.replace(/^\^/, '');
-
-const repoRoot = path.resolve(__dirname, '..');
 const libDir = path.resolve(repoRoot, process.argv[2] || '');
 if (libDir !== repoRoot && !libDir.startsWith(repoRoot + path.sep)) {
  throw new Error(`Lib dir must be inside the repository: ${libDir}`);

@@ -3,8 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
-const PLUGIN_DIR = path.join(__dirname, '..', '..', 'plugins', 'offline');
+const { APP_DIR, PLUGINS_DIR } = require('../utils/paths');
+const PLUGIN_DIR = path.join(PLUGINS_DIR, 'offline');
 const MARKER = '/* zalo-linux-offline-v1 */';
 
 function replaceRequired(source, from, to, label) {

@@ -1,5 +1,5 @@
 const path = require('path');
-const BASE_DIR = path.resolve(__dirname, '../..');
+const { ROOT: BASE_DIR } = require('./paths');
 
 function formatPath(p) {
   if (typeof p !== 'string') return p;

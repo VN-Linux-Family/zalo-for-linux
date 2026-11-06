@@ -6,7 +6,7 @@ const logger = require('./utils/logger');
 
 const ZALO_DMG_PATTERN = 'https://res-download-pc.zadn.vn/mac/ZaloSetup-universal-VERSION.dmg';
 const ZALO_WIN_PATTERN = 'https://res-download-pc.zadn.vn/win/ZaloSetup-VERSION.exe';
-const TEMP_DIR = path.join(__dirname, '..', 'temp');
+const { TEMP_DIR } = require('./utils/paths');
 
 async function main() {
   await downloadDmg();
@@ -33,7 +33,7 @@ async function downloadDmg() {
     // Version specified
     const version = process.env.ZALO_VERSION.trim();
     const dmgUrl = ZALO_DMG_PATTERN.replace('VERSION', version);
-    
+
     // Extract filename from URL
     const urlPath = new URL(dmgUrl).pathname;
     const dmgFilename = path.basename(urlPath);

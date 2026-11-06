@@ -3,9 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
-const NATIVELIBS_DIR = path.join(__dirname, '..', '..', 'nativelibs');
-const BUILDER_SCRIPT = path.join(NATIVELIBS_DIR, 'builder.js');
+const { ROOT, APP_DIR, APP_MAIN_DIST, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_SCRIPT } = require('../utils/paths');
 const DB_CROSS_V4_DIR = path.join(NATIVELIBS_DIR, 'db-cross-v4');
 
 async function main() {
@@ -22,7 +20,7 @@ async function main() {
   if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
     try {
       execSync(`node "${BUILDER_SCRIPT}" "${DB_CROSS_V4_DIR}"`, {
-        cwd: path.join(__dirname, '..', '..'),
+        cwd: ROOT,
         stdio: 'pipe'
       });
     } catch (error) {
@@ -37,7 +35,7 @@ async function main() {
   // releaseDir already defined above
   const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
 
-  const destDir = path.join(APP_DIR, 'native', 'nativelibs', 'db-cross-v4', 'prebuilt', 'linux', 'electron', 'x64');
+  const destDir = path.join(APP_NATIVE_LIBS, 'db-cross-v4', 'prebuilt', 'linux', 'electron', 'x64');
   fs.ensureDirSync(destDir);
 
   for (const file of nodeFiles) {
@@ -47,7 +45,7 @@ async function main() {
     );
   }
 
-  const bindingJsPath = path.join(APP_DIR, 'native', 'nativelibs', 'db-cross-v4', 'dist', 'binding.js');
+  const bindingJsPath = path.join(APP_NATIVE_LIBS, 'db-cross-v4', 'dist', 'binding.js');
   if (fs.existsSync(bindingJsPath)) {
     let content = fs.readFileSync(bindingJsPath, 'utf8');
 
@@ -61,7 +59,7 @@ async function main() {
     }
   }
 
-  const mainJsPath = path.join(APP_DIR, 'main-dist', 'main.js');
+  const mainJsPath = path.join(APP_MAIN_DIST, 'main.js');
   if (fs.existsSync(mainJsPath)) {
     let content = fs.readFileSync(mainJsPath, 'utf8');
 

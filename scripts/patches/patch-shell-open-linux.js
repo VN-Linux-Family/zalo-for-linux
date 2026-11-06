@@ -3,8 +3,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
-const MAIN_DIR = path.join(APP_DIR, 'main-dist');
+const { APP_DIR, APP_MAIN_DIST: MAIN_DIR } = require('../utils/paths');
 const LINUX_DIRECTORY_GUARD_PATTERN =
   /if\("linux"===process\.platform&&([A-Za-z_$][\w$]*)\.isDirectory\(\)\)return [A-Za-z_$][\w$]*\(e\)/;
 

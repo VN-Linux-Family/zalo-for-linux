@@ -3,8 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('./utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', 'app');
-const TEMP_DIR = path.join(__dirname, '..', 'temp');
+const { APP_DIR, TEMP_DIR } = require('./utils/paths');
 
 async function main() {
   // Create directories

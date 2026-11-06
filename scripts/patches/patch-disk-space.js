@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const PC_DIST_DIR = path.join(__dirname, '..', '..', 'app', 'pc-dist');
+const { APP_PC_DIST: PC_DIST_DIR } = require('../utils/paths');
 
 function patchDiskSpace(content) {
   if (!content.includes('analyzeMainDisk(){')) return content;

@@ -2,12 +2,12 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR, APP_MAIN_DIST } = require('../utils/paths');
 const PATCH_START = '// ZALO LINUX MAIN BADGE IPC START';
 const PATCH_END = '// ZALO LINUX MAIN BADGE IPC END';
 
 async function main() {
-  const mainPath = path.join(APP_DIR, 'main-dist', 'main.js');
+  const mainPath = path.join(APP_MAIN_DIST, 'main.js');
 
   if (!fs.existsSync(mainPath)) {
     logger.warn('main-dist/main.js not present, skipping main badge patch');

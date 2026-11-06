@@ -5,7 +5,8 @@ const https = require('https');
 const logger = require('./utils/logger');
 const { buildCommit } = require('./utils/build-commit');
 
-const ZADARK_DIR = path.join(__dirname, '..', 'plugins', 'zadark');
+const { PLUGINS_DIR } = require('./utils/paths');
+const ZADARK_DIR = path.join(PLUGINS_DIR, 'zadark');
 
 async function main() {
   try {
