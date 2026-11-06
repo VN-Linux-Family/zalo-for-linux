@@ -116,10 +116,13 @@ pub fn maintenance(engine: Arc<std::sync::Mutex<Engine>>, cfg: &Config,
                 let mut last_trim = Instant::now();
                 while !stop.load(Ordering::Relaxed) {
                     std::thread::sleep(Duration::from_millis(50));
-                    if let Ok(mut engine) = engine.try_lock() {
-                        engine.release_idle();
-                    }
-                    if trim.is_some_and(|d| last_trim.elapsed() >= d) {
+                    let released =
+                        engine.try_lock().is_ok_and(|mut engine|
+                                engine.release_idle());
+                    // glibc keeps freed arenas mapped; hand them back to the
+                    // OS right after the models go away.
+                    if released ||
+                            trim.is_some_and(|d| last_trim.elapsed() >= d) {
 
                         #[cfg(target_env = "gnu")]
                         unsafe { libc::malloc_trim(0); }
