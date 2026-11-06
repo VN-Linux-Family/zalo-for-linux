@@ -3,6 +3,7 @@ members = [
     "nativelibs/file-utilities",
     "nativelibs/file-utils",
     "nativelibs/mp4thumb",
+    "nativelibs/os-sys-info",
     "nativelibs/zimage",
     "nativelibs/zjxl",
     "nativelibs/zwalker",

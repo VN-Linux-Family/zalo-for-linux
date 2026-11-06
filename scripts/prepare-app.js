@@ -267,6 +267,9 @@ async function extractAppAsar() {
   const { main: patchMp4thumb } = require('./patches/patch-mp4thumb');
   await patchMp4thumb();
 
+  const { main: patchOsSysInfo } = require('./patches/patch-os-sys-info');
+  await patchOsSysInfo();
+
   const { main: patchZimage } = require('./patches/patch-zimage');
   await patchZimage();
 

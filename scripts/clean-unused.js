@@ -16,6 +16,8 @@ const CLEAN_NATIVELiBS =[
     "file-utils/x64",
     "mp4thumb/darwin-arm64",
     "mp4thumb/darwin-x64",
+    "os-sys-info/darwin_arm64",
+    "os-sys-info/darwin_x64",    
     "sqlite3/binding/napi-v6-darwin-arm64",
     "sqlite3/binding/napi-v6-darwin-x64",
     "v8-profiles/profiler_electron1.8_mac.node",
