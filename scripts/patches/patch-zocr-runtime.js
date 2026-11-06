@@ -7,9 +7,7 @@ const logger = require('../utils/logger');
 const { createHash } = require('node:crypto');
 const { parseAst } = require('../utils/ast-transform');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
-const ZOCR_DIR = path.join(__dirname, '..', '..', 'zocr');
-const TEMP_DIR = path.join(__dirname, '..', '..', 'temp');
+const { ROOT, APP_DIR, TEMP_DIR, ZOCR_DIR, APP_OCR_DIR, APP_NATIVE_LIBS } = require('../utils/paths');
 const ONNXRUNTIME_URL = `https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-${process.arch === 'arm64' ? 'aarch64' : 'x64'}-1.30.0.tgz`;
 
 // Extract the 32-byte seed used by the OCR model vault.
@@ -243,7 +241,7 @@ function build() {
     return false;
   }
 
-  const rootDir = path.join(__dirname, '..', '..');
+  const rootDir = ROOT;
   try {
     execSync('cargo build --release -p zocr-host', { cwd: rootDir, stdio: 'pipe' });
   } catch (error) {
@@ -262,7 +260,7 @@ function build() {
     fs.copyFileSync(rootBinary, localBinary);
   }
 
-  const destDir = path.join(APP_DIR, 'native', 'ocr');
+  const destDir = APP_OCR_DIR;
   fs.ensureDirSync(destDir);
   fs.copyFileSync(
     sourceBinary,
@@ -307,7 +305,7 @@ function installOnnxRuntime() {
   const extractDir = path.join(TEMP_DIR, filename.replace(/\.tgz$/, ''));
   fs.ensureDirSync(extractDir);
   execFileSync('tar', ['-xzf', archive, '-C', extractDir, '--strip-components=1'], { stdio: 'pipe' });
-  const destDir = path.join(APP_DIR, 'native', 'ocr');
+  const destDir = APP_OCR_DIR;
   fs.ensureDirSync(destDir);
   fs.copySync(
     fs.realpathSync(path.join(extractDir, 'lib', 'libonnxruntime.so')),
@@ -321,7 +319,7 @@ function main() {
   installOnnxRuntime();
 
   logger.info('Patching OCR runtime for Linux...');
-  const file = path.join(APP_DIR, 'native', 'nativelibs', 'zocr', 'zocr.min.js');
+  const file = path.join(APP_NATIVE_LIBS, 'zocr', 'zocr.min.js');
   const source = fs.readFileSync(file, 'utf8');
   const updated = patch(source);
   if (updated === source) {

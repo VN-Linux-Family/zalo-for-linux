@@ -17,12 +17,10 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
-const NATIVELIBS_DIR = path.join(__dirname, '..', '..', 'nativelibs');
-const BUILDER_SCRIPT = path.join(NATIVELIBS_DIR, 'builder.js');
+const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_SCRIPT } = require('../utils/paths');
 const V8_PROFILES_DIR = path.join(NATIVELIBS_DIR, 'v8-profiles');
-const DEST_NODE = path.join(APP_DIR, 'native', 'nativelibs', 'v8-profiles', 'profiler_electron_linux_x64.node');
-const INDEX_JS = path.join(APP_DIR, 'native', 'nativelibs', 'v8-profiles', 'index.js');
+const DEST_NODE = path.join(APP_NATIVE_LIBS, 'v8-profiles', 'profiler_electron_linux_x64.node');
+const INDEX_JS = path.join(APP_NATIVE_LIBS, 'v8-profiles', 'index.js');
 
 const MAC_REQUIRE = "require('./profiler_electron1.8_mac.node')";
 const LINUX_REQUIRE =
@@ -41,7 +39,7 @@ async function main() {
   if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
     try {
       execSync(`node "${BUILDER_SCRIPT}" "${V8_PROFILES_DIR}"`, {
-        cwd: path.join(__dirname, '..', '..'),
+        cwd: ROOT,
         stdio: 'pipe'
       });
     } catch (error) {

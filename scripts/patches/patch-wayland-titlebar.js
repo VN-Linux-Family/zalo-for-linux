@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR, APP_MAIN_DIST } = require('../utils/paths');
 
 const PATCH_START = '// ZALO LINUX WAYLAND TITLEBAR START';
 const PATCH_END = '// ZALO LINUX WAYLAND TITLEBAR END';
@@ -77,7 +77,7 @@ ${PATCH_END}`;
 }
 
 async function main() {
-  const preloadPath = path.join(APP_DIR, 'main-dist', 'preload-render.js');
+  const preloadPath = path.join(APP_MAIN_DIST, 'preload-render.js');
 
   if (!fs.existsSync(preloadPath)) {
     logger.warn('preload-render.js not present, skipping Wayland titlebar patch');

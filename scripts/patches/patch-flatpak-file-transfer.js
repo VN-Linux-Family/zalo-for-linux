@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR, APP_MAIN_DIST } = require('../utils/paths');
 const START = '// --- Zalo Linux Flatpak File Transfer ---';
 const END = '// --- End Zalo Linux Flatpak File Transfer ---';
 
@@ -184,7 +184,7 @@ function installMain(parseFiles, readDragKey) {
         '--object-path', '/org/freedesktop/portal/documents',
         '--method', 'org.freedesktop.portal.FileTransfer.RetrieveFiles', '--timeout', '5',
         JSON.stringify(key), '{}'], { timeout: 7000, maxBuffer: 1024 * 1024, encoding: 'utf8' },
-      (err, stdout) => err ? reject(err) : resolve(stdout));
+        (err, stdout) => err ? reject(err) : resolve(stdout));
     });
     const files = parseFiles(output);
     if (!files.length) throw new Error('Empty FileTransfer response');
@@ -193,9 +193,9 @@ function installMain(parseFiles, readDragKey) {
 
   ipcMain.handle('zalo-linux-resolve-transferred-files', async (event, request) => {
     if (!request || !Array.isArray(request.paths) || request.paths.length > 1024 ||
-        request.paths.some(p => typeof p !== 'string' || !path.isAbsolute(p) || p.includes('\0')) ||
-        typeof request.key !== 'string' || request.key.length > 4096 || request.key.includes('\0') ||
-        (request.drag !== undefined && typeof request.drag !== 'boolean')) {
+      request.paths.some(p => typeof p !== 'string' || !path.isAbsolute(p) || p.includes('\0')) ||
+      typeof request.key !== 'string' || request.key.length > 4096 || request.key.includes('\0') ||
+      (request.drag !== undefined && typeof request.drag !== 'boolean')) {
       throw new Error('Invalid file transfer request');
     }
     let paths = request.paths;
@@ -423,7 +423,7 @@ async function main() {
   logger.info('Patching Flatpak file transfers...');
   let updated = 0;
   for (const [name, preload] of [['main.js', false], ['compact-app.js', false], ['preload-render.js', true], ['compact-app-preload.js', true]]) {
-    const filePath = path.join(APP_DIR, 'main-dist', name);
+    const filePath = path.join(APP_MAIN_DIST, name);
     if (!fs.existsSync(filePath)) logger.warn(`File-transfer bundle not found: ${name}`);
     const original = fs.readFileSync(filePath, 'utf8');
     const patched = patchFlatpakFileTransfer(original, preload);

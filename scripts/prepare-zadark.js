@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./utils/logger');
 
-const ZADARK_DIR = path.join(__dirname, '..', 'plugins', 'zadark');
+const { PLUGINS_DIR } = require('./utils/paths');
+const ZADARK_DIR = path.join(PLUGINS_DIR, 'zadark');
 
 async function main() {
   try {
@@ -12,7 +13,7 @@ async function main() {
       logger.info('ZaDark preparation skipped (no ZADARK_VERSION provided)');
       return;
     }
-    
+
     await ensureZaDarkSource();
     await checkoutToTargetVersion();
     await addRequiredExports();
@@ -37,7 +38,7 @@ async function ensureZaDarkSource() {
 
 async function checkoutToTargetVersion() {
   const targetVersion = process.env.ZADARK_VERSION;
-  
+
   if (targetVersion) {
     logger.info(`Checking out ZaDark version: ${targetVersion}`);
     try {

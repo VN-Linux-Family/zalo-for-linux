@@ -3,13 +3,10 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const ROOT = path.join(__dirname, '..', '..');
-const APP_DIR = path.join(ROOT, 'app');
-const NATIVELIBS_DIR = path.join(ROOT, 'nativelibs');
-const BUILDER_SCRIPT = path.join(NATIVELIBS_DIR, 'builder.js');
+const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_SCRIPT } = require('../utils/paths');
 const LIB_DIR = path.join(NATIVELIBS_DIR, 'zfile');
-const DEST_DIR = path.join(APP_DIR, 'native', 'nativelibs', 'zfile', 'linux');
-const INDEX_JS = path.join(APP_DIR, 'native', 'nativelibs', 'zfile', 'index.js');
+const DEST_DIR = path.join(APP_NATIVE_LIBS, 'zfile', 'linux');
+const INDEX_JS = path.join(APP_NATIVE_LIBS, 'zfile', 'index.js');
 
 async function main() {
   if (!fs.existsSync(path.join(LIB_DIR, 'binding.gyp'))) {
@@ -104,7 +101,7 @@ async function main() {
     // Get a mount point that found, then probe a deep nonexistent path under it. The wrapper should resolve that path to the mount point.
     const baseMount = availableMounts[0];
     const testPath = path.join(baseMount, 'deep/nonexistent/path/for/postcondition');
-    
+
     const probe = disks[testPath];
     if (!probe || typeof probe.totalSpace !== 'number' || probe.totalSpace <= 0) {
       throw new Error('patch-zfile: post-condition failed — diskInfo() Proxy did not resolve an absolute path to a mount entry');

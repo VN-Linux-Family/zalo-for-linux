@@ -4,9 +4,7 @@ const path = require("path");
 const logger = require("./utils/logger");
 const { buildCommit } = require("./utils/build-commit");
 
-const BASE_DIR = path.join(__dirname, "..");
-const APP_DIR = path.join(BASE_DIR, "app");
-const DIST_DIR = path.join(BASE_DIR, "dist");
+const { ROOT: BASE_DIR, APP_DIR, DIST_DIR } = require('./utils/paths');
 // AppDir left behind by stage 2 of the Original build (`--appimage-extract`).
 // Phase 2 mutates it in place and repacks, instead of running electron-builder
 // a second time.

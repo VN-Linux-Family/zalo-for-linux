@@ -6,9 +6,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
-const NATIVELIBS_DIR = path.join(__dirname, '..', '..', 'nativelibs');
-const BUILDER_SCRIPT = path.join(NATIVELIBS_DIR, 'builder-rust.js');
+const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_RUST_SCRIPT: BUILDER_SCRIPT } = require('../utils/paths');
 const ZLANG_DIR = path.join(NATIVELIBS_DIR, 'zlang');
 
 const EXPECTED_EXPORTS = [
@@ -34,7 +32,7 @@ async function main() {
   if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
     try {
       execSync(`node "${BUILDER_SCRIPT}" "${ZLANG_DIR}"`, {
-        cwd: path.join(__dirname, '..', '..'),
+        cwd: ROOT,
         stdio: 'pipe'
       });
     } catch (error) {
@@ -51,7 +49,7 @@ async function main() {
   }
 
   const archDir = process.arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
-  const destDir = path.join(APP_DIR, 'native', 'nativelibs', 'zlang', archDir);
+  const destDir = path.join(APP_NATIVE_LIBS, 'zlang', archDir);
   fs.ensureDirSync(destDir);
   const destNode = path.join(destDir, `zlang.${archDir}.node`);
 

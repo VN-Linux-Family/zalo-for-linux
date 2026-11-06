@@ -3,9 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
-const NATIVELIBS_DIR = path.join(__dirname, '..', '..', 'nativelibs');
-const BUILDER_SCRIPT = path.join(NATIVELIBS_DIR, 'builder-rust.js');
+const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_RUST_SCRIPT: BUILDER_SCRIPT } = require('../utils/paths');
 const ZIMAGE_DIR = path.join(NATIVELIBS_DIR, 'zimage');
 
 async function main() {
@@ -23,7 +21,7 @@ async function main() {
   if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
     try {
       execSync(`node "${BUILDER_SCRIPT}" "${ZIMAGE_DIR}"`, {
-        cwd: path.join(__dirname, '..', '..'),
+        cwd: ROOT,
         stdio: 'pipe'
       });
     } catch (error) {
@@ -38,7 +36,7 @@ async function main() {
   // releaseDir already defined above
   const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
 
-  const destDir = path.join(APP_DIR, 'native', 'nativelibs', 'zimage', 'linux_x64');
+  const destDir = path.join(APP_NATIVE_LIBS, 'zimage', 'linux_x64');
   fs.ensureDirSync(destDir);
 
   for (const file of nodeFiles) {
@@ -48,7 +46,7 @@ async function main() {
     );
   }
 
-  const indexJsPath = path.join(APP_DIR, 'native', 'nativelibs', 'zimage', 'index.js');
+  const indexJsPath = path.join(APP_NATIVE_LIBS, 'zimage', 'index.js');
   if (fs.existsSync(indexJsPath)) {
     let content = fs.readFileSync(indexJsPath, 'utf8');
 

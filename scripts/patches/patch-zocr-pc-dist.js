@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR, APP_PC_DIST } = require('../utils/paths');
 
 function patch(source) {
   // OCR button visibility (may reside in a split module outside EzwU in newer bundles)
@@ -88,7 +88,7 @@ function patch(source) {
 
 function main() {
   logger.info('Patching OCR UI...');
-  const root = path.join(APP_DIR, 'pc-dist');
+  const root = APP_PC_DIST;
   const changes = [];
   let found = 0;
   const files = [

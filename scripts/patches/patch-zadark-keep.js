@@ -3,7 +3,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR } = require('../utils/paths');
 
 /**
  * Keep ZaDark loaded when Zalo switches to its dark theme (fixes #66).
