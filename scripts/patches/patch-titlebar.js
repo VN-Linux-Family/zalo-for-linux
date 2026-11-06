@@ -4,6 +4,44 @@ const logger = require('../utils/logger');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const FRAME_FLAG = '!global.__zaloNativeWayland';
+
+// The login/main window is the only one sized by MIN_LOGIN_HEIGHT. Matching the
+// first `frame:` in the file broke when Zalo 26.11 added an earlier window (#188).
+function findMainFramePair(root) {
+  return root.findAll({ rule: { kind: 'pair' } }).find(pair => {
+    if (pair.field('key')?.text() !== 'frame') return false;
+    const object = pair.parent();
+    if (!object || object.kind() !== 'object') return false;
+    return object.children().some(sibling =>
+      sibling.kind() === 'pair' &&
+      sibling.field('key')?.text() === 'minHeight' &&
+      /\bMIN_LOGIN_HEIGHT$/.test(sibling.field('value')?.text() ?? ''));
+  });
+}
+
+// Returns { content, status } where status is 'patched', 'already' or 'missing'.
+function patchContent(content) {
+  try {
+    const pair = findMainFramePair(parseAst(content));
+    if (pair) {
+      if (pair.field('value').text() === FRAME_FLAG) return { content, status: 'already' };
+      const root = pair.getRoot().root();
+      return { content: applyEdits(root, [pair.replace(`frame:${FRAME_FLAG}`)]), status: 'patched' };
+    }
+  } catch (err) {
+    logger.warn('AST parser error on titlebar patch, trying fallback:', err.message);
+  }
+
+  if (content.includes(`T,frame:${FRAME_FLAG}`)) return { content, status: 'already' };
+  if (content.includes('T,frame:!1') || content.includes('T,frame:!0')) {
+    return {
+      content: content.replace(/T,frame:!(?:1|0)(?![\w.])/g, `T,frame:${FRAME_FLAG}`),
+      status: 'patched',
+    };
+  }
+  return { content, status: 'missing' };
+}
 
 async function main() {
   const mainJsPath = path.join(APP_DIR, 'main-dist', 'main.js');
@@ -13,39 +51,14 @@ async function main() {
     return;
   }
 
-  let content = fs.readFileSync(mainJsPath, 'utf8');
-  const FRAME_FLAG = '!global.__zaloNativeWayland';
-
-  if (content.includes(`frame:${FRAME_FLAG}`)) {
+  const result = patchContent(fs.readFileSync(mainJsPath, 'utf8'));
+  if (result.status === 'already') {
     logger.dim('main.js title bar already patched');
-    return;
-  }
-
-  try {
-    const root = parseAst(content);
-    const values = [...root.findAll('!1'), ...root.findAll('!0'), ...root.findAll('false'), ...root.findAll('true')];
-    const pairNode = values.find(n => {
-      const p = n.parent();
-      return p && p.kind() === 'pair' && p.field('key') && p.field('key').text() === 'frame';
-    });
-    if (pairNode) {
-      const edit = pairNode.parent().replace(`frame:${FRAME_FLAG}`);
-      const updated = applyEdits(root, [edit]);
-      fs.writeFileSync(mainJsPath, updated, 'utf8');
-      logger.dim('Patched main.js via AST: native title bar except on native Wayland');
-      return;
-    }
-  } catch (err) {
-    logger.warn('AST parser error on titlebar patch, trying fallback:', err.message);
-  }
-
-  const FRAME = `T,frame:${FRAME_FLAG}`;
-  if (content.includes('T,frame:!1') || content.includes('T,frame:!0')) {
-    content = content.replace(/T,frame:!(?:1|0)(?![\w.])/g, FRAME);
-    fs.writeFileSync(mainJsPath, content, 'utf8');
-    logger.dim('Patched main.js via fallback: native title bar except on native Wayland');
+  } else if (result.status === 'patched') {
+    fs.writeFileSync(mainJsPath, result.content, 'utf8');
+    logger.dim('Patched main.js: native title bar except on native Wayland');
   } else {
-    logger.warn('Pattern T,frame:!1 not found in main.js, skipping patch');
+    logger.warn('Main window frame option not found in main.js, skipping patch');
   }
 }
 
@@ -53,4 +66,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main };
+module.exports = { main, patchContent };
