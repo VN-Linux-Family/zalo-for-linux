@@ -96,6 +96,7 @@
       padding: 10px 12px; border-bottom: 1px solid #e5e5e5; font-weight: 600; }
     #zalo-linux-recalled-panel header span { flex: 1; }
     #zalo-linux-recalled-panel header button { border: 0; background: none; color: #0068ff; cursor: pointer; font: inherit; }
+    #zalo-linux-recalled-panel header button:disabled { color: #a0a8b2; cursor: default; }
     #zalo-linux-recalled-panel .zlr-tabs { display: flex; gap: 6px; padding: 8px 12px 0; }
     #zalo-linux-recalled-panel .zlr-tabs[hidden] { display: none; }
     #zalo-linux-recalled-panel .zlr-tabs button { border: 1px solid #d6dbe1; border-radius: 12px; padding: 3px 10px;
@@ -112,8 +113,16 @@
     #zalo-linux-recalled-viewer { position: fixed; inset: 0; z-index: 100000; display: flex;
       align-items: center; justify-content: center; background: rgba(0, 0, 0, .82); cursor: zoom-out; }
     #zalo-linux-recalled-viewer[hidden] { display: none; }
-    #zalo-linux-recalled-viewer img { max-width: 94vw; max-height: 94vh; object-fit: contain;
-      border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, .5); }
+    #zalo-linux-recalled-viewer img, #zalo-linux-recalled-viewer video { max-width: 94vw; max-height: 94vh;
+      object-fit: contain; border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, .5); }
+    #zalo-linux-recalled-viewer [hidden] { display: none; }
+    #zalo-linux-recalled-viewer video { cursor: default; background: #000; }
+    #zalo-linux-recalled-panel .zlr-media { position: relative; display: inline-block; margin: 4px 0; cursor: zoom-in; }
+    #zalo-linux-recalled-panel .zlr-media .zlr-image { margin: 0; }
+    #zalo-linux-recalled-panel .zlr-play { position: absolute; inset: 0; display: flex; align-items: center;
+      justify-content: center; color: #fff; font-size: 28px; text-shadow: 0 1px 6px rgba(0, 0, 0, .7); pointer-events: none; }
+    #zalo-linux-recalled-panel .zlr-video-link { border: 1px solid #b8d4ff; border-radius: 8px; padding: 6px 10px;
+      background: #e8f1ff; color: #0058d6; cursor: pointer; font: 600 12px system-ui, sans-serif; margin: 4px 0; }
   `;
 
   const button = document.createElement('button');
@@ -149,25 +158,44 @@
   list.className = 'zlr-list';
   panel.append(header, tabs, list);
 
-  // Full-size view of a recalled photo; closes on click or Escape.
+  // Full-size view of a recalled photo or video; closes on a click outside
+  // the video or on Escape.
   const viewer = document.createElement('div');
   viewer.id = 'zalo-linux-recalled-viewer';
   viewer.hidden = true;
   viewer.setAttribute('role', 'dialog');
-  viewer.setAttribute('aria-label', 'Ảnh đã thu hồi');
+  viewer.setAttribute('aria-label', 'Tin đã thu hồi');
   const viewerImage = document.createElement('img');
   viewerImage.alt = 'Ảnh đã thu hồi';
   viewerImage.referrerPolicy = 'no-referrer';
-  viewer.append(viewerImage);
-  function showImage(url) {
-    viewerImage.src = url;
+  const viewerVideo = document.createElement('video');
+  viewerVideo.controls = true;
+  viewerVideo.addEventListener('click', (event) => event.stopPropagation());
+  viewer.append(viewerImage, viewerVideo);
+  function showMedia({ image = '', video = '' }) {
+    viewerImage.hidden = !image;
+    viewerVideo.hidden = !video;
+    if (image) viewerImage.src = image;
+    if (video) { viewerVideo.src = video; viewerVideo.play().catch(() => {}); }
     viewer.hidden = false;
   }
   function hideImage() {
     viewer.hidden = true;
+    viewerVideo.pause();
     viewerImage.removeAttribute('src');
+    viewerVideo.removeAttribute('src');
+    viewerVideo.load();
   }
   viewer.addEventListener('click', hideImage);
+
+  function videoLink(url) {
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'zlr-video-link';
+    link.textContent = '▶ Xem video';
+    link.addEventListener('click', () => showMedia({ video: url }));
+    return link;
+  }
 
   function formatTime(ms) {
     if (!ms) return '?';
@@ -190,6 +218,9 @@
     tabButtons.all.textContent = `${tabButtons.all.dataset.label} (${all.length})`;
     for (const [key, tab] of Object.entries(tabButtons)) tab.setAttribute('aria-pressed', String(view === key));
     const items = view === 'conversation' ? here : all;
+    // The clear action follows the tab being viewed.
+    clearButton.textContent = view === 'conversation' ? 'Xoá tin cuộc này' : 'Xoá hết';
+    clearButton.disabled = items.length === 0;
     list.replaceChildren();
     if (items.length === 0) {
       const empty = document.createElement('div');
@@ -208,21 +239,35 @@
       meta.textContent = `${item.name || 'Không rõ tên'} · gửi ${formatTime(item.sentAt)} · thu hồi ${formatTime(item.recalledAt)}`;
       row.append(meta);
       if (item.image) {
+        const holder = document.createElement('span');
+        holder.className = 'zlr-media';
         const image = document.createElement('img');
         image.className = 'zlr-image';
-        image.alt = 'Ảnh đã thu hồi';
+        image.alt = item.video ? 'Video đã thu hồi' : 'Ảnh đã thu hồi';
         image.loading = 'lazy';
         image.referrerPolicy = 'no-referrer';
         image.src = item.image;
-        image.title = 'Bấm để xem ảnh lớn';
-        image.addEventListener('click', () => showImage(item.imageFull || item.image));
+        holder.title = item.video ? 'Bấm để xem video' : 'Bấm để xem ảnh lớn';
+        holder.addEventListener('click', () => showMedia(item.video
+          ? { video: item.video }
+          : { image: item.imageFull || item.image }));
         image.addEventListener('error', () => {
           const gone = document.createElement('div');
           gone.className = 'zlr-empty';
           gone.textContent = 'Ảnh không còn tải được từ máy chủ Zalo.';
-          image.replaceWith(gone);
+          holder.replaceWith(gone);
+          if (item.video) gone.after(videoLink(item.video));
         });
-        row.append(image);
+        holder.append(image);
+        if (item.video) {
+          const play = document.createElement('span');
+          play.className = 'zlr-play';
+          play.textContent = '▶';
+          holder.append(play);
+        }
+        row.append(holder);
+      } else if (item.video) {
+        row.append(videoLink(item.video));
       }
       if (item.text) {
         const text = document.createElement('div');
@@ -276,9 +321,17 @@
   button.addEventListener('click', () => setOpen(!open));
   closeButton.addEventListener('click', () => setOpen(false));
   clearButton.addEventListener('click', () => {
-    if (!window.confirm('Xoá toàn bộ tin đã lưu?')) return;
-    log.clear();
-    unseen = 0;
+    const conversationId = activeConversationId();
+    if (view === 'conversation' && conversationId) {
+      const count = log.forConversation(conversationId).length;
+      if (!count || !window.confirm(`Xoá ${count} tin đã giữ của cuộc trò chuyện này? Không thể khôi phục.`)) return;
+      log.clearConversation(conversationId);
+    } else {
+      const count = log.load().length;
+      if (!count || !window.confirm(`Xoá toàn bộ ${count} tin đã giữ của mọi cuộc trò chuyện? Không thể khôi phục.`)) return;
+      log.clear();
+      unseen = 0;
+    }
     render();
   });
 

@@ -29,6 +29,20 @@
     return '';
   }
 
+  // Videos carry a duration; their oriUrl is the video file and thumbUrl the
+  // cover. Photos have no duration and use oriUrl for the full-size image.
+  function media(message) {
+    if (message && typeof message === 'object' && typeof message.duration === 'number') {
+      return { image: imageUrl(message, ['thumbUrl']), imageFull: '', video: imageUrl(message, ['oriUrl']) };
+    }
+    const image = imageUrl(message);
+    return {
+      image,
+      imageFull: image ? imageUrl(message, ['oriUrl', 'hdUrl', 'normalUrl']) || image : '',
+      video: ''
+    };
+  }
+
   function createRecallLog(storage, now = Date.now) {
     function load() {
       try {
@@ -48,8 +62,8 @@
     function remember(msg) {
       if (!msg || !msg.msgId) return false;
       const text = summarize(msg.message);
-      const image = imageUrl(msg.message);
-      if (!text && !image) return false;
+      const { image, imageFull, video } = media(msg.message);
+      if (!text && !image && !video) return false;
       const items = load();
       const msgId = String(msg.msgId);
       if (items.some((item) => item.msgId === msgId)) return false;
@@ -60,8 +74,8 @@
         name: String(msg.dName || ''),
         text,
         image,
-        // Full size for the zoomed view.
-        imageFull: image ? imageUrl(msg.message, ['oriUrl', 'hdUrl', 'normalUrl']) || image : '',
+        imageFull,
+        video,
         sentAt: Number(msg.sendDttm) || null,
         recalledAt: now()
       });
@@ -86,11 +100,20 @@
       return load().filter((item) => item.conversationId === String(conversationId));
     }
 
+    // Returns how many entries were removed.
+    function clearConversation(conversationId) {
+      if (!conversationId) return 0;
+      const items = load();
+      const kept = items.filter((item) => item.conversationId !== String(conversationId));
+      if (kept.length !== items.length) save(kept);
+      return items.length - kept.length;
+    }
+
     function clear() {
       storage.removeItem(STORAGE_KEY);
     }
 
-    return { load, remember, assignConversation, forConversation, clear };
+    return { load, remember, assignConversation, forConversation, clearConversation, clear };
   }
 
   const api = { STORAGE_KEY, MAX_ITEMS, MAX_TEXT, summarize, imageUrl, createRecallLog };

@@ -72,8 +72,8 @@ Bổ sung Dark Mode, bảo vệ quyền riêng tư và tùy biến giao diện �
 Giữ lại nội dung tin nhắn mà người khác thu hồi, để bạn xem lại sau. Tính năng này tắt sẵn.
 
 - **Cách bật**: Mở **Cài đặt → Nâng cao...**, bật **Giữ tin nhắn đã thu hồi**. Áp dụng ngay, không cần mở lại Zalo.
-- **Cách xem**: Khi có tin bị thu hồi, nút **Thu hồi** hiện phía trên ô soạn tin. Hộp danh sách có hai mục: **Cuộc trò chuyện này** và **Tất cả**. Ảnh hiện dạng ảnh nhỏ, bấm vào để xem ảnh lớn.
+- **Cách xem**: Khi có tin bị thu hồi, nút **Thu hồi** hiện phía trên ô soạn tin. Hộp danh sách có hai mục: **Cuộc trò chuyện này** và **Tất cả**. Ảnh và video hiện dạng ảnh nhỏ, bấm vào để xem ảnh lớn hoặc phát video. Nút xoá đi theo mục đang xem: **Xoá tin cuộc này** hoặc **Xoá hết**.
 - **Giới hạn**:
   - Chỉ giữ được tin bị thu hồi lúc Zalo đang mở trên máy.
-  - Giữ tin chữ, link và ảnh. Với ảnh, chỉ giữ đường link tới máy chủ Zalo; nếu Zalo xoá ảnh trên máy chủ thì không xem lại được.
+  - Giữ tin chữ, link, ảnh và video. Với ảnh và video, chỉ giữ đường link tới máy chủ Zalo; nếu Zalo xoá tệp trên máy chủ thì không xem lại được.
   - Lưu trên máy này, tối đa 500 tin. Tắt tính năng sẽ xoá toàn bộ tin đã giữ.

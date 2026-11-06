@@ -72,8 +72,8 @@ Native dark mode, privacy enhancements, and custom UI personalization powered by
 Keeps the content of messages that others recall, so you can read them later. Off by default.
 
 - **How to enable**: Open **Settings → Nâng cao...** and turn on **Giữ tin nhắn đã thu hồi**. It applies immediately, without restarting Zalo.
-- **How to view**: When a message is recalled, a **Thu hồi** button appears above the message composer. The list has two tabs: the current conversation and all conversations. Photos show as thumbnails; click one to view it full size.
+- **How to view**: When a message is recalled, a **Thu hồi** button appears above the message composer. The list has two tabs: the current conversation and all conversations. Photos and videos show as thumbnails; click one to view the photo full size or play the video. The delete action follows the tab: the current conversation or everything.
 - **Limitations**:
   - Only messages recalled while Zalo is running on this computer are kept.
-  - Text, links and photos are kept. For photos only the link to Zalo's server is stored, so a photo that Zalo deletes from its server can no longer be shown.
+  - Text, links, photos and videos are kept. For photos and videos only the link to Zalo's server is stored, so a file that Zalo deletes from its server can no longer be shown.
   - Stored on this computer, up to 500 messages. Turning the feature off deletes everything it kept.

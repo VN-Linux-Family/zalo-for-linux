@@ -28,7 +28,7 @@ describe('Recalled messages log', () => {
     assert.equal(log.remember(textMessage('m1')), true);
     assert.equal(log.remember(textMessage('m1')), false);
     assert.deepEqual(log.load(), [{
-      msgId: 'm1', fromUid: '1', toUid: '2', name: 'An', text: 'xin chào', image: '', imageFull: '',
+      msgId: 'm1', fromUid: '1', toUid: '2', name: 'An', text: 'xin chào', image: '', imageFull: '', video: '',
       sentAt: 1700000000000, recalledAt: 42
     }]);
   });
@@ -63,6 +63,19 @@ describe('Recalled messages log', () => {
     assert.equal(log.remember(textMessage('p2', { normalUrl: 'javascript:alert(1)' })), false);
   });
 
+  it('keeps a recalled video as its file link with the cover as preview', () => {
+    const log = createRecallLog(memoryStorage());
+    const video = {
+      title: '', description: '', duration: 12000,
+      oriUrl: 'https://cdn.example/v.mp4', thumbUrl: 'https://cdn.example/cover.jpg'
+    };
+    assert.equal(log.remember(textMessage('v1', video)), true);
+    const [entry] = log.load();
+    assert.equal(entry.video, 'https://cdn.example/v.mp4');
+    assert.equal(entry.image, 'https://cdn.example/cover.jpg');
+    assert.equal(entry.imageFull, '');
+  });
+
   it('groups entries by the conversation Zalo reports after the recall', () => {
     const log = createRecallLog(memoryStorage());
     log.remember(textMessage('m1'));
@@ -74,6 +87,17 @@ describe('Recalled messages log', () => {
     assert.deepEqual(log.forConversation('c1').map((item) => item.msgId), ['m1']);
     assert.deepEqual(log.forConversation(''), []);
     assert.equal(log.load().length, 2);
+  });
+
+  it('clears one conversation without touching the others', () => {
+    const log = createRecallLog(memoryStorage());
+    for (const id of ['m1', 'm2', 'm3']) log.remember(textMessage(id));
+    log.assignConversation('m1', 'c1');
+    log.assignConversation('m2', 'c1');
+    log.assignConversation('m3', 'c2');
+    assert.equal(log.clearConversation('c1'), 2);
+    assert.equal(log.clearConversation(''), 0);
+    assert.deepEqual(log.load().map((item) => item.msgId), ['m3']);
   });
 
   it('recovers from corrupt storage and clears its key', () => {
