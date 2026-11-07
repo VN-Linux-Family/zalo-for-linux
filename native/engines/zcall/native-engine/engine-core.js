@@ -383,7 +383,7 @@ class EngineCore {
         const status = Number(d.status || params.status || 0);
         if (status !== 0) {
           this.log('peer declined, answer status', status);
-          this._finish(103, status === 3 ? 'Người nhận đã từ chối' : 'Không liên lạc được');
+          this._finish(160, status === 3 ? 'Người nhận đã từ chối' : 'Không liên lạc được');
           return;
         }
         this._connectCaller(params.rtpSerIp);
