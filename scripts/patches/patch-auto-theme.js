@@ -15,7 +15,7 @@ try {
   };
 }
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR, APP_MAIN_DIST } = require('../utils/paths');
 
 const THEME_MAIN_INJECTION = `
 // --- Zalo Linux Auto Dark/Light Theme Sync ---
@@ -134,7 +134,7 @@ const THEME_PRELOAD_INJECTION = `
 `;
 
 async function main() {
-  const mainDistDir = path.join(APP_DIR, 'main-dist');
+  const mainDistDir = APP_MAIN_DIST;
 
   // 1. Patch main-dist/main.js
   const mainJsPath = path.join(mainDistDir, 'main.js');

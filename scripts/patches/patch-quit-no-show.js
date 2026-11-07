@@ -3,7 +3,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR } = require('../utils/paths');
 
 /**
  * Do not show the main window while quitting.

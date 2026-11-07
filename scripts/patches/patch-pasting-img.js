@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR, APP_MAIN_DIST } = require('../utils/paths');
 
 // Minify JS to match Zalo's bundler output style (no newlines, single
 // spaces, no block comments). Preserves string literals.
@@ -261,7 +261,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const helpers = minify(helpersSource);
 
   for (const file of preloadFiles) {
-    const filePath = path.join(APP_DIR, 'main-dist', file);
+    const filePath = path.join(APP_MAIN_DIST, file);
     if (!fs.existsSync(filePath)) {
       logger.warn(`Skipping ${file} (not found)`);
       continue;

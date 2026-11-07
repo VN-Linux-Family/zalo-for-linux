@@ -50,6 +50,7 @@ Ngoài ra, mỗi addon đều độc lập, tự chứa mọi thứ mình cần.
 | [zimage](./zimage) | ✅ Đã hoàn thành | Xử lý ảnh, thay đổi kích thước và chuyển đổi định dạng |
 | [zjxl](./zjxl) | ✅ Đã hoàn thành | Hỗ trợ giải mã và mã hóa ảnh JPEG XL (JXL) |
 | [zwalker](./zwalker) | ✅ Đã hoàn thành | Hỗ trợ dọn rác bộ nhớ đệm phương tiện |
+| [zcall-audio](./zcall-audio) | ✅ Đã hoàn thành | Engine âm thanh PulseAudio/PipeWire thời gian thực độ trễ thấp cho cuộc gọi |
 | [zlang](./zlang) | ✅ Đã hoàn thành | Nhận diện ngôn ngữ tự nhiên trên Linux (whatlang) |
 
 ## Build một addon

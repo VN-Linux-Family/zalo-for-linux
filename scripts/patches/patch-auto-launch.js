@@ -3,8 +3,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
-const MAIN_DIST_DIR = path.join(APP_DIR, 'main-dist');
+const { APP_DIR, APP_MAIN_DIST: MAIN_DIST_DIR } = require('../utils/paths');
 const AUTO_LAUNCH_BUNDLES = ['main.js', 'compact-app.js'];
 
 const START = '// --- Zalo Linux DBus Autostart ---';

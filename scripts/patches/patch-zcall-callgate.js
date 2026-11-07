@@ -25,7 +25,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
-const PC_DIST = path.join(__dirname, '..', '..', 'app', 'pc-dist');
+const { APP_PC_DIST: PC_DIST } = require('../utils/paths');
 
 // Hash part of the filenames changes per Zalo version — glob by prefix.
 const GLOB_TARGETS = [

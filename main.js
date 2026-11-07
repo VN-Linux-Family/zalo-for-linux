@@ -41,14 +41,9 @@ if (process.platform === 'linux') {
 // Plugins
 // ---------------------------------------------------------------------------
 
-const screenshotPlugin = require('./plugins/screenshot');
-const launcherBadgePlugin = require('./plugins/launcher-badge');
-const trayBadgePlugin = require('./plugins/tray-badge');
-const userscriptsPlugin = require('./plugins/userscripts');
-const advancedSettingsPlugin = require('./plugins/advanced-settings');
+const plugins = require('./plugins');
 const zcall = require('./plugins/zcall');
 const trayHost = require('./plugins/tray-host');
-const waylandTitlebarPlugin = require('./plugins/wayland-titlebar');
 // Created with the main window: the screen module is not usable before 'ready'.
 let windowState = null;
 const startHidden = require('./plugins/start-hidden').createStartHiddenController({
@@ -56,7 +51,7 @@ const startHidden = require('./plugins/start-hidden').createStartHiddenControlle
 });
 
 // Before Zalo's bootstrap: the main window's frame option depends on it.
-waylandTitlebarPlugin.init({ app, ipcMain });
+plugins.initEarly({ app, ipcMain });
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -177,7 +172,7 @@ app.on('browser-window-created', (_evt, win) => {
     // Track the main Zalo window for tray menu
     if (!mainWindow && !BACKGROUND_WINDOW_TITLES.includes(win.getTitle())) {
       mainWindow = win;
-      screenshotPlugin.setMainWindow(win);
+      plugins.onMainWindowCreated(win);
 
       if (!windowState) {
         windowState = require('./plugins/window-state').createWindowStateController({
@@ -260,20 +255,17 @@ app.once('ready', () => {
     }
   }
 
-// Register plugins
-  trayBadgePlugin.register({ app, tray, nativeImage, appDir, iconPath });
-  launcherBadgePlugin.register({ app, ipcMain });
-  screenshotPlugin.register({ app, ipcMain });
-  const advancedSettings = advancedSettingsPlugin.register({ app, ipcMain, BrowserWindow, dialog, screenshotPlugin });
-  userscriptsPlugin.register({ app, ipcMain, advancedSettings });
-  require('./plugins/offline').register({ app, ipcMain, appDir });
-  require('./plugins/recalled-messages').register({ app, ipcMain, BrowserWindow, advancedSettings });
-  waylandTitlebarPlugin.register({ app, ipcMain, BrowserWindow });
-
-  const zadarkSyncPath = path.join(appDir, 'pc-dist', 'zadark', 'sync');
-  if (fs.existsSync(zadarkSyncPath)) {
-    require(zadarkSyncPath).register({ app, ipcMain, appDir });
-  }
+  // Register plugins
+  plugins.register({
+    app,
+    ipcMain,
+    BrowserWindow,
+    dialog,
+    nativeImage,
+    tray,
+    appDir,
+    iconPath
+  });
 
   zcall.start({ userDataDir: app.getPath('userData') });
 });

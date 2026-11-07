@@ -3,7 +3,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR, APP_MAIN_DIST } = require('../utils/paths');
 const FRAME_FLAG = '!global.__zaloNativeWayland';
 
 // The login/main window is the only one sized by MIN_LOGIN_HEIGHT. Matching the
@@ -44,7 +44,7 @@ function patchContent(content) {
 }
 
 async function main() {
-  const mainJsPath = path.join(APP_DIR, 'main-dist', 'main.js');
+  const mainJsPath = path.join(APP_MAIN_DIST, 'main.js');
 
   if (!fs.existsSync(mainJsPath)) {
     logger.warn('main.js not present, skipping titlebar patch');

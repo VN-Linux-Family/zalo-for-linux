@@ -2,10 +2,10 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', '..', 'app');
+const { APP_DIR, APP_MAIN_DIST, APP_PC_DIST } = require('../utils/paths');
 const BUNDLE_DIRS = [
-  path.join(APP_DIR, 'main-dist'),
-  path.join(APP_DIR, 'pc-dist')
+  APP_MAIN_DIST,
+  APP_PC_DIST
 ];
 
 const PATH_MODULE_EXPORT_ANCHOR =

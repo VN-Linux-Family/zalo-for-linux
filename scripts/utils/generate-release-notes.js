@@ -69,7 +69,7 @@ function getPriorAuthors(previousTag) {
   return priorSet;
 }
 
-function parseGitLog(lines, priorAuthors = new Set(), repo = 'VN-Linux-Family/zalo-for-linux', currentTag = 'latest', previousTag = '') {
+function parseGitLog(records, priorAuthors = new Set(), repo = 'VN-Linux-Family/zalo-for-linux', currentTag = 'latest', previousTag = '') {
   const categories = [
     { key: 'feat', title: 'Features', items: [], match: (s) => /^feat(\(.*\))?!?:/i.test(s) || /feature/i.test(s) },
     { key: 'fix', title: 'Fixes', items: [], match: (s) => /^fix(\(.*\))?!?:/i.test(s) || /bugfix/i.test(s) },
@@ -80,10 +80,10 @@ function parseGitLog(lines, priorAuthors = new Set(), repo = 'VN-Linux-Family/za
     { key: 'other', title: 'Maintenance', items: [], match: () => true },
   ];
 
-  const allContributors = new Map(); // authorLogin -> { isNew, firstPr }
+  const newContributors = new Map(); // authorLogin -> firstPrNumber
 
-  for (const line of lines) {
-    const parts = line.split('|');
+  for (const record of records) {
+    const parts = record.split('\x1f');
     if (parts.length < 2) continue;
     const subject = parts[0];
     const hash = parts[1] || '';
@@ -104,9 +104,10 @@ function parseGitLog(lines, priorAuthors = new Set(), repo = 'VN-Linux-Family/za
       prAuthor = mergePrMatch[2] || mergerName;
 
       // Extract PR title from commit body if available
-      const bodyCandidate = bodyText
-        ? bodyText.split('\\n').map((l) => l.trim()).find((l) => l.length > 0 && !l.startsWith('Merge pull request') && !l.startsWith('Co-authored-by:'))
-        : null;
+      const bodyLines = (bodyText || '').split('\n').map((l) => l.trim());
+      const bodyCandidate = bodyLines.find(
+        (l) => l.length > 0 && !l.startsWith('Merge pull request') && !l.startsWith('Co-authored-by:')
+      );
 
       if (bodyCandidate) {
         title = bodyCandidate;
@@ -132,32 +133,28 @@ function parseGitLog(lines, priorAuthors = new Set(), repo = 'VN-Linux-Family/za
     const targetCategory = categories.find((c) => c.match(title)) || categories[categories.length - 1];
     targetCategory.items.push(entry);
 
-    // Track all contributors (both new and recurring)
+    // Track new contributors who made their first contribution
     if (prAuthor && prAuthor !== 'github-actions[bot]' && prAuthor !== 'VN-Linux-Family') {
       const isNew = !priorAuthors.has(prAuthor.toLowerCase().trim());
-      if (!allContributors.has(prAuthor)) {
-        allContributors.set(prAuthor, { isNew, prNumber });
+      if (isNew && !newContributors.has(prAuthor)) {
+        newContributors.set(prAuthor, prNumber);
       }
     }
   }
 
-  let changelog = "### What's Changed\n\n";
+  let changelog = "## What's Changed\n\n";
 
   for (const cat of categories) {
     if (cat.items.length > 0) {
-      changelog += `#### ${cat.title}\n\n${cat.items.reverse().join('\n')}\n\n`;
+      // Heading 3 format (### Category)
+      changelog += `### ${cat.title}\n\n${cat.items.reverse().join('\n')}\n\n`;
     }
   }
 
-  if (allContributors.size > 0) {
-    changelog += '#### Contributors\n\n';
-    const sortedAuthors = Array.from(allContributors.keys()).sort((a, b) =>
-      a.localeCompare(b, undefined, { sensitivity: 'base' })
-    );
-    for (const author of sortedAuthors) {
-      const info = allContributors.get(author);
-      const note = info.isNew ? ' (first contribution)' : '';
-      changelog += `* @${author}${note}\n`;
+  if (newContributors.size > 0) {
+    changelog += '### New Contributors\n\n';
+    for (const [author, pr] of newContributors.entries()) {
+      changelog += `* @${author} made their first contribution in https://github.com/${repo}/pull/${pr}\n`;
     }
     changelog += '\n';
   }
@@ -171,16 +168,17 @@ function parseGitLog(lines, priorAuthors = new Set(), repo = 'VN-Linux-Family/za
 
 function generateChangelog(repo, currentTag, previousTag) {
   const range = previousTag ? `${previousTag}..HEAD` : 'HEAD';
-  const rawLog = run(`git log --reverse ${range} --pretty=format:"%s|%h|%an|%ae"`);
+  // Use ASCII unit separator (%x1f) and record separator (%x1e) to accurately isolate subject, hash, author, and body
+  const rawLog = run(`git log --reverse ${range} --pretty=format:"%x1e%s%x1f%h%x1f%an%x1f%b"`);
   if (!rawLog) {
     return previousTag
-      ? `### What's Changed\n\n* Maintenance and upstream updates.\n\n**Full Changelog**: https://github.com/${repo}/compare/${previousTag}...${currentTag}`
-      : `### What's Changed\n\n* Initial release.\n`;
+      ? `## What's Changed\n\n* Maintenance and upstream updates.\n\n**Full Changelog**: https://github.com/${repo}/compare/${previousTag}...${currentTag}`
+      : `## What's Changed\n\n* Initial release.\n`;
   }
 
   const priorAuthors = getPriorAuthors(previousTag);
-  const lines = rawLog.split('\n').filter(Boolean);
-  return parseGitLog(lines, priorAuthors, repo, currentTag, previousTag);
+  const records = rawLog.split('\x1e').filter(Boolean);
+  return parseGitLog(records, priorAuthors, repo, currentTag, previousTag);
 }
 
 function generateReleaseBody(currentTag, outputPath = DEFAULT_OUTPUT) {
