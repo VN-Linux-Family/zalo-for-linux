@@ -10,7 +10,7 @@ const INDEX_JS = path.join(APP_NATIVE_LIBS, 'zfile', 'index.js');
 
 async function main() {
   if (!fs.existsSync(path.join(LIB_DIR, 'binding.gyp'))) {
-    throw new Error('zfile source not found at nativelibs/zfile — cannot build');
+    throw new Error('zfile source not found at native/addons/zfile — cannot build');
   }
 
   const releaseDir = path.join(LIB_DIR, 'build', 'Release');
@@ -53,7 +53,7 @@ async function main() {
   const wrapperSrc = path.join(LIB_DIR, 'zfile-linux.js');
   const destWrapper = path.join(DEST_DIR, 'zfile-linux.js');
   if (!fs.existsSync(wrapperSrc)) {
-    throw new Error('zfile wrapper source not found at nativelibs/zfile/zfile-linux.js');
+    throw new Error('zfile wrapper source not found at native/addons/zfile/zfile-linux.js');
   }
   fs.copyFileSync(wrapperSrc, destWrapper);
   logger.dim('Installed Linux zfile-linux.js wrapper');

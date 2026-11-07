@@ -20,54 +20,43 @@ này.
 ## Cấu trúc thư mục
 
 ```text
-nativelibs/
+native/addons/
 ├── README.md                       # Tài liệu tiếng Anh
 ├── README.vi.md                    # Tài liệu tiếng Việt
-├── builder.js                      # Công cụ hỗ trợ build qua dòng lệnh
 └── <addon-name>/                   # Mỗi addon một thư mục
     ├── .gitignore                  # bỏ qua node_modules/, build/, target/
     ├── README.md                   # tài liệu riêng của addon
-    ├── binding.gyp                 # cấu hình node-gyp
-    ├── package.json                # manifest của Node package
-    └── src/
-        └── main.cc                 # mã nguồn C++
+    ├── binding.gyp / Cargo.toml    # cấu hình build
+    └── src/                        # mã nguồn C++ hoặc Rust
 ```
 
-`builder.js` ở thư mục gốc là công cụ build dùng chung cho tất cả các addon.
-Ngoài ra, mỗi addon đều độc lập, tự chứa mọi thứ mình cần.
+`native/builder.js` ở thư mục cha là công cụ build hợp nhất dùng chung cho tất cả các addon.
 
 ## Các addon hiện có
 
-| Addon | Trạng thái | Mô tả |
-| :--- | :--- | :--- |
-| [db-cross-v4](./db-cross-v4) | ✅ Đã hoàn thành | Giải mã bản sao lưu và đồng bộ tin nhắn mã hóa đầu cuối (E2EE) |
-| [file-utilities](./file-utilities) | ✅ Đã hoàn thành | Quét hệ thống file bất đồng bộ và so khớp mẫu |
-| [file-utils](./file-utils) | ✅ Đã hoàn thành | Các tiện ích truy cập hệ thống file và quản lý file |
-| [mp4thumb](./mp4thumb) | ✅ Đã hoàn thành | Trích xuất ảnh thumbnail từ file video MP4 |
-| [os-sys-info](./os-sys-info) | ✅ Đã hoàn thành | Bộ đọc thông tin hệ điều hành và ID tiến trình |
-| [v8-profiles](./v8-profiles) | ✅ Đã hoàn thành | Công cụ phân tích hiệu năng CPU native cho Zalo |
-| [zfile](./zfile) | ✅ Đã hoàn thành | Cung cấp thông tin ổ đĩa (dung lượng trống, điểm gắn) |
-| [zimage](./zimage) | ✅ Đã hoàn thành | Xử lý ảnh, thay đổi kích thước và chuyển đổi định dạng |
-| [zjxl](./zjxl) | ✅ Đã hoàn thành | Hỗ trợ giải mã và mã hóa ảnh JPEG XL (JXL) |
-| [zwalker](./zwalker) | ✅ Đã hoàn thành | Hỗ trợ dọn rác bộ nhớ đệm phương tiện |
-| [zcall-audio](./zcall-audio) | ✅ Đã hoàn thành | Engine âm thanh PulseAudio/PipeWire thời gian thực độ trễ thấp cho cuộc gọi |
-| [zlang](./zlang) | ✅ Đã hoàn thành | Nhận diện ngôn ngữ tự nhiên trên Linux (whatlang) |
+| Addon                                 | Trạng thái       | Mô tả                                                                       |
+| :------------------------------------ | :--------------- | :-------------------------------------------------------------------------- |
+| [db-cross-v4](./db-cross-v4)          | ✅ Đã hoàn thành | Giải mã bản sao lưu và đồng bộ tin nhắn mã hóa đầu cuối (E2EE)              |
+| [file-utilities](./file-utilities)    | ✅ Đã hoàn thành | Quét hệ thống file bất đồng bộ và so khớp mẫu                               |
+| [file-utils](./file-utils)            | ✅ Đã hoàn thành | Các tiện ích truy cập hệ thống file và quản lý file                         |
+| [mp4thumb](./mp4thumb)                | ✅ Đã hoàn thành | Trích xuất ảnh thumbnail từ file video MP4                                  |
+| [os-sys-info](./os-sys-info)          | ✅ Đã hoàn thành | Bộ đọc thông tin hệ điều hành và ID tiến trình                              |
+| [v8-profiles](./v8-profiles)          | ✅ Đã hoàn thành | Công cụ phân tích hiệu năng CPU native cho Zalo                             |
+| [zfile](./zfile)                      | ✅ Đã hoàn thành | Cung cấp thông tin ổ đĩa (dung lượng trống, điểm gắn)                       |
+| [zimage](./zimage)                    | ✅ Đã hoàn thành | Xử lý ảnh, thay đổi kích thước và chuyển đổi định dạng                      |
+| [zjxl](./zjxl)                        | ✅ Đã hoàn thành | Hỗ trợ giải mã và mã hóa ảnh JPEG XL (JXL)                                  |
+| [zwalker](./zwalker)                  | ✅ Đã hoàn thành | Hỗ trợ dọn rác bộ nhớ đệm phương tiện                                       |
+| [zcall-audio](../engines/zcall/audio) | ✅ Đã hoàn thành | Engine âm thanh PulseAudio/PipeWire thời gian thực độ trễ thấp cho cuộc gọi |
+| [zlang](./zlang)                      | ✅ Đã hoàn thành | Nhận diện ngôn ngữ tự nhiên trên Linux (whatlang)                           |
 
 ## Build một addon
 
-### Nếu là addon dựa trên gyp:
-
 ```bash
-node nativelibs/builder.js nativelibs/<addon-name>
-```
-
-### Nếu là addon dựa trên Rust:
-
-```bash
-node nativelibs/builder-rust.js nativelibs/<addon-name>
+node native/builder.js native/addons/<addon-name>
 ```
 
 File nhị phân sau khi biên dịch sẽ nằm tại:
+
 - `<project-root>/nativelibs/<addon-name>/build/Release/*.node` (Addon dựa trên gyp)
 - `<project-root>/nativelibs/<addon-name>/target/release/*.node` (Addon dựa trên Rust)
 
@@ -82,6 +71,7 @@ File nhị phân sau khi biên dịch sẽ nằm tại:
 Để thêm một bản viết lại mới:
 
 1. **Tạo cấu trúc thư mục** — sao chép một addon có sẵn làm mẫu:
+
    ```bash
    cp -r nativelibs/db-cross-v4 nativelibs/<new-addon>
    ```
@@ -123,6 +113,7 @@ File nhị phân sau khi biên dịch sẽ nằm tại:
 **Chúng mình không commit các file nhị phân `.node` build sẵn.** Thư mục `build/` và `node_modules/` trong mỗi addon đều nằm trong gitignore. File nhị phân luôn được build lại từ mã nguồn trong build pipeline.
 
 Cách làm này đảm bảo:
+
 - Bản build **tái tạo được** — ai cũng có thể tạo lại đúng file nhị phân đó từ mã nguồn.
 - **Không có mã độc quyền** nào nằm trong repository.
 - **Không có rủi ro chuỗi cung ứng** do commit một khối nhị phân không rõ nguồn gốc.

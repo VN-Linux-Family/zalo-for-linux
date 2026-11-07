@@ -3,7 +3,8 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const srtp = require(path.join(__dirname, '..', 'zcall-native', 'native-engine', 'srtp-aes'));
+const { ZCALL_DIR } = require('../scripts/utils/paths');
+const srtp = require(path.join(ZCALL_DIR, 'native-engine', 'srtp-aes'));
 
 describe('SRTP AES & KDF (RFC 3711)', () => {
   const masterKeyAndSalt = Buffer.alloc(30, 0x42);

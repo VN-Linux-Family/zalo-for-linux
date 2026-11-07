@@ -1,15 +1,15 @@
 [workspace]
 members = [
-    "nativelibs/file-utilities",
-    "nativelibs/file-utils",
-    "nativelibs/mp4thumb",
-    "nativelibs/os-sys-info",
-    "nativelibs/zimage",
-    "nativelibs/zjxl",
-    "nativelibs/zwalker",
-    "nativelibs/zcall-audio",
-    "zocr",
-    "nativelibs/zlang",
+    "native/addons/file-utilities",
+    "native/addons/file-utils",
+    "native/addons/mp4thumb",
+    "native/addons/os-sys-info",
+    "native/addons/zimage",
+    "native/addons/zjxl",
+    "native/addons/zlang",
+    "native/addons/zwalker",
+    "native/engines/zocr",
+    "native/engines/zcall/audio",
 ]
 resolver = "2"
 

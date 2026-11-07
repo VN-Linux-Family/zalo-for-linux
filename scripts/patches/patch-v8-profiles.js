@@ -30,7 +30,7 @@ async function main() {
   logger.info('Building v8-profiles from source...');
 
   if (!fs.existsSync(path.join(V8_PROFILES_DIR, 'binding.gyp'))) {
-    throw new Error('v8-profiles source not found at nativelibs/v8-profiles — cannot build');
+    throw new Error('v8-profiles source not found at native/addons/v8-profiles — cannot build');
   }
 
   const releaseDir = path.join(V8_PROFILES_DIR, 'build', 'Release');

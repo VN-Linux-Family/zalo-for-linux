@@ -18,20 +18,17 @@ proprietary binaries are committed to this repository.
 ## Directory Structure
 
 ```
-nativelibs/
+native/addons/
 ├── README.md                       # This file
-├── builder.js                      # CLI build helper
 └── <addon-name>/                   # One folder per addon
     ├── .gitignore                  # ignore node_modules/, build/
     ├── README.md                   # addon-specific docs
-    ├── binding.gyp                 # node-gyp config
-    ├── package.json                # Node package manifest
-    └── src/
-        └── main.cc                 # C++ source
+    ├── binding.gyp / Cargo.toml    # build manifest
+    └── src/                        # source code
 ```
 
-`builder.js` at the top level is the shared build helper used by all
-addons. Each addon is otherwise self-contained.
+`native/builder.js` at the parent level is the unified build helper used by all
+addons.
 
 ## Available Addons
 
@@ -47,23 +44,14 @@ addons. Each addon is otherwise self-contained.
 | [zimage](./zimage) | ✅ Implemented | Image processing, resizing, and format conversions |
 | [zjxl](./zjxl) | ✅ Implemented | JPEG XL (JXL) image decoding and encoding support |
 | [zwalker](./zwalker) | ✅ Implemented | Media-cache garbage collecting support |
-| [zcall-audio](./zcall-audio) | ✅ Implemented | Native PulseAudio/PipeWire low-latency audio engine for calls |
+| [zcall-audio](../engines/zcall/audio) | ✅ Implemented | Native PulseAudio/PipeWire low-latency audio engine for calls |
 | [zlang](./zlang) | ✅ Implemented | Natural language identification for Linux (whatlang) |
 
 ## Building an Addon
 
-### For gyp-based addons:
-
 ```bash
-node nativelibs/builder.js nativelibs/<addon-name>
+node native/builder.js native/addons/<addon-name>
 ```
-
-### For Rust-based addons:
-
-```bash
-node nativelibs/builder-rust.js nativelibs/<addon-name>
-```
-
 The compiled binary stays in:
 `<project-root>/nativelibs/<addon-name>/build/Release/*.node # gyp-based addons`
 

@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "Unofficial Zalo port for Linux with ZaDark integration",
   "workspaces": [
-    "nativelibs/db-cross-v4",
-    "nativelibs/v8-profiles",
-    "nativelibs/zfile"
+    "native/addons/db-cross-v4",
+    "native/addons/v8-profiles",
+    "native/addons/zfile"
   ],
   "main": "main.js",
   "scripts": {
@@ -75,7 +75,7 @@
         ]
       },
       {
-        "from": "zcall-native",
+        "from": "native/engines/zcall",
         "to": "zcall-native",
         "filter": [
           "**/*",

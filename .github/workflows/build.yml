@@ -144,9 +144,8 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          nativelibs/*/target
-          zocr/target
-        key: ${{ runner.os }}-${{ matrix.arch }}-cargo-${{ hashFiles('nativelibs/*/Cargo.lock', 'zocr/Cargo.lock') }}
+          target
+        key: ${{ runner.os }}-${{ matrix.arch }}-cargo-${{ hashFiles('Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-${{ matrix.arch }}-cargo-
 
