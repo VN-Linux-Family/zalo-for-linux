@@ -8,8 +8,7 @@ const { createHash } = require('node:crypto');
 const { parseAst } = require('../utils/ast-transform');
 
 const { ROOT, APP_DIR, TEMP_DIR, ZOCR_DIR, APP_OCR_DIR, APP_NATIVE_LIBS } = require('../utils/paths');
-const ONNXRUNTIME_URL = `https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-${process.arch === 'arm64' ? 'aarch64' : 'x64'}-1.30.0.tgz`;
-
+const { getOnnxRuntimeUrl } = require('../download');
 // Extract the 32-byte seed used by the OCR model vault.
 function extractKey(data) {
   function requireBytes(offset, length) {
@@ -287,20 +286,20 @@ function installOnnxRuntime() {
     throw new Error(`Unsupported architecture for ONNX Runtime: ${process.arch}`);
   }
   fs.ensureDirSync(TEMP_DIR);
-  const filename = path.basename(new URL(ONNXRUNTIME_URL).pathname);
+  const url = getOnnxRuntimeUrl();
+  const filename = path.basename(new URL(url).pathname);
   const archive = path.join(TEMP_DIR, filename);
   if (!fs.existsSync(archive)) {
-    logger.info('Downloading ONNX Runtime...');
+    logger.warn('ONNX Runtime archive not found in temp, attempting on-demand download...');
     try {
-      execFileSync('wget', ['--progress=bar:force', ONNXRUNTIME_URL, '-O', archive], { stdio: 'inherit' });
+      execFileSync('wget', ['--progress=bar:force', url, '-O', archive], { stdio: 'inherit' });
     } catch (error) {
       fs.removeSync(archive);
-      throw new Error(`Failed to download ONNX Runtime: ${error.message}`);
+      throw new Error(`Failed to download ONNX Runtime: ${error.message}. Please run "npm run download" first.`);
     }
   } else {
-    logger.dim('Using cached ONNX Runtime archive');
+    logger.dim(`Using cached ONNX Runtime archive: ${filename}`);
   }
-
   logger.info('Extracting ONNX Runtime...');
   const extractDir = path.join(TEMP_DIR, filename.replace(/\.tgz$/, ''));
   fs.ensureDirSync(extractDir);

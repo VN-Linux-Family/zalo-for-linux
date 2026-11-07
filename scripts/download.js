@@ -7,6 +7,12 @@ const logger = require('./utils/logger');
 const ZALO_DMG_PATTERN = 'https://res-download-pc.zadn.vn/mac/ZaloSetup-universal-VERSION.dmg';
 const ZALO_WIN_PATTERN = 'https://res-download-pc.zadn.vn/win/ZaloSetup-VERSION.exe';
 const { TEMP_DIR } = require('./utils/paths');
+const ONNXRUNTIME_VERSION = '1.30.0';
+
+function getOnnxRuntimeUrl() {
+  const arch = process.arch === 'arm64' ? 'aarch64' : 'x64';
+  return `https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${arch}-${ONNXRUNTIME_VERSION}.tgz`;
+}
 
 async function main() {
   await downloadDmg();
@@ -14,6 +20,11 @@ async function main() {
     await downloadWindows();
   } catch (error) {
     logger.warn('Windows installer download failed: ' + error.message);
+  }
+  try {
+    await downloadOnnxRuntime();
+  } catch (error) {
+    logger.warn('ONNX Runtime download failed: ' + error.message);
   }
 }
 
@@ -107,6 +118,45 @@ async function downloadWindows() {
   const fileSize = (stats.size / 1024 / 1024).toFixed(2);
   logger.success(`Downloaded successfully: ${exeFilename} (${fileSize} MB)`);
 }
+async function downloadOnnxRuntime() {
+  if (process.arch !== 'x64' && process.arch !== 'arm64') {
+    logger.warn(`Skipping ONNX Runtime download: unsupported architecture ${process.arch}`);
+    return null;
+  }
+  if (!fs.existsSync(TEMP_DIR)) {
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+  }
+  const url = getOnnxRuntimeUrl();
+  const filename = path.basename(new URL(url).pathname);
+  const archivePath = path.join(TEMP_DIR, filename);
+
+  if (fs.existsSync(archivePath)) {
+    const stats = fs.statSync(archivePath);
+    const fileSize = (stats.size / 1024 / 1024).toFixed(2);
+    logger.info(`Found existing ONNX Runtime v${ONNXRUNTIME_VERSION} (${fileSize} MB)`);
+
+    if (!process.env.FORCE_DOWNLOAD) {
+      logger.success('Download skipped - ONNX Runtime archive already exists');
+      return archivePath;
+    }
+
+    logger.info('Force download enabled, removing existing file...');
+    fs.unlinkSync(archivePath);
+  }
+
+  logger.info(`Downloading ONNX Runtime v${ONNXRUNTIME_VERSION}...`);
+  await downloadFile(url, archivePath);
+
+  if (!fs.existsSync(archivePath)) {
+    throw new Error('Download failed - ONNX Runtime archive not found after download');
+  }
+
+  const stats = fs.statSync(archivePath);
+  const fileSize = (stats.size / 1024 / 1024).toFixed(2);
+  logger.success(`Downloaded successfully: ${filename} (${fileSize} MB)`);
+  return archivePath;
+}
+
 
 async function getWindowsVersion() {
   return new Promise((resolve, reject) => {
@@ -151,4 +201,11 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main };
+module.exports = {
+  main,
+  downloadDmg,
+  downloadWindows,
+  downloadOnnxRuntime,
+  getOnnxRuntimeUrl,
+  ONNXRUNTIME_VERSION,
+};

@@ -21,6 +21,7 @@
     "extract-screenshot-assets": "node scripts/extract-screenshot-assets.js",
     "clean-unused": "node scripts/clean-unused.js",
     "build": "node scripts/build.js",
+    "build:native": "node scripts/build-native.js",
     "main": "SETUP=true BUILD=true node scripts/main.js",
     "main:setup": "SETUP=true node scripts/main.js",
     "main:build": "BUILD=true node scripts/main.js"
