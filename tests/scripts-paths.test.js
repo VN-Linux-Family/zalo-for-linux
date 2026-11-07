@@ -15,6 +15,8 @@ describe('Project Paths Centralization', () => {
       'DIST_DIR',
       'PLUGINS_DIR',
       'NODE_MODULES_DIR',
+      'VENDOR_DIR',
+      'ZADARK_VENDOR_DIR',
       'NATIVELIBS_DIR',
       'ZOCR_DIR',
       'ZCALL_DIR',
@@ -43,7 +45,8 @@ describe('Project Paths Centralization', () => {
     assert.ok(fs.existsSync(paths.PATCHES_DIR), 'PATCHES_DIR must exist');
     assert.ok(fs.existsSync(paths.NATIVELIBS_DIR), 'NATIVELIBS_DIR must exist');
     assert.ok(fs.existsSync(paths.PLUGINS_DIR), 'PLUGINS_DIR must exist');
-    assert.ok(fs.existsSync(paths.ZOCR_DIR), 'ZOCR_DIR must exist');
+    assert.ok(fs.existsSync(paths.VENDOR_DIR), 'VENDOR_DIR must exist');
+    assert.ok(fs.existsSync(paths.ZADARK_VENDOR_DIR), 'ZADARK_VENDOR_DIR must exist');
     assert.ok(fs.existsSync(paths.ZCALL_DIR), 'ZCALL_DIR must exist');
     assert.ok(fs.existsSync(paths.BUILDER_SCRIPT), 'BUILDER_SCRIPT must exist');
     assert.ok(fs.existsSync(paths.BUILDER_RUST_SCRIPT), 'BUILDER_RUST_SCRIPT must exist');
