@@ -4,7 +4,7 @@ const path = require("path");
 const logger = require("./utils/logger");
 const { buildCommit } = require("./utils/build-commit");
 
-const { ROOT: BASE_DIR, APP_DIR, DIST_DIR } = require('./utils/paths');
+const { ROOT: BASE_DIR, APP_DIR, DIST_DIR, ZADARK_VENDOR_DIR } = require('./utils/paths');
 // AppDir left behind by stage 2 of the Original build (`--appimage-extract`).
 // Phase 2 mutates it in place and repacks, instead of running electron-builder
 // a second time.
@@ -138,9 +138,7 @@ async function integrateZaDark(zaloRoot = BASE_DIR) {
   try {
     // Verify ZaDark module is available
     const zadarkModulePath = path.join(
-      BASE_DIR,
-      "plugins",
-      "zadark",
+      ZADARK_VENDOR_DIR,
       "build",
       "pc",
       "zadark-pc.js",
@@ -157,13 +155,6 @@ async function integrateZaDark(zaloRoot = BASE_DIR) {
     zadarkPC.writeBootstrapFile(zaloRoot);
     zadarkPC.writePopupViewerFile(zaloRoot);
 
-    // Copy zadark-sync plugin to app/pc-dist/zadark/sync
-    const syncSrc = path.join(BASE_DIR, "plugins", "zadark-sync");
-    const syncDest = path.join(targetAppDir, "pc-dist", "zadark", "sync");
-    if (fs.existsSync(syncSrc)) {
-      fs.cpSync(syncSrc, syncDest, { recursive: true });
-      logger.dim("Copied zadark-sync plugin to pc-dist/zadark/sync");
-    }
 
     // Zalo's dark theme strips ZaDark's CSS/scripts from the page (#66).
     await require("./patches/patch-zadark-keep").main(targetAppDir);
@@ -214,9 +205,7 @@ async function build(buildName = "", outputSuffix = "", options = {}) {
     if (outputSuffix === "-ZaDark") {
       // Read ZaDark version for custom naming
       const zadarkPackagePath = path.join(
-        BASE_DIR,
-        "plugins",
-        "zadark",
+        ZADARK_VENDOR_DIR,
         "package.json",
       );
       zadarkVersion = "unknown";

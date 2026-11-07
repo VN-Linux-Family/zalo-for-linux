@@ -8,6 +8,8 @@ const TEMP_DIR = path.join(ROOT, 'temp');
 const DIST_DIR = path.join(ROOT, 'dist');
 const PLUGINS_DIR = path.join(ROOT, 'plugins');
 const NODE_MODULES_DIR = path.join(ROOT, 'node_modules');
+const VENDOR_DIR = path.join(ROOT, 'vendor');
+const ZADARK_VENDOR_DIR = path.join(VENDOR_DIR, 'zadark');
 
 // ---------------------------------------------------------------------------
 // Repository source locations (subject to Phase 3 relocation)
@@ -38,6 +40,8 @@ module.exports = Object.freeze({
   DIST_DIR,
   PLUGINS_DIR,
   NODE_MODULES_DIR,
+  VENDOR_DIR,
+  ZADARK_VENDOR_DIR,
 
   // Source paths
   NATIVELIBS_DIR,

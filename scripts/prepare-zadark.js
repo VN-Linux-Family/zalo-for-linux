@@ -3,8 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./utils/logger');
 
-const { PLUGINS_DIR } = require('./utils/paths');
-const ZADARK_DIR = path.join(PLUGINS_DIR, 'zadark');
+const { ZADARK_VENDOR_DIR: ZADARK_DIR } = require('./utils/paths');
 
 async function main() {
   try {
@@ -16,8 +15,8 @@ async function main() {
 
     await ensureZaDarkSource();
     await checkoutToTargetVersion();
-    await addRequiredExports();
     await buildZaDarkAssets();
+    await addRequiredExports();
 
     logger.success('ZaDark preparation completed successfully');
 
@@ -71,7 +70,7 @@ async function checkoutToTargetVersion() {
 
 async function addRequiredExports() {
   logger.info('Checking ZaDark module exports...');
-  const zadarkModulePath = path.join(ZADARK_DIR, 'src', 'pc', 'zadark-pc.js');
+  const zadarkModulePath = path.join(ZADARK_DIR, 'build', 'pc', 'zadark-pc.js');
 
   if (!fs.existsSync(zadarkModulePath)) {
     logger.warn('ZaDark module not found at expected location');

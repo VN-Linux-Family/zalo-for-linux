@@ -11,6 +11,7 @@ const userscriptsPlugin = require('./userscripts');
 const advancedSettingsPlugin = require('./advanced-settings');
 const waylandTitlebarPlugin = require('./wayland-titlebar');
 const offlinePlugin = require('./offline');
+const zadarkPlugin = require('./zadark');
 
 /**
  * Safely executes a plugin lifecycle function with isolated error handling.
@@ -119,15 +120,12 @@ function register(context = {}) {
   }
  });
 
- // 3. ZaDark Sync (runtime-extracted addon, if present)
- if (appDir) {
-  const zadarkSyncPath = path.join(appDir, 'pc-dist', 'zadark', 'sync');
-  if (fs.existsSync(zadarkSyncPath)) {
-   safeRegister('zadarkSync', () => {
-    require(zadarkSyncPath).register({ app, ipcMain, appDir });
-   });
+ // 3. ZaDark Theme Synchronization Plugin (if active in build)
+ safeRegister('zadark', () => {
+  if (zadarkPlugin && typeof zadarkPlugin.register === 'function') {
+   zadarkPlugin.register({ app, ipcMain, appDir });
   }
- }
+ });
 }
 
 /**
