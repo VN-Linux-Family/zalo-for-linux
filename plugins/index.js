@@ -12,6 +12,7 @@ const advancedSettingsPlugin = require('./advanced-settings');
 const waylandTitlebarPlugin = require('./wayland-titlebar');
 const offlinePlugin = require('./offline');
 const zadarkPlugin = require('./zadark');
+const recalledMessagesPlugin = require('./recalled-messages');
 
 /**
  * Safely executes a plugin lifecycle function with isolated error handling.
@@ -120,6 +121,12 @@ function register(context = {}) {
   }
  });
 
+ safeRegister('recalledMessages', () => {
+  if (advancedSettings && recalledMessagesPlugin && typeof recalledMessagesPlugin.register === 'function') {
+   recalledMessagesPlugin.register({ app, ipcMain, BrowserWindow, advancedSettings });
+  }
+ });
+
  // 3. ZaDark Theme Synchronization Plugin (if active in build)
  safeRegister('zadark', () => {
   if (zadarkPlugin && typeof zadarkPlugin.register === 'function') {
@@ -154,6 +161,7 @@ module.exports = {
   userscriptsPlugin,
   advancedSettingsPlugin,
   waylandTitlebarPlugin,
-  offlinePlugin
+  offlinePlugin,
+  recalledMessagesPlugin
  }
 };

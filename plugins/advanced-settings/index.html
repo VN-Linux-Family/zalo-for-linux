@@ -80,6 +80,17 @@
         </form>
         <p class="sound-hint">Giá trị từ 0 đến 10000 mili-giây (1000 ms = 1 giây). Thay đổi áp dụng ngay cho lần chụp tiếp theo.</p>
       </section>
+      <section class="settings-card" aria-labelledby="recalled-title">
+        <div class="toggle-row">
+          <div>
+            <h2 id="recalled-title">Giữ tin nhắn đã thu hồi</h2>
+            <p id="recalled-description" class="section-description">Giữ lại nội dung tin nhắn bị thu hồi để xem lại qua nút <strong>Thu hồi</strong> phía trên ô soạn tin.</p>
+          </div>
+          <label class="toggle-label"><span class="visually-hidden">Giữ tin nhắn đã thu hồi</span><input id="keep-recalled" type="checkbox" aria-describedby="recalled-description recalled-hint"><i></i></label>
+        </div>
+        <p id="recalled-hint" class="toggle-hint">Chỉ giữ được tin bị thu hồi lúc Zalo đang mở. Tin được lưu trên máy này, tối đa 500 tin. Tắt tính năng sẽ xoá các tin đã giữ.</p>
+        <span id="recalled-status" class="sound-status" role="status" aria-live="polite"></span>
+      </section>
       <section class="settings-card userscripts-card" aria-labelledby="userscripts-title">
         <div class="brand-icon" aria-hidden="true">&lt;/&gt;</div>
         <div class="userscripts-description"><h2 id="userscripts-title">Userscript Manager</h2><p>Tạo, chỉnh sửa và quản lý các script chạy trong Zalo.</p></div>

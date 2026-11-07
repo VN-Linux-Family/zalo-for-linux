@@ -64,3 +64,16 @@ Bổ sung Dark Mode, bảo vệ quyền riêng tư và tùy biến giao diện �
 - **Bảo vệ riêng tư**: Chống nhìn trộm tin nhắn (làm mờ nội dung) và ẩn trạng thái "đang soạn tin" / "đã xem".
 - **Cá nhân hóa**: Đổi hình nền hội thoại tùy ý, chỉnh font chữ, dịch nhanh tin nhắn và bộ 80+ emoji độc quyền.
 - **Tích hợp nguyên bản**: Được tự động biên dịch và tích hợp trực tiếp vào AppImage trong chu trình build.
+
+---
+
+### 🗂️ 6. Giữ tin nhắn đã thu hồi
+
+Giữ lại nội dung tin nhắn mà người khác thu hồi, để bạn xem lại sau. Tính năng này tắt sẵn.
+
+- **Cách bật**: Mở **Cài đặt → Nâng cao...**, bật **Giữ tin nhắn đã thu hồi**. Áp dụng ngay, không cần mở lại Zalo.
+- **Cách xem**: Khi có tin bị thu hồi, nút **Thu hồi** hiện phía trên ô soạn tin. Hộp danh sách có hai mục: **Cuộc trò chuyện này** và **Tất cả**. Ảnh và video hiện dạng ảnh nhỏ, bấm vào để xem ảnh lớn hoặc phát video. Nút xoá đi theo mục đang xem: **Xoá tin cuộc này** hoặc **Xoá hết**.
+- **Giới hạn**:
+  - Chỉ giữ được tin bị thu hồi lúc Zalo đang mở trên máy.
+  - Giữ tin chữ, link, ảnh và video. Với ảnh và video, chỉ giữ đường link tới máy chủ Zalo; nếu Zalo xoá tệp trên máy chủ thì không xem lại được.
+  - Lưu trên máy này, tối đa 500 tin. Tắt tính năng sẽ xoá toàn bộ tin đã giữ.

@@ -145,6 +145,32 @@
     });
   }
 
+  const keepRecalled = document.getElementById('keep-recalled');
+  const recalledStatus = document.getElementById('recalled-status');
+  function recalledMessage(text, error = false) {
+    recalledStatus.textContent = text;
+    recalledStatus.classList.toggle('error', error);
+  }
+  keepRecalled.disabled = true;
+  keepRecalled.addEventListener('change', async () => {
+    const enabled = keepRecalled.checked;
+    if (!enabled && !window.confirm('Tắt tính năng sẽ xoá các tin nhắn đã thu hồi đang giữ. Tiếp tục?')) {
+      keepRecalled.checked = true;
+      return;
+    }
+    keepRecalled.disabled = true;
+    try {
+      const saved = await window.linuxSettings.setKeepRecalled(enabled);
+      keepRecalled.checked = saved.keepRecalled;
+      recalledMessage(saved.keepRecalled ? 'Đã bật. Áp dụng ngay cho cửa sổ Zalo đang mở.' : 'Đã tắt và xoá các tin đã giữ.');
+    } catch (error) {
+      keepRecalled.checked = !enabled;
+      recalledMessage(errorMessage(error), true);
+    } finally {
+      keepRecalled.disabled = false;
+    }
+  });
+
   window.addEventListener('pagehide', stopPreview);
   window.linuxSettings.get().then((settings) => {
     for (const form of forms) form.elements.path.value = settings[form.dataset.sound] || '';
@@ -154,8 +180,11 @@
       const fallback = kind === 'withZalo' ? 100 : 500;
       form.elements.delay.value = typeof settings[key] === 'number' ? settings[key] : fallback;
     }
+    keepRecalled.checked = settings.keepRecalled === true;
+    keepRecalled.disabled = false;
   }).catch((error) => {
     for (const form of forms) message(form, errorMessage(error), true);
     for (const form of delayForms) message(form, errorMessage(error), true);
+    recalledMessage(errorMessage(error), true);
   });
 })();

@@ -11,7 +11,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   ringtone: '',
   ringback: '',
   screenshotDelayWithZalo: 100,
-  screenshotDelayWithoutZalo: 500
+  screenshotDelayWithoutZalo: 500,
+  keepRecalled: false
 });
 
 function defaultSoundUrl(kind) {
@@ -55,6 +56,7 @@ function createStore(userDataDir) {
       if (typeof saved.screenshotDelayWithoutZalo === 'number' && Number.isFinite(saved.screenshotDelayWithoutZalo) && saved.screenshotDelayWithoutZalo >= 0) {
         settings.screenshotDelayWithoutZalo = Math.round(saved.screenshotDelayWithoutZalo);
       }
+      if (saved.keepRecalled === true) settings.keepRecalled = true;
     } catch (error) {
       if (error.code !== 'ENOENT') console.error('[advanced-settings] Cannot read settings:', error.message);
     }
@@ -81,15 +83,23 @@ function createStore(userDataDir) {
     return path.normalize(value);
   }
 
-  function save(kind, value) {
-    validateKind(kind);
-    const validated = validatePath(value);
-    const settings = { ...read(), [kind]: validated };
+  function write(settings) {
     fs.mkdirSync(userDataDir, { recursive: true });
     const temporary = filename + '.tmp';
     fs.writeFileSync(temporary, JSON.stringify(settings, null, 2), { mode: 0o600 });
     fs.renameSync(temporary, filename);
     return settings;
+  }
+
+  function save(kind, value) {
+    validateKind(kind);
+    const validated = validatePath(value);
+    return write({ ...read(), [kind]: validated });
+  }
+
+  function setKeepRecalled(value) {
+    if (typeof value !== 'boolean') throw new Error('Giá trị không hợp lệ.');
+    return write({ ...read(), keepRecalled: value });
   }
 
   function saveScreenshotDelay(kind, value) {
@@ -106,12 +116,7 @@ function createStore(userDataDir) {
     }
 
     const validated = validateScreenshotDelay(value, fallback);
-    const settings = { ...read(), [key]: validated };
-    fs.mkdirSync(userDataDir, { recursive: true });
-    const temporary = filename + '.tmp';
-    fs.writeFileSync(temporary, JSON.stringify(settings, null, 2), { mode: 0o600 });
-    fs.renameSync(temporary, filename);
-    return settings;
+    return write({ ...read(), [key]: validated });
   }
 
   function soundUrls() {
@@ -126,7 +131,7 @@ function createStore(userDataDir) {
     return urls;
   }
 
-  return { read, save, saveScreenshotDelay, soundUrls, validateKind, validatePath };
+  return { read, save, saveScreenshotDelay, setKeepRecalled, soundUrls, validateKind, validatePath };
 }
 
 module.exports = { createStore, AUDIO_EXTENSIONS, defaultSoundUrl, DEFAULT_SETTINGS, validateScreenshotDelay };
