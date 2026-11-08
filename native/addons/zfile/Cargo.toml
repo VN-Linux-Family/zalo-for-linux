@@ -1,0 +1,18 @@
+[package]
+name = "zfile-native"
+version = "1.0.0"
+edition = "2021"
+publish = false
+description = "Linux reimplementation of Zalo zfile native addon"
+
+[lib]
+name = "zfile_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi5", "async"] }
+napi-derive = "2"
+libc = "0.2"
+
+[build-dependencies]
+napi-build = "2"
