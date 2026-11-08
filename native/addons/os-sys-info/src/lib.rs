@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,11 +97,7 @@ fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
     let hz = ticks_per_second as u64;
     let kernel = ticks_to_100ns(fields.stime, hz);
     let user = ticks_to_100ns(fields.utime, hz);
-    let boot_time = fs::read_to_string("/proc/stat")
-        .map_err(|e| process_error(pid, "readBootTime", e))?
-        .lines()
-        .find_map(|line| line.strip_prefix("btime ")?.parse::<u64>().ok())
-        .ok_or_else(|| ProcessError { pid, op: "readBootTime".to_owned(), code: -1 })?;
+    let boot_time = get_boot_time().map_err(|e| process_error(pid, "readBootTime", e))?;
     let creation = boot_time.saturating_mul(10_000_000).saturating_add(ticks_to_100ns(fields.starttime, hz));
 
     let status = fs::read_to_string(format!("{base}/status"))
@@ -109,17 +105,19 @@ fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
     let rss_kib = status_value(&status, "VmRSS:").ok_or_else(|| ProcessError { pid, op: "readWorkingSet".to_owned(), code: -1 })?;
     let working_set = rss_kib.checked_mul(1024).ok_or_else(|| ProcessError { pid, op: "readWorkingSet".to_owned(), code: -1 })?;
 
-    let smaps = fs::read_to_string(format!("{base}/smaps_rollup"))
-        .map_err(|e| process_error(pid, "readPrivateBytes", e))?;
-    let clean = status_value(&smaps, "Private_Clean:").ok_or_else(|| ProcessError { pid, op: "readPrivateBytes".to_owned(), code: -1 })?;
-    let dirty = status_value(&smaps, "Private_Dirty:").ok_or_else(|| ProcessError { pid, op: "readPrivateBytes".to_owned(), code: -1 })?;
-    let hugetlb = status_value(&smaps, "Private_Hugetlb:").unwrap_or(0);
-    let private_kib = clean.checked_add(dirty).and_then(|v| v.checked_add(hugetlb))
-        .ok_or_else(|| ProcessError { pid, op: "readPrivateBytes".to_owned(), code: -1 })?;
-    let private_bytes = private_kib.checked_mul(1024).ok_or_else(|| ProcessError { pid, op: "readPrivateBytes".to_owned(), code: -1 })?;
+    let private_bytes = if let Ok(smaps) = fs::read_to_string(format!("{base}/smaps_rollup")) {
+        let clean = status_value(&smaps, "Private_Clean:").unwrap_or(0);
+        let dirty = status_value(&smaps, "Private_Dirty:").unwrap_or(0);
+        let hugetlb = status_value(&smaps, "Private_Hugetlb:").unwrap_or(0);
+        clean.saturating_add(dirty).saturating_add(hugetlb).saturating_mul(1024)
+    } else {
+        status_value(&status, "RssAnon:")
+            .map(|anon_kib| anon_kib.saturating_mul(1024))
+            .unwrap_or(working_set)
+    };
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    static MONOTONIC_START: OnceLock<Instant> = OnceLock::new();
-    let monotonic_ms = MONOTONIC_START.get_or_init(Instant::now).elapsed().as_millis() as u64;
+    static MONOTONIC_START: LazyLock<Instant> = LazyLock::new(Instant::now);
+    let monotonic_ms = MONOTONIC_START.elapsed().as_millis() as u64;
 
     Ok(ProcessSample {
         pid,
@@ -141,10 +139,10 @@ fn parse_stat(stat: &str) -> Option<StatFields> {
     let close = stat.rfind(") ")?;
     let fields: Vec<&str> = stat[close + 2..].split_whitespace().collect();
     Some(StatFields {
-        ppid: fields.first()?.parse().ok()?,
-        utime: fields.get(10)?.parse().ok()?,
-        stime: fields.get(11)?.parse().ok()?,
-        starttime: fields.get(18)?.parse().ok()?,
+        ppid: fields.get(1)?.parse().ok()?,
+        utime: fields.get(11)?.parse().ok()?,
+        stime: fields.get(12)?.parse().ok()?,
+        starttime: fields.get(19)?.parse().ok()?,
     })
 }
 
@@ -162,6 +160,21 @@ fn ticks_to_100ns(ticks: u64, hz: u64) -> u64 {
 fn process_error(pid: u32, op: &str, error: io::Error) -> ProcessError {
     ProcessError { pid, op: op.to_owned(), code: error.raw_os_error().unwrap_or(-1) }
 }
+static BOOT_TIME: LazyLock<io::Result<u64>> = LazyLock::new(|| {
+    let content = fs::read_to_string("/proc/stat")?;
+    content
+        .lines()
+        .find_map(|line| line.strip_prefix("btime ")?.parse::<u64>().ok())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "btime not found in /proc/stat"))
+});
+
+fn get_boot_time() -> io::Result<u64> {
+    match &*BOOT_TIME {
+        Ok(t) => Ok(*t),
+        Err(e) => Err(io::Error::new(e.kind(), e.to_string())),
+    }
+}
+
 
 #[repr(C)]
 struct UtsName { sysname: [i8; 65], nodename: [i8; 65], release: [i8; 65], version: [i8; 65], machine: [i8; 65], domainname: [i8; 65] }
@@ -199,6 +212,7 @@ pub fn node_get_os_machine() -> Option<String> {
 pub struct NodeProcessSample {
     pub pid: u32,
     pub ppid: u32,
+    #[napi(js_name = "creation100ns")]
     pub creation100ns: f64,
     #[napi(js_name = "kernelTime100ns")]
     pub kernel_time100ns: f64,
@@ -268,4 +282,48 @@ impl napi::Task for NodeProcessSnapshotTask {
 #[napi_derive::napi(js_name = "getProcessSnapshot")]
 pub fn node_get_process_snapshot(pids: Vec<f64>) -> napi::Result<napi::bindgen_prelude::AsyncTask<NodeProcessSnapshotTask>> {
     Ok(napi::bindgen_prelude::AsyncTask::new(NodeProcessSnapshotTask { pids }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_os_metadata() {
+        assert_eq!(get_os_architecture(), "64-bit");
+        let machine = get_os_machine();
+        assert!(machine.is_some());
+        let m = machine.unwrap();
+        assert!(m == "x64" || m == "arm64");
+    }
+
+    #[test]
+    fn test_parse_stat_format() {
+        let sample = "128776 (Web Content (1)) S 4751 128776 4751 34816 128776 4194304 4046613 7210034 34104 2554 38072 3779 20710 4986 20 0 80 0 2594714 7845638144 114561 18446744073709551615";
+        let parsed = parse_stat(sample).expect("parse_stat should succeed");
+        assert_eq!(parsed.ppid, 4751);
+        assert_eq!(parsed.utime, 38072);
+        assert_eq!(parsed.stime, 3779);
+        assert_eq!(parsed.starttime, 2594714);
+    }
+
+    #[test]
+    fn test_get_process_snapshot_self() {
+        let pid = std::process::id() as f64;
+        let snapshot = get_process_snapshot(&[pid]);
+        assert_eq!(snapshot.samples.len(), 1);
+        assert_eq!(snapshot.errors.len(), 0);
+        let sample = &snapshot.samples[0];
+        assert_eq!(sample.pid, pid as u32);
+        assert!(sample.working_set > 0);
+        assert!(sample.creation100ns > 0);
+    }
+
+    #[test]
+    fn test_get_process_snapshot_invalid_pids() {
+        let snapshot = get_process_snapshot(&[-1.0, 0.0, 2.5, 999999999.0]);
+        assert_eq!(snapshot.samples.len(), 0);
+        assert_eq!(snapshot.errors.len(), 1);
+        assert_eq!(snapshot.errors[0].pid, 999999999);
+    }
 }

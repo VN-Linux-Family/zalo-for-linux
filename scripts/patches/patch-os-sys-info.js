@@ -3,7 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
+const { APP_MAIN_DIST, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const OS_SYS_INFO_DIR = path.join(NATIVELIBS_DIR, 'os-sys-info');
 const NODE_BINARY = 'os_sys_info.node';
 const NODE_BINARY_SRC = 'os-sys-info.node';
@@ -44,6 +44,18 @@ async function main() {
     }
   } else {
     logger.warn('os-sys-info/index.js not found, skipped Linux loader patch');
+  }
+
+  const mainJsPath = path.join(APP_MAIN_DIST, 'main.js');
+  if (fs.existsSync(mainJsPath)) {
+    let mainContent = fs.readFileSync(mainJsPath, 'utf8');
+    const targetPattern = '"win32"!==process.platform&&"darwin"!==process.platform';
+    const replacement = '"win32"!==process.platform&&"darwin"!==process.platform&&"linux"!==process.platform';
+    if (mainContent.includes(targetPattern)) {
+      mainContent = mainContent.replace(targetPattern, replacement);
+      fs.writeFileSync(mainJsPath, mainContent, 'utf8');
+      logger.dim('Patched main-dist/main.js to enable osSysInfo on Linux');
+    }
   }
 
   logger.success('os-sys-info built and installed');
