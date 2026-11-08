@@ -8,6 +8,7 @@ members = [
     "native/addons/zjxl",
     "native/addons/zlang",
     "native/addons/zwalker",
+    "native/addons/zfile",
     "native/engines/zocr",
     "native/engines/zcall/audio",
 ]

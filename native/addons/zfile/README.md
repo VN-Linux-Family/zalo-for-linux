@@ -34,7 +34,7 @@ in JS where it belongs.
 
 ## Exported native module
 
-`build/Release/zfile-native.node`. `patch-zfile.js` copies it into
+`target/release/zfile-native.node`. `patch-zfile.js` copies it into
 `app/native/nativelibs/zfile/linux/zfile-native.node`, copies `zfile-linux.js`
 alongside, and splices `index.js` to `require('./linux/zfile-linux.js')` on Linux.
 
@@ -42,13 +42,14 @@ alongside, and splices `index.js` to `require('./linux/zfile-linux.js')` on Linu
 
 ```bash
 # from repo root:
-node nativelibs/builder.js nativelibs/zfile
-# → nativelibs/zfile/build/Release/zfile-native.node
+npm run build:native zfile
+# or:
+cargo build --release -p zfile-native
+# → target/release/zfile-native.node
 ```
 
-`binding.gyp` target `zfile-native`, C++17, links only glibc (`statvfs`,
-`getmntent_r` — no third-party libs).
-
+Reimplemented in pure Rust via NAPI-RS (`napi` + `libc`), part of the root
+Cargo workspace.
 ## Use (in the app)
 
 Application code calls Zalo's `zfile` API unchanged; on Linux the calls land in

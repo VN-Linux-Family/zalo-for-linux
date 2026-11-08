@@ -4,8 +4,7 @@
   "description": "Unofficial Zalo port for Linux with ZaDark integration",
   "workspaces": [
     "native/addons/db-cross-v4",
-    "native/addons/v8-profiles",
-    "native/addons/zfile"
+    "native/addons/v8-profiles"
   ],
   "main": "main.js",
   "scripts": {

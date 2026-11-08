@@ -3,7 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
+const { ROOT, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const LIB_DIR = path.join(NATIVELIBS_DIR, 'zfile');
 const DEST_DIR = path.join(APP_NATIVE_LIBS, 'zfile', 'linux');
 const INDEX_JS = path.join(APP_NATIVE_LIBS, 'zfile', 'index.js');
@@ -11,10 +11,9 @@ const INDEX_JS = path.join(APP_NATIVE_LIBS, 'zfile', 'index.js');
 async function main() {
   logger.info('Installing zfile native addon...');
 
-  const releaseDir = path.join(LIB_DIR, 'build', 'Release');
-  const fallbackNode = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'))
-    ? path.join(releaseDir, fs.readdirSync(releaseDir).find(f => f.endsWith('.node')))
-    : path.join(releaseDir, 'zfile-native.node');
+  const rootFallback = path.join(ROOT, 'target', 'release', 'zfile-native.node');
+  const localFallback = path.join(LIB_DIR, 'target', 'release', 'zfile-native.node');
+  const fallbackNode = fs.existsSync(rootFallback) ? rootFallback : localFallback;
   const builtNode = resolvePrebuiltBinary('zfile-native.node', fallbackNode);
 
   if (!fs.existsSync(builtNode)) {
