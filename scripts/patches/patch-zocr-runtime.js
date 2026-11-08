@@ -7,7 +7,7 @@ const logger = require('../utils/logger');
 const { createHash } = require('node:crypto');
 const { parseAst } = require('../utils/ast-transform');
 
-const { ROOT, APP_DIR, TEMP_DIR, ZOCR_DIR, APP_OCR_DIR, APP_NATIVE_LIBS } = require('../utils/paths');
+const { ROOT, APP_DIR, TEMP_DIR, ZOCR_DIR, APP_OCR_DIR, APP_NATIVE_LIBS, resolvePrebuiltBinary } = require('../utils/paths');
 const { getOnnxRuntimeUrl } = require('../download');
 // Extract the 32-byte seed used by the OCR model vault.
 function extractKey(data) {
@@ -234,29 +234,15 @@ function patch(source) {
 }
 
 function build() {
-  logger.info('Building zocr-host from source...');
-  if (!fs.existsSync(path.join(ZOCR_DIR, 'Cargo.toml'))) {
-    logger.warn('zocr not found, skipping');
-    return false;
-  }
+  logger.info('Installing zocr-host native engine...');
 
-  const rootDir = ROOT;
-  try {
-    execSync('cargo build --release -p zocr-host', { cwd: rootDir, stdio: 'pipe' });
-  } catch (error) {
-    logger.error('Failed to build zocr-host', error.message);
-    if (error.stdout) logger.dim(error.stdout.toString());
-    if (error.stderr) logger.dim(error.stderr.toString());
-    throw new Error('Failed to build zocr-host');
-  }
-
-  const rootBinary = path.join(rootDir, 'target', 'release', 'zocr-host');
+  const rootBinary = path.join(ROOT, 'target', 'release', 'zocr-host');
   const localBinary = path.join(ZOCR_DIR, 'target', 'release', 'zocr-host');
-  const sourceBinary = fs.existsSync(rootBinary) ? rootBinary : localBinary;
+  const fallbackBinary = fs.existsSync(rootBinary) ? rootBinary : localBinary;
+  const sourceBinary = resolvePrebuiltBinary('zocr-host', fallbackBinary);
 
-  if (fs.existsSync(rootBinary)) {
-    fs.ensureDirSync(path.join(ZOCR_DIR, 'target', 'release'));
-    fs.copyFileSync(rootBinary, localBinary);
+  if (!fs.existsSync(sourceBinary)) {
+    throw new Error(`Missing pre-built zocr-host binary at: ${sourceBinary}. Please run "npm run build:native" first.`);
   }
 
   const destDir = APP_OCR_DIR;

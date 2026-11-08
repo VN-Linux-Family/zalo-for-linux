@@ -33,7 +33,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_RUST_SCRIPT: BUILDER_SCRIPT } = require('../utils/paths');
+const { ROOT, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const ZWALKER_DIR = path.join(NATIVELIBS_DIR, 'zwalker');
 
 const EXPECTED_EXPORTS = [
@@ -45,34 +45,13 @@ const EXPECTED_EXPORTS = [
 ];
 
 async function main() {
-  logger.info('Building zwalker from source...');
+  logger.info('Installing zwalker native addon...');
 
-  if (!fs.existsSync(path.join(ZWALKER_DIR, 'Cargo.toml'))) {
-    logger.warn('zwalker not found, skipping');
-    return;
-  }
-
-  const releaseDir = path.join(ZWALKER_DIR, 'target', 'release');
-  const builtSo = path.join(releaseDir, 'zwalker.node');
-  const alreadyBuilt = fs.existsSync(releaseDir) && fs.existsSync(builtSo);
-
-  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
-    try {
-      execSync(`node "${BUILDER_SCRIPT}" "${ZWALKER_DIR}"`, {
-        cwd: ROOT,
-        stdio: 'pipe'
-      });
-    } catch (error) {
-      logger.error('Failed to build zwalker', error.message);
-      if (error.stdout) logger.dim(error.stdout.toString());
-      throw new Error(`Failed to build zwalker`);
-    }
-  } else {
-    logger.dim('zwalker already built, skipping compilation');
-  }
+  const fallbackSo = path.join(ZWALKER_DIR, 'target', 'release', 'zwalker.node');
+  const builtSo = resolvePrebuiltBinary('zwalker.node', fallbackSo);
 
   if (!fs.existsSync(builtSo)) {
-    throw new Error(`zwalker build produced no ${builtSo}`);
+    throw new Error(`Missing pre-built binary for zwalker at: ${builtSo}. Please run "npm run build:native" first.`);
   }
 
   const destDir = path.join(APP_NATIVE_LIBS, 'zwalker');

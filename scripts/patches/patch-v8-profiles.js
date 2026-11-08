@@ -17,7 +17,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_SCRIPT } = require('../utils/paths');
+const { APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const V8_PROFILES_DIR = path.join(NATIVELIBS_DIR, 'v8-profiles');
 const DEST_NODE = path.join(APP_NATIVE_LIBS, 'v8-profiles', 'profiler_electron_linux_x64.node');
 const INDEX_JS = path.join(APP_NATIVE_LIBS, 'v8-profiles', 'index.js');
@@ -27,35 +27,19 @@ const LINUX_REQUIRE =
   "process.platform === 'linux' ? require('./profiler_electron_linux_x64.node') : require('./profiler_electron1.8_mac.node')";
 
 async function main() {
-  logger.info('Building v8-profiles from source...');
-
-  if (!fs.existsSync(path.join(V8_PROFILES_DIR, 'binding.gyp'))) {
-    throw new Error('v8-profiles source not found at native/addons/v8-profiles — cannot build');
-  }
+  logger.info('Installing v8-profiles native addon...');
 
   const releaseDir = path.join(V8_PROFILES_DIR, 'build', 'Release');
-  const alreadyBuilt = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'));
+  const fallbackNode = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'))
+    ? path.join(releaseDir, fs.readdirSync(releaseDir).find(f => f.endsWith('.node')))
+    : path.join(releaseDir, 'profiler_electron_linux_x64.node');
+  const builtNode = resolvePrebuiltBinary('profiler_electron_linux_x64.node', fallbackNode);
 
-  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
-    try {
-      execSync(`node "${BUILDER_SCRIPT}" "${V8_PROFILES_DIR}"`, {
-        cwd: ROOT,
-        stdio: 'pipe'
-      });
-    } catch (error) {
-      logger.error('Failed to build v8-profiles', error.message);
-      if (error.stdout) logger.dim(error.stdout.toString());
-      throw new Error('Failed to build v8-profiles');
-    }
-  } else {
-    logger.dim('v8-profiles already built, skipping compilation');
+  if (!fs.existsSync(builtNode)) {
+    throw new Error(`Missing pre-built binary for v8-profiles at: ${builtNode}. Please run "npm run build:native" first.`);
   }
-
-  const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
-  if (nodeFiles.length === 0) throw new Error('v8-profiles build produced no .node');
-
   fs.ensureDirSync(path.dirname(DEST_NODE));
-  fs.copyFileSync(path.join(releaseDir, nodeFiles[0]), DEST_NODE);
+  fs.copyFileSync(builtNode, DEST_NODE);
   logger.dim('Installed Linux profiler_electron_linux_x64.node');
 
   if (!fs.existsSync(INDEX_JS)) {
