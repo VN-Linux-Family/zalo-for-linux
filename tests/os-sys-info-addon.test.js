@@ -18,6 +18,14 @@ describe('os-sys-info Native Process Snapshot Addon', () => {
     assert.strictEqual(typeof patchOsSysInfo.main, 'function');
   });
 
+  it('patches main-dist/main.js to include linux in platform check', () => {
+    const mainJsPath = path.join(ROOT, 'app', 'main-dist', 'main.js');
+    if (fs.existsSync(mainJsPath)) {
+      const content = fs.readFileSync(mainJsPath, 'utf8');
+      assert.ok(content.includes('"win32"!==process.platform&&"darwin"!==process.platform&&"linux"!==process.platform'));
+    }
+  });
+
   it('validates compiled binary ELF header', { skip: !hasBinary ? 'os-sys-info.node not compiled in clean checkout' : false }, () => {
     const fd = fs.openSync(OS_SYS_INFO_NODE, 'r');
     const header = Buffer.alloc(4);
