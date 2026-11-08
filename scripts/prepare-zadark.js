@@ -17,6 +17,7 @@ async function main() {
     await checkoutToTargetVersion();
     await buildZaDarkAssets();
     await addRequiredExports();
+    await require('./patches/patch-zadark-translate').main();
 
     logger.success('ZaDark preparation completed successfully');
 

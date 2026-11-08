@@ -155,6 +155,9 @@ async function integrateZaDark(zaloRoot = BASE_DIR) {
     zadarkPC.writeBootstrapFile(zaloRoot);
     zadarkPC.writePopupViewerFile(zaloRoot);
 
+    // Route ZaDark translate requests to Google Translate (api.zadark.com is dead).
+    await require("./patches/patch-zadark-translate").main(targetAppDir);
+
 
     // Zalo's dark theme strips ZaDark's CSS/scripts from the page (#66).
     await require("./patches/patch-zadark-keep").main(targetAppDir);
