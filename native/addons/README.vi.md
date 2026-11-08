@@ -121,4 +121,4 @@ Cách làm này đảm bảo:
 
 ## Ghi nhận
 
-Các bản viết lại dựa trên công sức dịch ngược của [realdtn2](https://github.com/realdtn2/zalo-linux-2026), [DMKha241](https://github.com/DMKha241) và [thotam](https://github.com/thotam). Xem `README.md` của từng addon để biết ghi nhận cụ thể.
+Các bản viết lại dựa trên công sức clean-room reverse engineering của [@ngxccc](https://github.com/ngxccc) ([alolite](https://github.com/ngxccc/alolite)), [DMKha241](https://github.com/DMKha241) và [thotam](https://github.com/thotam). Xem `README.md` của từng addon để biết ghi nhận cụ thể.

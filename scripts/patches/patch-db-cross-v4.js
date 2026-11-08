@@ -3,16 +3,15 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { APP_MAIN_DIST, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
+const { ROOT, APP_MAIN_DIST, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const DB_CROSS_V4_DIR = path.join(NATIVELIBS_DIR, 'db-cross-v4');
 
 async function main() {
   logger.info('Installing db-cross-v4 native addon...');
 
-  const releaseDir = path.join(DB_CROSS_V4_DIR, 'build', 'Release');
-  const fallbackNode = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'))
-    ? path.join(releaseDir, fs.readdirSync(releaseDir).find(f => f.endsWith('.node')))
-    : path.join(releaseDir, 'db-cross-v4-native.node');
+  const rootFallback = path.join(ROOT, 'target', 'release', 'db-cross-v4-native.node');
+  const localFallback = path.join(DB_CROSS_V4_DIR, 'target', 'release', 'db-cross-v4-native.node');
+  const fallbackNode = fs.existsSync(rootFallback) ? rootFallback : localFallback;
   const builtNode = resolvePrebuiltBinary('db-cross-v4-native.node', fallbackNode);
 
   if (!fs.existsSync(builtNode)) {

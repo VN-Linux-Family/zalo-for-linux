@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Unofficial Zalo port for Linux with ZaDark integration",
   "workspaces": [
-    "native/addons/db-cross-v4",
     "native/addons/v8-profiles"
   ],
   "main": "main.js",

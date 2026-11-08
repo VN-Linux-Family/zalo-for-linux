@@ -1,0 +1,19 @@
+[package]
+name = "db-cross-v4-native"
+version = "1.0.0"
+edition = "2021"
+license = "BSD-3-Clause"
+authors = ["ngxccc <https://github.com/ngxccc>", "Việt Nam Linux Family"]
+[lib]
+name = "db_cross_v4_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi5"] }
+napi-derive = "2"
+aes = "0.8"
+cbc = "0.1"
+lzma-rs = "0.3"
+
+[build-dependencies]
+napi-build = "2"

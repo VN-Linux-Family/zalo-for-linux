@@ -122,6 +122,6 @@ This ensures:
 
 ## Credits
 
-Reimplementations are based on reverse engineering work by
-[realdtn2](https://github.com/realdtn2), [DMKha241](https://github.com/DMKha241) and [thotam](https://github.com/thotam). See each
+Reimplementations are based on clean-room reverse engineering work by
+[@ngxccc](https://github.com/ngxccc) ([alolite](https://github.com/ngxccc/alolite)), [DMKha241](https://github.com/DMKha241) and [thotam](https://github.com/thotam). See each
 addon's `README.md` for specific attribution.
