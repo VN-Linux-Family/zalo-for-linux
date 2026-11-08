@@ -3,40 +3,19 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_RUST_SCRIPT: BUILDER_SCRIPT } = require('../utils/paths');
+const { APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const OS_SYS_INFO_DIR = path.join(NATIVELIBS_DIR, 'os-sys-info');
 const NODE_BINARY = 'os_sys_info.node';
 const NODE_BINARY_SRC = 'os-sys-info.node';
 
 async function main() {
-  logger.info('Building os-sys-info from source...');
+  logger.info('Installing os-sys-info native addon...');
 
-  if (!fs.existsSync(path.join(OS_SYS_INFO_DIR, 'Cargo.toml'))) {
-    logger.warn('os-sys-info not found, skipping');
-    return;
-  }
-
-  const releaseDir = path.join(OS_SYS_INFO_DIR, 'target', 'release');
-  const builtNode = path.join(releaseDir, NODE_BINARY_SRC);
-  const alreadyBuilt = fs.existsSync(builtNode);
-
-  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
-    try {
-      execSync(`node "${BUILDER_SCRIPT}" "${OS_SYS_INFO_DIR}"`, {
-        cwd: ROOT,
-        stdio: 'pipe'
-      });
-    } catch (error) {
-      logger.error('Failed to build os-sys-info', error.message);
-      if (error.stdout) logger.dim(error.stdout.toString());
-      throw new Error('Failed to build os-sys-info');
-    }
-  } else {
-    logger.dim('os-sys-info already built, skipping compilation');
-  }
+  const fallbackNode = path.join(OS_SYS_INFO_DIR, 'target', 'release', NODE_BINARY_SRC);
+  const builtNode = resolvePrebuiltBinary(NODE_BINARY_SRC, fallbackNode);
 
   if (!fs.existsSync(builtNode)) {
-    throw new Error(`Built native module not found: ${builtNode}`);
+    throw new Error(`Missing pre-built binary for os-sys-info at: ${builtNode}. Please run "npm run build:native" first.`);
   }
 
   const destDir = path.join(APP_NATIVE_LIBS, 'os-sys-info', 'linux');

@@ -3,48 +3,23 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_RUST_SCRIPT: BUILDER_SCRIPT } = require('../utils/paths');
+const { APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const FILE_UTILS_DIR = path.join(NATIVELIBS_DIR, 'file-utils');
 
 async function main() {
-  logger.info('Building file-utils from source...');
+  logger.info('Installing file-utils native addon...');
 
-  if (!fs.existsSync(path.join(FILE_UTILS_DIR, 'Cargo.toml'))) {
-    logger.warn('file-utils not found, skipping');
-    return;
+  const fallbackNode = path.join(FILE_UTILS_DIR, 'target', 'release', 'file-utils.node');
+  const builtNode = resolvePrebuiltBinary('file-utils.node', fallbackNode);
+
+  if (!fs.existsSync(builtNode)) {
+    throw new Error(`Missing pre-built binary for file-utils at: ${builtNode}. Please run "npm run build:native" first.`);
   }
-
-  const releaseDir = path.join(FILE_UTILS_DIR, 'target', 'release');
-  const builtNode = path.join(releaseDir, 'file-utils.node');
-  const alreadyBuilt = fs.existsSync(builtNode);
-
-  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
-    try {
-      execSync(`node "${BUILDER_SCRIPT}" "${FILE_UTILS_DIR}"`, {
-        cwd: ROOT,
-        stdio: 'pipe'
-      });
-    } catch (error) {
-      logger.error('Failed to build file-utils', error.message);
-      if (error.stdout) logger.dim(error.stdout.toString());
-      throw new Error(`Failed to build file-utils`);
-    }
-  } else {
-    logger.dim('file-utils already built, skipping compilation');
-  }
-
-  // releaseDir already defined above
-  const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
 
   const destDir = path.join(APP_NATIVE_LIBS, 'file-utils', 'linux');
   fs.ensureDirSync(destDir);
 
-  for (const file of nodeFiles) {
-    fs.copyFileSync(
-      path.join(releaseDir, file),
-      path.join(destDir, file)
-    );
-  }
+  fs.copyFileSync(builtNode, path.join(destDir, 'file-utils.node'));
 
   const indexJsPath = path.join(APP_NATIVE_LIBS, 'file-utils', 'index.js');
   if (fs.existsSync(indexJsPath)) {

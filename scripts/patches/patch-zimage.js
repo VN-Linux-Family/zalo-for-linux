@@ -3,48 +3,23 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_RUST_SCRIPT: BUILDER_SCRIPT } = require('../utils/paths');
+const { APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const ZIMAGE_DIR = path.join(NATIVELIBS_DIR, 'zimage');
 
 async function main() {
-  logger.info('Building zimage from source...');
+  logger.info('Installing zimage native addon...');
 
-  if (!fs.existsSync(path.join(ZIMAGE_DIR, 'Cargo.toml'))) {
-    logger.warn('zimage not found, skipping');
-    return;
+  const fallbackNode = path.join(ZIMAGE_DIR, 'target', 'release', 'zimage.node');
+  const builtNode = resolvePrebuiltBinary('zimage.node', fallbackNode);
+
+  if (!fs.existsSync(builtNode)) {
+    throw new Error(`Missing pre-built binary for zimage at: ${builtNode}. Please run "npm run build:native" first.`);
   }
-
-  const releaseDir = path.join(ZIMAGE_DIR, 'target', 'release');
-  const builtNode = path.join(releaseDir, 'zimage.node');
-  const alreadyBuilt = fs.existsSync(builtNode);
-
-  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
-    try {
-      execSync(`node "${BUILDER_SCRIPT}" "${ZIMAGE_DIR}"`, {
-        cwd: ROOT,
-        stdio: 'pipe'
-      });
-    } catch (error) {
-      logger.error('Failed to build zimage', error.message);
-      if (error.stdout) logger.dim(error.stdout.toString());
-      throw new Error(`Failed to build zimage`);
-    }
-  } else {
-    logger.dim('zimage already built, skipping compilation');
-  }
-
-  // releaseDir already defined above
-  const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
 
   const destDir = path.join(APP_NATIVE_LIBS, 'zimage', 'linux_x64');
   fs.ensureDirSync(destDir);
 
-  for (const file of nodeFiles) {
-    fs.copyFileSync(
-      path.join(releaseDir, file),
-      path.join(destDir, file)
-    );
-  }
+  fs.copyFileSync(builtNode, path.join(destDir, 'zimage.node'));
 
   const indexJsPath = path.join(APP_NATIVE_LIBS, 'zimage', 'index.js');
   if (fs.existsSync(indexJsPath)) {

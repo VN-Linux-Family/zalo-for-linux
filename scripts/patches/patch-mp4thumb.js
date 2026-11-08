@@ -3,48 +3,23 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_RUST_SCRIPT: BUILDER_SCRIPT } = require('../utils/paths');
+const { APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const MP4THUMB_DIR = path.join(NATIVELIBS_DIR, 'mp4thumb');
 
 async function main() {
-  logger.info('Building mp4thumb from source...');
+  logger.info('Installing mp4thumb native addon...');
 
-  if (!fs.existsSync(path.join(MP4THUMB_DIR, 'Cargo.toml'))) {
-    logger.warn('mp4thumb not found, skipping');
-    return;
+  const fallbackNode = path.join(MP4THUMB_DIR, 'target', 'release', 'mp4thumb.node');
+  const builtNode = resolvePrebuiltBinary('mp4thumb.node', fallbackNode);
+
+  if (!fs.existsSync(builtNode)) {
+    throw new Error(`Missing pre-built binary for mp4thumb at: ${builtNode}. Please run "npm run build:native" first.`);
   }
-
-  const releaseDir = path.join(MP4THUMB_DIR, 'target', 'release');
-  const builtNode = path.join(releaseDir, 'mp4thumb.node');
-  const alreadyBuilt = fs.existsSync(builtNode);
-
-  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
-    try {
-      execSync(`node "${BUILDER_SCRIPT}" "${MP4THUMB_DIR}"`, {
-        cwd: ROOT,
-        stdio: 'pipe'
-      });
-    } catch (error) {
-      logger.error('Failed to build mp4thumb', error.message);
-      if (error.stdout) logger.dim(error.stdout.toString());
-      throw new Error(`Failed to build mp4thumb`);
-    }
-  } else {
-    logger.dim('mp4thumb already built, skipping compilation');
-  }
-
-  // releaseDir already defined above
-  const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
 
   const destDir = path.join(APP_NATIVE_LIBS, 'mp4thumb', 'linux');
   fs.ensureDirSync(destDir);
 
-  for (const file of nodeFiles) {
-    fs.copyFileSync(
-      path.join(releaseDir, file),
-      path.join(destDir, file)
-    );
-  }
+  fs.copyFileSync(builtNode, path.join(destDir, 'mp4thumb.node'));
 
   const indexJsPath = path.join(APP_NATIVE_LIBS, 'mp4thumb', 'index.js');
   if (fs.existsSync(indexJsPath)) {

@@ -3,47 +3,25 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_DIR, APP_MAIN_DIST, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_SCRIPT } = require('../utils/paths');
+const { APP_MAIN_DIST, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const DB_CROSS_V4_DIR = path.join(NATIVELIBS_DIR, 'db-cross-v4');
 
 async function main() {
-  logger.info('Building db-cross-v4 from source...');
-
-  if (!fs.existsSync(path.join(DB_CROSS_V4_DIR, 'binding.gyp'))) {
-    logger.warn('db-cross-v4 not found, skipping');
-    return;
-  }
+  logger.info('Installing db-cross-v4 native addon...');
 
   const releaseDir = path.join(DB_CROSS_V4_DIR, 'build', 'Release');
-  const alreadyBuilt = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'));
+  const fallbackNode = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'))
+    ? path.join(releaseDir, fs.readdirSync(releaseDir).find(f => f.endsWith('.node')))
+    : path.join(releaseDir, 'db-cross-v4-native.node');
+  const builtNode = resolvePrebuiltBinary('db-cross-v4-native.node', fallbackNode);
 
-  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
-    try {
-      execSync(`node "${BUILDER_SCRIPT}" "${DB_CROSS_V4_DIR}"`, {
-        cwd: ROOT,
-        stdio: 'pipe'
-      });
-    } catch (error) {
-      logger.error('Failed to build db-cross-v4', error.message);
-      if (error.stdout) logger.dim(error.stdout.toString());
-      throw new Error(`Failed to build db-cross-v4`);
-    }
-  } else {
-    logger.dim('db-cross-v4 already built, skipping compilation');
+  if (!fs.existsSync(builtNode)) {
+    throw new Error(`Missing pre-built binary for db-cross-v4 at: ${builtNode}. Please run "npm run build:native" first.`);
   }
-
-  // releaseDir already defined above
-  const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
-
   const destDir = path.join(APP_NATIVE_LIBS, 'db-cross-v4', 'prebuilt', 'linux', 'electron', 'x64');
   fs.ensureDirSync(destDir);
 
-  for (const file of nodeFiles) {
-    fs.copyFileSync(
-      path.join(releaseDir, file),
-      path.join(destDir, file)
-    );
-  }
+  fs.copyFileSync(builtNode, path.join(destDir, 'db-cross-v4-native.node'));
 
   const bindingJsPath = path.join(APP_NATIVE_LIBS, 'db-cross-v4', 'dist', 'binding.js');
   if (fs.existsSync(bindingJsPath)) {

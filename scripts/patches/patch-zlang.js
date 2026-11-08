@@ -6,7 +6,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_RUST_SCRIPT: BUILDER_SCRIPT } = require('../utils/paths');
+const { APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const ZLANG_DIR = path.join(NATIVELIBS_DIR, 'zlang');
 
 const EXPECTED_EXPORTS = [
@@ -18,34 +18,13 @@ const EXPECTED_EXPORTS = [
 ];
 
 async function main() {
-  logger.info('Building zlang from source...');
+  logger.info('Installing zlang native addon...');
 
-  if (!fs.existsSync(path.join(ZLANG_DIR, 'Cargo.toml'))) {
-    logger.warn('zlang not found, skipping');
-    return;
-  }
-
-  const releaseDir = path.join(ZLANG_DIR, 'target', 'release');
-  const builtNode = path.join(releaseDir, 'zlang.node');
-  const alreadyBuilt = fs.existsSync(builtNode);
-
-  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
-    try {
-      execSync(`node "${BUILDER_SCRIPT}" "${ZLANG_DIR}"`, {
-        cwd: ROOT,
-        stdio: 'pipe'
-      });
-    } catch (error) {
-      logger.error('Failed to build zlang', error.message);
-      if (error.stdout) logger.dim(error.stdout.toString());
-      throw new Error(`Failed to build zlang`);
-    }
-  } else {
-    logger.dim('zlang already built, skipping compilation');
-  }
+  const fallbackNode = path.join(ZLANG_DIR, 'target', 'release', 'zlang.node');
+  const builtNode = resolvePrebuiltBinary('zlang.node', fallbackNode);
 
   if (!fs.existsSync(builtNode)) {
-    throw new Error(`zlang build produced no ${builtNode}`);
+    throw new Error(`Missing pre-built binary for zlang at: ${builtNode}. Please run "npm run build:native" first.`);
   }
 
   const archDir = process.arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
@@ -83,7 +62,7 @@ async function main() {
   }
 
   // Patch index.js in zlang to enable Linux loading and bypass platform check
-  const indexJsPath = path.join(APP_DIR, 'native', 'nativelibs', 'zlang', 'index.js');
+  const indexJsPath = path.join(APP_NATIVE_LIBS, 'zlang', 'index.js');
   if (fs.existsSync(indexJsPath)) {
     let content = fs.readFileSync(indexJsPath, 'utf8');
 

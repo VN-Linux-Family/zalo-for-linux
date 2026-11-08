@@ -3,41 +3,26 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_DIR, APP_NATIVE_LIBS, NATIVELIBS_DIR, BUILDER_SCRIPT } = require('../utils/paths');
+const { APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const LIB_DIR = path.join(NATIVELIBS_DIR, 'zfile');
 const DEST_DIR = path.join(APP_NATIVE_LIBS, 'zfile', 'linux');
 const INDEX_JS = path.join(APP_NATIVE_LIBS, 'zfile', 'index.js');
 
 async function main() {
-  if (!fs.existsSync(path.join(LIB_DIR, 'binding.gyp'))) {
-    throw new Error('zfile source not found at native/addons/zfile — cannot build');
-  }
+  logger.info('Installing zfile native addon...');
 
   const releaseDir = path.join(LIB_DIR, 'build', 'Release');
-  const alreadyBuilt = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'));
+  const fallbackNode = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'))
+    ? path.join(releaseDir, fs.readdirSync(releaseDir).find(f => f.endsWith('.node')))
+    : path.join(releaseDir, 'zfile-native.node');
+  const builtNode = resolvePrebuiltBinary('zfile-native.node', fallbackNode);
 
-  if (!alreadyBuilt || process.env.FORCE_BUILD === 'true') {
-    logger.info('Building zfile-native from source...');
-    try {
-      execSync(`node "${BUILDER_SCRIPT}" "${LIB_DIR}"`, {
-        cwd: ROOT,
-        stdio: 'pipe'
-      });
-    } catch (error) {
-      logger.error('Failed to build zfile-native', error.message);
-      if (error.stdout) logger.dim(error.stdout.toString());
-      throw new Error('Failed to build zfile-native');
-    }
-  } else {
-    logger.dim('zfile-native already built, skipping compilation');
+  if (!fs.existsSync(builtNode)) {
+    throw new Error(`Missing pre-built binary for zfile at: ${builtNode}. Please run "npm run build:native" first.`);
   }
-
-  const nodeFiles = fs.readdirSync(releaseDir).filter(f => f.endsWith('.node'));
-  if (nodeFiles.length === 0) throw new Error('zfile build produced no .node');
-
   fs.ensureDirSync(DEST_DIR);
   const destNode = path.join(DEST_DIR, 'zfile-native.node');
-  fs.copyFileSync(path.join(releaseDir, nodeFiles[0]), destNode);
+  fs.copyFileSync(builtNode, destNode);
   logger.dim('Installed Linux zfile-native.node');
 
   // Install the JS wrapper that resolves getDiskInfo() lookups by absolute path.

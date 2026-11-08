@@ -40,6 +40,8 @@ describe('Project Paths Centralization', () => {
       assert.strictEqual(typeof paths[key], 'string', `${key} must be a string`);
       assert.ok(path.isAbsolute(paths[key]), `${key} must be an absolute path: ${paths[key]}`);
     }
+    assert.strictEqual(typeof paths.resolvePrebuiltBinary, 'function');
+    assert.ok('PREBUILT_DIR' in paths);
   });
 
   it('resolves core repository directories that exist in the working tree', () => {
@@ -82,5 +84,11 @@ describe('Project Paths Centralization', () => {
     assert.throws(() => {
       paths.NEW_KEY = 'test';
     }, TypeError);
+  });
+
+  it('resolvePrebuiltBinary falls back to default path when PREBUILT_DIR is unset', () => {
+    const defaultPath = path.join(paths.ROOT, 'target', 'release', 'dummy.node');
+    const resolved = paths.resolvePrebuiltBinary('dummy.node', defaultPath);
+    assert.strictEqual(resolved, defaultPath);
   });
 });
