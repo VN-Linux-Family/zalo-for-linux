@@ -29,13 +29,12 @@ zalo-for-linux/
 ├── native                    # Linux reimplementations of Zalo native components
 │   ├── builder.js            # Unified CLI build helper
 │   ├── README.md             # Native layout overview
-│   ├── addons/               # N-API cdylib addons (C++ and Rust)
+│   ├── addons/               # Pure Rust N-API cdylib addons
 │   │   ├── db-cross-v4       # Backup decryption & E2EE message synchronization addon
 │   │   ├── file-utilities    # Asynchronous filesystem scanning & pattern matching addon
 │   │   ├── file-utils        # Filesystem access and file management utilities
 │   │   ├── mp4thumb          # Video thumbnail extractor from MP4 files
 │   │   ├── os-sys-info       # Operating system and process information reader
-│   │   ├── v8-profiles       # Native CPU profiler for Zalo
 │   │   ├── zfile             # Disk/volume info (free space, mount points) addon
 │   │   ├── zimage            # Image processor, resizer, and format conversions
 │   │   ├── zjxl              # JPEG XL (JXL) image decoder and encoder

@@ -2,9 +2,6 @@
   "name": "zalo-for-linux",
   "version": "1.0.0",
   "description": "Unofficial Zalo port for Linux with ZaDark integration",
-  "workspaces": [
-    "native/addons/v8-profiles"
-  ],
   "main": "main.js",
   "scripts": {
     "test": "node --test 'tests/**/*.test.js'",

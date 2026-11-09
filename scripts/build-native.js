@@ -2,7 +2,7 @@
  * scripts/build-native.js
  *
  * Standalone build orchestrator for all native modules:
- * - 11 N-API addons in native/addons/ (C++ node-gyp & Rust NAPI-RS)
+ * - 10 N-API addons in native/addons/ (Pure Rust NAPI-RS)
  * - Standalone engines in native/engines/ (zcall/audio, zocr)
  *
  * Usage:
