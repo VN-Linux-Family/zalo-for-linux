@@ -34,13 +34,18 @@ async function main() {
   // longest-prefix mount entry (verified correct for data on "/" and on other
   // mounts like "/mnt/data"). Enumeration (Object.keys/entries) still yields the
   // real mount points, so the drive-list bar keeps working.
-  const wrapperSrc = path.join(LIB_DIR, 'zfile-linux.js');
+  const wrapperFallback = path.join(LIB_DIR, 'zfile-linux.js');
+  const wrapperSrc = resolvePrebuiltBinary('zfile-linux.js', wrapperFallback);
   const destWrapper = path.join(DEST_DIR, 'zfile-linux.js');
+
   if (!fs.existsSync(wrapperSrc)) {
-    throw new Error('zfile wrapper source not found at native/addons/zfile/zfile-linux.js');
+    throw new Error(
+      `Missing zfile-linux.js in prebuilt and fallback paths. Checked: ${wrapperSrc}`
+    );
   }
+
   fs.copyFileSync(wrapperSrc, destWrapper);
-  logger.dim('Installed Linux zfile-linux.js wrapper');
+  logger.dim(`Installed Linux zfile-linux.js wrapper from: ${wrapperSrc}`);
 
   // Splice a linux branch into index.js that requires the WRAPPER (not the raw .node).
   if (!fs.existsSync(INDEX_JS)) {
