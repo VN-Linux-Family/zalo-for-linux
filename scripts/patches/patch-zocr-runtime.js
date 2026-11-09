@@ -273,7 +273,7 @@ function installOnnxRuntime() {
   }
   fs.ensureDirSync(TEMP_DIR);
   const url = getOnnxRuntimeUrl();
-  const filename = getOnnxRuntimeUrl().split('/').pop();
+  const filename = url.split('/').pop();
   const archive = path.join(TEMP_DIR, filename);
   if (!fs.existsSync(archive)) {
     logger.warn('ONNX Runtime archive not found in temp, attempting on-demand download...');

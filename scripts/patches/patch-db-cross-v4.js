@@ -2,7 +2,7 @@ const { execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
-const { arch } = process
+const { arch } = process;
 
 const { APP_MAIN_DIST, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const DB_CROSS_V4_DIR = path.join(NATIVELIBS_DIR, 'db-cross-v4');
