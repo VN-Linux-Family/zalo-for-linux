@@ -82,8 +82,8 @@ async function main() {
   delete require.cache[require.resolve(INDEX_JS)];
   const zfile = require(INDEX_JS);
   const disks = await zfile.diskInfo();
-  if (!disks || typeof disks !== 'object' || Object.keys(disks).length === 0) {
-    throw new Error('patch-zfile: post-condition failed — zfile.diskInfo() returned no drives');
+  if (!disks || typeof disks !== 'object' || Array.isArray(disks)) {
+    throw new Error('patch-zfile: post-condition failed — zfile.diskInfo() returned invalid data');
   }
   const availableMounts = Object.keys(disks);
   if (availableMounts.length > 0) {
