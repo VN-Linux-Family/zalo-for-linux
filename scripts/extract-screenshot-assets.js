@@ -11,8 +11,8 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('./utils/logger');
 
-const APP_DIR = path.join(__dirname, '..', 'app');
-const OUT_DIR = path.join(__dirname, '..', 'plugins', 'screenshot', 'ui', 'fonts');
+const { APP_DIR } = require('./utils/paths');
+const OUT_DIR = path.join(APP_DIR, 'screenshot-assets', 'ui', 'fonts');
 
 function findFont(dir) {
   if (!fs.existsSync(dir)) return null;
@@ -43,7 +43,7 @@ async function main(options = {}) {
   const targetFile = path.join(outDir, 'zalo-pc-screencap.ttf');
   fs.copySync(fontFile, targetFile);
 
-  logger.success(`Screenshot font extracted: ${path.basename(fontFile)} -> plugins/screenshot/ui/fonts/zalo-pc-screencap.ttf`);
+  logger.success(`Screenshot font extracted: ${path.basename(fontFile)} -> app/screenshot-assets/ui/fonts/zalo-pc-screencap.ttf`);
 }
 
 module.exports = { main, findFont };

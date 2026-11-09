@@ -21,6 +21,12 @@ const { pathToFileURL } = require('url');
 const { captureScreen } = require('./capture');
 const { createStore, DEFAULT_SETTINGS } = require('../advanced-settings/store');
 
+const appDir = fs.existsSync(path.join(__dirname, '..', '..', 'app'))
+ ? path.join(path.join(__dirname, '..', '..', 'app'))
+ : path.join(path.dirname(process.execPath), 'app');
+
+const fontPath = path.join(appDir, 'screenshot-assets', 'ui', 'fonts', 'zalo-pc-screencap.ttf');
+
 let _mainWindow = null;
 let _overlayWindow = null;
 let _isCapturing = false;
@@ -54,7 +60,6 @@ function getScreenshotDelay(mode, customApp) {
 }
 
 function ensureFont() {
-  const fontPath = path.join(__dirname, 'ui', 'fonts', 'zalo-pc-screencap.ttf');
   if (fs.existsSync(fontPath)) return;
 
   const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'extract-screenshot-assets.js');
@@ -238,7 +243,8 @@ async function startInteractiveScreenshot(event) {
     });
 
     const htmlPath = path.join(__dirname, 'ui', 'index.html');
-    _overlayWindow.loadFile(htmlPath, { query: { img: fileUrl } });
+    const fontUrl = pathToFileURL(fontPath).href;
+    _overlayWindow.loadFile(htmlPath, { query: { img: fileUrl, font: fontUrl } });
 
     _overlayWindow.once('ready-to-show', () => {
       if (_overlayWindow && !_overlayWindow.isDestroyed()) {
