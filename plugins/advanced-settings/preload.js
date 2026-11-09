@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld('linuxSettings', {
   saveScreenshotDelay: (kind, value) => ipcRenderer.invoke('linux-settings:save-screenshot-delay', kind, value),
   pickSound: (kind) => ipcRenderer.invoke('linux-settings:pick-sound', kind),
   previewSound: (kind, value) => ipcRenderer.invoke('linux-settings:preview-sound', kind, value),
+  setDevMode: (enabled) => ipcRenderer.invoke('linux-settings:set-dev-mode', enabled),
   setKeepRecalled: (enabled) => ipcRenderer.invoke('linux-settings:set-keep-recalled', enabled)
 });

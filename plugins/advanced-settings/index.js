@@ -5,8 +5,11 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const { createStore, AUDIO_EXTENSIONS, defaultSoundUrl } = require('./store');
 
-function register({ app, ipcMain, BrowserWindow, dialog }) {
+function register({ app, ipcMain, BrowserWindow, dialog, devMode }) {
   const store = createStore(app.getPath('userData'));
+  if (!devMode || typeof devMode.getStatus !== 'function' || typeof devMode.setEnabled !== 'function') {
+    throw new Error('Advanced Settings requires the Dev Mode plugin.');
+  }
   let settingsWindow = null;
   let mainWindow = null;
 
@@ -52,7 +55,7 @@ function register({ app, ipcMain, BrowserWindow, dialog }) {
 
   ipcMain.handle('linux-settings:get', (event) => {
     assertSender(event);
-    return store.read();
+    return { ...store.read(), ...devMode.getStatus() };
   });
   ipcMain.handle('linux-settings:save-sound', (event, kind, value) => {
     assertSender(event);
@@ -61,6 +64,11 @@ function register({ app, ipcMain, BrowserWindow, dialog }) {
   ipcMain.handle('linux-settings:save-screenshot-delay', (event, kind, value) => {
     assertSender(event);
     return store.saveScreenshotDelay(kind, value);
+  });
+  ipcMain.handle('linux-settings:set-dev-mode', (event, enabled) => {
+    assertSender(event);
+    if (typeof enabled !== 'boolean') throw new Error('Giá trị dev mode không hợp lệ.');
+    return devMode.setEnabled(enabled);
   });
   ipcMain.handle('linux-settings:pick-sound', async (event, kind) => {
     assertSender(event);

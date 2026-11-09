@@ -9,6 +9,7 @@ const launcherBadgePlugin = require('./launcher-badge');
 const trayBadgePlugin = require('./tray-badge');
 const userscriptsPlugin = require('./userscripts');
 const advancedSettingsPlugin = require('./advanced-settings');
+const devModePlugin = require('./dev-mode');
 const waylandTitlebarPlugin = require('./wayland-titlebar');
 const offlinePlugin = require('./offline');
 const zadarkPlugin = require('./zadark');
@@ -70,7 +71,19 @@ function register(context = {}) {
   iconPath
  } = context;
 
- // 1. Standalone IPC/UI plugins
+ // 1. Core runtime state shared with the main process and settings UI.
+ const devMode = safeRegister('devMode', () => {
+  if (devModePlugin && typeof devModePlugin.register === 'function') {
+   return devModePlugin.register({
+    app,
+    BrowserWindow,
+    onTrayMenuChanged: context.onTrayMenuChanged
+   });
+  }
+  return null;
+ });
+
+ // 2. Standalone IPC/UI plugins
  safeRegister('trayBadge', () => {
   if (trayBadgePlugin && typeof trayBadgePlugin.register === 'function') {
    trayBadgePlugin.register({ app, tray, nativeImage, appDir, iconPath });
@@ -101,7 +114,7 @@ function register(context = {}) {
   }
  });
 
- // 2. Settings & Userscripts (chained dependency)
+ // 3. Settings & Userscripts (chained dependency)
  const advancedSettings = safeRegister('advancedSettings', () => {
   if (advancedSettingsPlugin && typeof advancedSettingsPlugin.register === 'function') {
    return advancedSettingsPlugin.register({
@@ -109,7 +122,8 @@ function register(context = {}) {
     ipcMain,
     BrowserWindow,
     dialog,
-    screenshotPlugin
+    screenshotPlugin,
+    devMode
    });
   }
   return null;
@@ -127,12 +141,13 @@ function register(context = {}) {
   }
  });
 
- // 3. ZaDark Theme Synchronization Plugin (if active in build)
+ // 4. ZaDark Theme Synchronization Plugin (if active in build)
  safeRegister('zadark', () => {
   if (zadarkPlugin && typeof zadarkPlugin.register === 'function') {
    zadarkPlugin.register({ app, ipcMain, appDir });
   }
  });
+ return devMode;
 }
 
 /**
@@ -160,6 +175,7 @@ module.exports = {
   trayBadgePlugin,
   userscriptsPlugin,
   advancedSettingsPlugin,
+  devModePlugin,
   waylandTitlebarPlugin,
   offlinePlugin,
   recalledMessagesPlugin

@@ -19,6 +19,7 @@ app.setName('Zalo');
 let tray = null;
 let mainWindow = null;
 let isAppQuitting = false;
+let devMode = null;
 
 // Hidden windows Zalo uses as background processes, never the main window.
 const BACKGROUND_WINDOW_TITLES = ['Shared Worker', 'SQLite'];
@@ -57,21 +58,6 @@ plugins.initEarly({ app, ipcMain });
 // Helpers
 // ---------------------------------------------------------------------------
 
-function toggleDevTools() {
-  try {
-    const win = BrowserWindow.getFocusedWindow() || mainWindow;
-    if (win && win.webContents) {
-      if (win.webContents.isDevToolsOpened()) {
-        win.webContents.closeDevTools();
-      } else {
-        win.webContents.openDevTools({ mode: 'detach' });
-      }
-    }
-  } catch (e) {
-    console.error('Toggle DevTools failed', e);
-  }
-}
-
 function showMainWindow() {
   startHidden.release();
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -106,10 +92,7 @@ function updateTrayVisibilityMenu() {
         updateTrayVisibilityMenu();
       }
     },
-    {
-      label: 'Toggle DevTools',
-      click: toggleDevTools
-    },
+    ...(devMode ? devMode.getTrayMenuItems() : []),
     {
       label: 'Thoát',
       click: () => {
@@ -199,11 +182,6 @@ app.on('browser-window-created', (_evt, win) => {
       if (tray && trayHost.isAvailable()) startHidden.attach(win);
       updateTrayVisibilityMenu();
 
-      mainWindow.webContents.on('before-input-event', (_event, input) => {
-        if ((input.control) && input.shift && input.key.toLowerCase() === 'i') {
-          toggleDevTools();
-        }
-      });
     }
 
     // Minimize to tray instead of closing.
@@ -255,8 +233,8 @@ app.once('ready', () => {
     }
   }
 
-  // Register plugins
-  plugins.register({
+  // Register plugins once with the complete Electron context.
+  devMode = plugins.register({
     app,
     ipcMain,
     BrowserWindow,
@@ -264,8 +242,10 @@ app.once('ready', () => {
     nativeImage,
     tray,
     appDir,
-    iconPath
+    iconPath,
+    onTrayMenuChanged: updateTrayVisibilityMenu
   });
+  updateTrayVisibilityMenu();
 
   zcall.start({ userDataDir: app.getPath('userData') });
 });

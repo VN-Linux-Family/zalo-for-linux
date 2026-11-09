@@ -43,10 +43,20 @@ function validateScreenshotDelay(value, fallbackDefault = 0) {
 function createStore(userDataDir) {
   const filename = path.join(userDataDir, 'zalo-linux-settings.json');
 
+  function readRaw() {
+    try {
+      const saved = JSON.parse(fs.readFileSync(filename, 'utf8'));
+      return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.error('[advanced-settings] Cannot read settings:', error.message);
+      return {};
+    }
+  }
+
   function read() {
     const settings = { ...DEFAULT_SETTINGS };
     try {
-      const saved = JSON.parse(fs.readFileSync(filename, 'utf8'));
+      const saved = readRaw();
       for (const kind of SOUND_KINDS) {
         if (typeof saved[kind] === 'string') settings[kind] = saved[kind];
       }
@@ -58,7 +68,7 @@ function createStore(userDataDir) {
       }
       if (saved.keepRecalled === true) settings.keepRecalled = true;
     } catch (error) {
-      if (error.code !== 'ENOENT') console.error('[advanced-settings] Cannot read settings:', error.message);
+      console.error('[advanced-settings] Cannot read settings:', error.message);
     }
     return settings;
   }
@@ -85,10 +95,11 @@ function createStore(userDataDir) {
 
   function write(settings) {
     fs.mkdirSync(userDataDir, { recursive: true });
+    const merged = { ...readRaw(), ...settings };
     const temporary = filename + '.tmp';
-    fs.writeFileSync(temporary, JSON.stringify(settings, null, 2), { mode: 0o600 });
+    fs.writeFileSync(temporary, JSON.stringify(merged, null, 2), { mode: 0o600 });
     fs.renameSync(temporary, filename);
-    return settings;
+    return merged;
   }
 
   function save(kind, value) {
@@ -101,7 +112,6 @@ function createStore(userDataDir) {
     if (typeof value !== 'boolean') throw new Error('Giá trị không hợp lệ.');
     return write({ ...read(), keepRecalled: value });
   }
-
   function saveScreenshotDelay(kind, value) {
     let key;
     let fallback;

@@ -40,6 +40,7 @@ Customize call ringtones and audio playback without modifying application assets
   - **Ringtone**: Custom audio file for incoming calls.
   - **Ringback**: Custom audio file played while waiting for outgoing calls to connect.
 - **Notes**: Supports browsing local audio files with built-in preview and reset-to-default buttons. Persists across restarts.
+- **Developer mode**: Enable it in **Settings → Nâng cao... (Advanced)** to allow DevTools from `Ctrl+Shift+I` and the tray menu. Disabled by default. `ZALO_DEV_MODE=1` forces it on without changing the saved setting.
 
 ---
 

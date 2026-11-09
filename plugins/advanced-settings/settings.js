@@ -170,6 +170,27 @@
       keepRecalled.disabled = false;
     }
   });
+  const devMode = document.getElementById('dev-mode');
+  const devModeStatus = document.getElementById('dev-mode-status');
+  devMode.disabled = true;
+  devMode.addEventListener('change', async () => {
+    const enabled = devMode.checked;
+    devMode.disabled = true;
+    try {
+      const saved = await window.linuxSettings.setDevMode(enabled);
+      devMode.checked = saved.devModeEnabled;
+      devMode.disabled = saved.devModeForced === true;
+      devModeStatus.textContent = saved.devModeForced
+        ? 'Được bật bắt buộc bởi biến môi trường ZALO_DEV_MODE.'
+        : (saved.devModeEnabled ? 'Đã bật DevTools.' : 'Đã tắt DevTools.');
+      devModeStatus.classList.remove('error');
+    } catch (error) {
+      devMode.checked = !enabled;
+      devMode.disabled = false;
+      devModeStatus.textContent = errorMessage(error);
+      devModeStatus.classList.add('error');
+    }
+  });
 
   window.addEventListener('pagehide', stopPreview);
   window.linuxSettings.get().then((settings) => {
@@ -182,6 +203,9 @@
     }
     keepRecalled.checked = settings.keepRecalled === true;
     keepRecalled.disabled = false;
+    devMode.checked = settings.devModeEnabled === true;
+    devMode.disabled = settings.devModeForced === true;
+    if (settings.devModeForced) devModeStatus.textContent = 'Được bật bắt buộc bởi biến môi trường ZALO_DEV_MODE.';
   }).catch((error) => {
     for (const form of forms) message(form, errorMessage(error), true);
     for (const form of delayForms) message(form, errorMessage(error), true);
