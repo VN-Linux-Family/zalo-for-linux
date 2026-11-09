@@ -99,11 +99,16 @@ async function main() {
   const cleanedCrate = await cleanZcallCrate();
   const cleanedBinaries = await sweep(APP_NATIVE_LIBS, { platformBinaries: true });
   const cleanedSources = await sweep(APP_DIR, { platformBinaries: false })
-    + await sweep(ZCALL_DIR, { platformBinaries: false });
+    + await sweep(path.join(ZCALL_DIR, 'native-engine'), { platformBinaries: false })
+    + await sweep(path.join(ZCALL_DIR, 'tools'), { platformBinaries: false });
 
   if (cleanedCrate) logger.dim('Cleaned the zcall Rust crate source (native/engines/zcall/audio)');
   if (cleanedBinaries) logger.dim(`Cleaned ${cleanedBinaries} non-Linux binar(ies)`);
   if (cleanedSources) logger.dim(`Cleaned ${cleanedSources} build-only file(s)/dir(s)`);
+}
+
+if (require.main === module) {
+  main();
 }
 
 module.exports = { main };
