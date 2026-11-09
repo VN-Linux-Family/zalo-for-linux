@@ -78,7 +78,14 @@
         "filter": [
           "**/*",
           "!**/__pycache__/**",
-          "!**/*.pyc"
+          "!**/*.pyc",
+          "!audio/**",
+          "!**/*.rs",
+          "!**/Cargo.toml",
+          "!**/Cargo.lock",
+          "!**/build.rs",
+          "!**/rust-toolchain.toml",
+          "!**/.cargo/**"
         ]
       }
     ],
