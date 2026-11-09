@@ -3,6 +3,23 @@
 <head>
   <meta charset="utf-8">
   <title>Zalo Screenshot</title>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const fontUrl = params.get('font');
+
+    if (fontUrl) {
+      const style = document.createElement('style');
+      style.textContent = `
+        @font-face {
+          font-family: 'zalo-pc-screencap';
+          src: url("${fontUrl}") format('truetype');
+          font-weight: normal;
+          font-style: normal;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  </script>
   <link rel="stylesheet" href="screencap.css">
 </head>
 <body>

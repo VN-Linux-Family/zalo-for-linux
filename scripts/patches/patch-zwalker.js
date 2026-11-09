@@ -32,6 +32,7 @@ const { execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { arch } = process
 
 const { ROOT, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const ZWALKER_DIR = path.join(NATIVELIBS_DIR, 'zwalker');
@@ -56,10 +57,10 @@ async function main() {
 
   const destDir = path.join(APP_NATIVE_LIBS, 'zwalker');
   fs.ensureDirSync(destDir);
-  const destNode = path.join(destDir, 'zwalker.linux-x64-gnu.node');
+  const destNode = path.join(destDir, `zwalker.linux-${arch}-gnu.node`);
 
   fs.copyFileSync(builtSo, destNode);
-  logger.dim('Installed zwalker.linux-x64-gnu.node');
+  logger.dim(`Installed zwalker.linux-${arch}-gnu.node`);
 
   // Post-conditions & validations
   if (!fs.existsSync(destNode) || fs.statSync(destNode).size === 0) {

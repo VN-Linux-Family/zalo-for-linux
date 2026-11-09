@@ -263,7 +263,7 @@ async function extractAppAsar() {
   }
 
   logger.info(`Extracting app.asar to app directory: ${APP_DIR}...`);
-  const asarModule = require('@electron/asar');
+  const asarModule = await import('@electron/asar');
 
   const originalCwd = process.cwd();
   try {

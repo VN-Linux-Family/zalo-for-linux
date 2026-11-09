@@ -17,7 +17,9 @@ const DIST_DIR = process.env.ZALO_DIST_DIR
 const PREBUILT_DIR = process.env.ZALO_PREBUILT_DIR
  ? path.resolve(process.env.ZALO_PREBUILT_DIR)
  : null;
-const PLUGINS_DIR = path.join(ROOT, 'plugins');
+const PLUGINS_DIR = fs.existsSync(path.join(path.dirname(process.execPath), 'resources', 'app.asar', 'plugins'))
+ ? path.join(path.dirname(process.execPath), 'resources', 'app.asar', 'plugins')
+ : path.join(ROOT, 'plugins');
 const NODE_MODULES_DIR = path.join(ROOT, 'node_modules');
 const VENDOR_DIR = path.join(ROOT, 'vendor');
 const ZADARK_VENDOR_DIR = path.join(VENDOR_DIR, 'zadark');

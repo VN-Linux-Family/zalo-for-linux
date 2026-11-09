@@ -2,6 +2,7 @@ const { execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { arch } = process;
 
 const { ROOT, APP_MAIN_DIST, APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const DB_CROSS_V4_DIR = path.join(NATIVELIBS_DIR, 'db-cross-v4');
@@ -17,7 +18,7 @@ async function main() {
   if (!fs.existsSync(builtNode)) {
     throw new Error(`Missing pre-built binary for db-cross-v4 at: ${builtNode}. Please run "npm run build:native" first.`);
   }
-  const destDir = path.join(APP_NATIVE_LIBS, 'db-cross-v4', 'prebuilt', 'linux', 'electron', 'x64');
+  const destDir = path.join(APP_NATIVE_LIBS, 'db-cross-v4', 'prebuilt', 'linux', 'electron', `${arch}`);
   fs.ensureDirSync(destDir);
 
   fs.copyFileSync(builtNode, path.join(destDir, 'db-cross-v4-native.node'));
@@ -29,7 +30,7 @@ async function main() {
     if (!content.includes("process.platform === 'linux'")) {
       content = content.replace(
         /else \{\s*if \(process\.arch === 'x64'\)/,
-        `else if (process.platform === 'linux') {\n    addon = require('../prebuilt/linux/electron/x64/db-cross-v4-native.node');\n}\nelse {\n    if (process.arch === 'x64')`
+        `else if (process.platform === 'linux') {\n    addon = require('../prebuilt/linux/electron/${arch}/db-cross-v4-native.node');\n}\nelse {\n    if (process.arch === 'x64')`
       );
       fs.writeFileSync(bindingJsPath, content, 'utf8');
       logger.dim('Patched binding.js for Linux support');
