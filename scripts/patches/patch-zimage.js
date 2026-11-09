@@ -16,7 +16,7 @@ async function main() {
     throw new Error(`Missing pre-built binary for zimage at: ${builtNode}. Please run "npm run build:native" first.`);
   }
 
-  const destDir = path.join(APP_NATIVE_LIBS, 'zimage', 'linux_x64');
+  const destDir = path.join(APP_NATIVE_LIBS, 'zimage', 'linux');
   fs.ensureDirSync(destDir);
 
   fs.copyFileSync(builtNode, path.join(destDir, 'zimage.node'));
@@ -28,7 +28,7 @@ async function main() {
     if (!content.includes("process.platform === 'linux'")) {
       content = content.replace(
         `\t\t} else {\n\t\t\tos = 'darwin_x64';\n\t\t}\n\t}\n}`,
-        `\t\t} else {\n\t\t\tos = 'darwin_x64';\n\t\t}\n\t} else if (process.platform === 'linux') {\n\t\tos = 'linux_x64';\n\t}\n}`
+        `\t\t} else {\n\t\t\tos = 'darwin_x64';\n\t\t}\n\t} else if (process.platform === 'linux') {\n\t\tos = 'linux';\n\t}\n}`
       );
       fs.writeFileSync(indexJsPath, content, 'utf8');
       logger.dim('Patched index.js for Linux support');
