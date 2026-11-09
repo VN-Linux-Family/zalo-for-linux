@@ -9,6 +9,7 @@ members = [
     "native/addons/zlang",
     "native/addons/zwalker",
     "native/addons/zfile",
+    "native/addons/db-cross-v4",
     "native/engines/zocr",
     "native/engines/zcall/audio",
 ]

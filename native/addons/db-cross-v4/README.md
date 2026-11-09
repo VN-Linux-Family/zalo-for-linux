@@ -5,52 +5,23 @@ for backup decryption and message synchronization.
 
 ## Origin
 
-This is a clean-room reimplementation based on reverse engineering of the
-macOS binary. The original work was done by
-[realdtn2](https://github.com/realdtn2/zalo-linux-2026) and documented in
-their repository's `reverse-engineering/` directory.
+This is a clean-room reimplementation in pure Rust (NAPI-RS), based on the open wire and container specifications documented by the [alolite project](https://github.com/ngxccc/alolite) (licensed under MIT / Apache-2.0).
 
-## Files
+It provides complete wire and contract parity with the official Zalo macOS `db-cross-v4-native.node` binary without using any proprietary code, legacy C++ code, or external system C headers.
 
-| File | Purpose |
-|------|---------|
-| `src/main.cc` | C++ source for the Linux addon |
-| `binding.gyp` | node-gyp build config |
-| `package.json` | Node package manifest |
+## Architecture
 
-Generated directories (gitignored):
-- `node_modules/` — installed by `npm install`
-- `build/Release/db-cross-v4-native.node` — compiled addon
-
-## Building
-
-```bash
-node nativelibs/builder.js nativelibs/db-cross-v4
-```
-
-The compiled binary stays in:
-`nativelibs/db-cross-v4/build/Release/db-cross-v4-native.node`
-
-Copying to the final location is handled by the project build pipeline
-(`scripts/prepare-app.js`).
+- **`crypto`**: AES-256 key derivation from ASCII passphrase (`derive_aes256_key_zalo_v2`) and chunked 64 KiB AES-256-CBC decryption with zero IV reset.
+- **`container`**: `ZDB4.0` backup archive container unpacker, LZMA2/XZ stream extraction with `YZ` footer boundary detection, Path Traversal protection, and SQLite header validation.
+- **`tlv`**: Little-Endian / Big-Endian heuristic scoring TLV parser with smart UTF-16LE decoding.
+- **`binnet`**: Structured parser for `ChatContent.BinNet` (attachments `0x06`, quotes `0x07`, mentions `0x08`, and properties `0x05`).
+- **`lib`**: N-API exports for `decompressAndDecryptDb_V2`, `parseBinNet`, and `decompressAndDecryptDb`.
 
 ## Requirements
 
-- Node.js (matches project version)
-- C++ compiler (gcc/clang)
-- OpenSSL development headers (`libssl-dev`)
-- LZMA development headers (`liblzma-dev`)
+Pure Rust build: requires only the Rust toolchain (stable). Zero C++ compilers, zero OpenSSL headers, zero liblzma headers.
 
-On Debian/Ubuntu:
+## Credits & Attribution
 
-```bash
-sudo apt install build-essential libssl-dev liblzma-dev
-```
-
-## Notes
-
-The addon is linked against:
-- `-lcrypto` (OpenSSL, for AES-256-CBC decryption)
-- `-llzma` (XZ/LZMA, for backup decompression)
-
-Both are standard Linux libraries.
+- **Implementation**: Clean-room reverse engineering and native Linux implementation by [@ngxccc](https://github.com/ngxccc) ([alolite](https://github.com/ngxccc/alolite)).
+- **Integration**: Maintained by [Việt Nam Linux Family](https://github.com/VN-Linux-Family) under the BSD-3-Clause license.
