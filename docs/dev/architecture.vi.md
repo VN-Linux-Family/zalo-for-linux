@@ -32,13 +32,12 @@ zalo-for-linux/
 ├── native            # Các thành phần native của Zalo được viết lại cho Linux
 │   ├── builder.js    # Công cụ hỗ trợ build hợp nhất qua dòng lệnh
 │   ├── README.vi.md  # Tài liệu tổng quan về native
-│   ├── addons/       # Các native addon N-API nạp động (C++ và Rust)
+│   ├── addons/       # Các native addon N-API thuần Rust (Pure Rust NAPI-RS)
 │   │   ├── db-cross-v4   # Addon giải mã bản sao lưu và đồng bộ tin nhắn E2EE
 │   │   ├── file-utilities# Addon quét hệ thống file bất đồng bộ
 │   │   ├── file-utils    # Tiện ích truy cập và quản lý file
 │   │   ├── mp4thumb      # Trích xuất ảnh thu nhỏ từ video MP4
 │   │   ├── os-sys-info   # Bộ đọc thông tin hệ điều hành và ID tiến trình
-│   │   ├── v8-profiles   # Phân tích hiệu năng CPU native cho Zalo
 │   │   ├── zfile         # Đọc thông tin ổ đĩa (dung lượng trống, mount point)
 │   │   ├── zimage        # Xử lý ảnh và chuyển đổi định dạng
 │   │   ├── zjxl          # Giải mã và mã hóa ảnh JPEG XL (JXL)

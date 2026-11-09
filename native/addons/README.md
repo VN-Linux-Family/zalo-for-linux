@@ -39,7 +39,6 @@ addons.
 | [file-utils](./file-utils) | ✅ Implemented | Filesystem access and file management utilities |
 | [mp4thumb](./mp4thumb) | ✅ Implemented | Video thumbnail extraction from MP4 files |
 | [os-sys-info](./os-sys-info) | ✅ Implemented | Operating system and process information reader |
-| [v8-profiles](./v8-profiles) | ✅ Implemented | Native CPU profiler for Zalo |
 | [zfile](./zfile) | ✅ Implemented | Disk/volume info (free space, mount points) |
 | [zimage](./zimage) | ✅ Implemented | Image processing, resizing, and format conversions |
 | [zjxl](./zjxl) | ✅ Implemented | JPEG XL (JXL) image decoding and encoding support |

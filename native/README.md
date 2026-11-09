@@ -4,15 +4,14 @@ This directory consolidates all Linux native implementations replacing proprieta
 
 ```text
 native/
-├── builder.js                # Unified CLI builder helper (C++ node-gyp & Rust NAPI)
+├── builder.js                # Unified CLI builder helper (Rust Cargo/NAPI)
 ├── addons/                   # N-API cdylib addons loaded dynamically via require()
-│   ├── db-cross-v4/          # Backup decryption & E2EE message synchronization (C++)
+│   ├── db-cross-v4/          # Backup decryption & E2EE message synchronization (Rust)
 │   ├── file-utilities/       # Asynchronous filesystem scanning & pattern matching (Rust)
 │   ├── file-utils/           # Filesystem access and file management utilities (Rust)
 │   ├── mp4thumb/             # MP4 video thumbnail extractor (Rust)
 │   ├── os-sys-info/          # Operating system metadata & PID inspector (Rust)
-│   ├── v8-profiles/          # V8 CPU profiling addon (C++)
-│   ├── zfile/                # Disk space, mount point & file copying utilities (C++)
+│   ├── zfile/                # Disk space, mount point & file copying utilities (Rust)
 │   ├── zimage/               # Image compression & conversion addon (Rust)
 │   ├── zjxl/                 # JPEG XL decoder & encoder (Rust)
 │   ├── zlang/                # Language detection engine (Rust)

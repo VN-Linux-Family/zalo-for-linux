@@ -9,7 +9,7 @@ const { getOnnxRuntimeUrl, ONNXRUNTIME_VERSION } = require('../scripts/download'
 const { ROOT } = require('../scripts/utils/paths');
 
 describe('Native Build Orchestrator & Downloads', () => {
-  it('discovers all 11 native addons and 2 native engines', () => {
+  it('discovers all 10 native addons and 2 native engines (pure Rust)', () => {
     const targets = getAvailableTargets();
     const names = targets.map(t => t.name);
 
@@ -19,7 +19,6 @@ describe('Native Build Orchestrator & Downloads', () => {
       'file-utils',
       'mp4thumb',
       'os-sys-info',
-      'v8-profiles',
       'zfile',
       'zimage',
       'zjxl',
@@ -31,9 +30,7 @@ describe('Native Build Orchestrator & Downloads', () => {
       assert.ok(names.includes(addon), `Expected addon ${addon} to be discovered in native targets`);
       const t = targets.find(item => item.name === addon);
       assert.strictEqual(t.category, 'addon');
-      assert.ok(fs.existsSync(t.dir), `Addon dir ${t.dir} must exist`);
-      const hasConfig = fs.existsSync(path.join(t.dir, 'Cargo.toml')) || fs.existsSync(path.join(t.dir, 'binding.gyp'));
-      assert.ok(hasConfig, `Addon ${addon} must have Cargo.toml or binding.gyp`);
+      assert.ok(fs.existsSync(path.join(t.dir, 'Cargo.toml')), `Addon ${addon} must have Cargo.toml (pure Rust)`);
     }
 
     assert.ok(names.includes('zocr'), 'Expected engine zocr to be discovered');

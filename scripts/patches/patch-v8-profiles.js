@@ -1,78 +1,120 @@
-// Original copyright
-// This file is derived from: https://github.com/thotam/zalo-linux
-// Copyright (c) 2026 thotam <thanhtamtqno1@gmail.com>
-// Licensed under the MIT License.
-// ---------------------------------------------------------------------------
-// Intergation copyright
-// Copyright (c) 2026 doandat943 and Việt Nam Linux Family
-// Licensed under the BSD 3-Clause License.
+'use strict';
 
-// The v8-profiles addon is raw-V8 (NODE_MODULE, NOT N-API), so it loads only under
-// the exact Electron ABI it was built against. We splice a linux branch into the
-// binding require chain BEFORE the mac fallback; the linux-guards try/catch that
-// wraps this expression stays as a defensive stub if the .node ever fails to load.
-
-const { execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { APP_NATIVE_LIBS } = require('../utils/paths');
 
-const { APP_NATIVE_LIBS, NATIVELIBS_DIR, resolvePrebuiltBinary } = require('../utils/paths');
-const V8_PROFILES_DIR = path.join(NATIVELIBS_DIR, 'v8-profiles');
-const DEST_NODE = path.join(APP_NATIVE_LIBS, 'v8-profiles', 'profiler_electron_linux_x64.node');
-const INDEX_JS = path.join(APP_NATIVE_LIBS, 'v8-profiles', 'index.js');
+const V8_PROFILES_DIR = path.join(APP_NATIVE_LIBS, 'v8-profiles');
+const INDEX_JS = path.join(V8_PROFILES_DIR, 'index.js');
 
-const MAC_REQUIRE = "require('./profiler_electron1.8_mac.node')";
-const LINUX_REQUIRE =
-  "process.platform === 'linux' ? require('./profiler_electron_linux_x64.node') : require('./profiler_electron1.8_mac.node')";
+const MOCK_INDEX_CONTENT = `/**
+ * Mock v8-profiles implementation for Zalo on Linux.
+ *
+ * In official macOS/Windows releases, Zalo ships a legacy v8-profiler C++ addon
+ * ('profiler_electron1.8_mac.node') used only for internal telemetry / debugging.
+ * On Linux, this C++ addon is not used by Zalo business logic and is replaced
+ * by this zero-overhead, memory-safe JavaScript mock with full API contract parity.
+ */
+'use strict';
+
+function CpuProfile(title) {
+  this.typeId = 'CPU';
+  this.uid = 1;
+  this.title = title || '';
+  this.startTime = Date.now();
+  this.endTime = Date.now();
+  this.samples = [];
+  this.timestamps = [];
+  this.head = {
+    functionName: '(root)',
+    url: '',
+    scriptId: 0,
+    lineNumber: 0,
+    callUID: 1,
+    bailoutReason: 'no reason',
+    hitCount: 0,
+    children: []
+  };
+}
+
+CpuProfile.prototype.getHeader = function() {
+  return {
+    typeId: this.typeId,
+    uid: this.uid,
+    title: this.title
+  };
+};
+
+CpuProfile.prototype.delete = function() {};
+
+const profiles = {};
+const activeProfiles = [];
+
+const profiler = {
+  get profiles() {
+    return profiles;
+  },
+  startProfiling: function(name, recsamples) {
+    name = '' + (name || '');
+    if (activeProfiles.indexOf(name) < 0) {
+      activeProfiles.push(name);
+    }
+  },
+  stopProfiling: function(name) {
+    name = '' + (name || '');
+    const idx = activeProfiles.indexOf(name);
+    if (idx >= 0) {
+      activeProfiles.splice(idx, 1);
+    }
+    const profile = new CpuProfile(name);
+    profiles[name] = profile;
+    return profile;
+  },
+  setSamplingInterval: function(num) {},
+  deleteAllProfiles: function() {
+    for (const key of Object.keys(profiles)) {
+      delete profiles[key];
+    }
+  }
+};
+
+module.exports = profiler;
+process.profiler = profiler;
+`;
 
 async function main() {
-  logger.info('Installing v8-profiles native addon...');
+ logger.info('Installing v8-profiles JS mock stub...');
 
-  const releaseDir = path.join(V8_PROFILES_DIR, 'build', 'Release');
-  const fallbackNode = fs.existsSync(releaseDir) && fs.readdirSync(releaseDir).some(f => f.endsWith('.node'))
-    ? path.join(releaseDir, fs.readdirSync(releaseDir).find(f => f.endsWith('.node')))
-    : path.join(releaseDir, 'profiler_electron_linux_x64.node');
-  const builtNode = resolvePrebuiltBinary('profiler_electron_linux_x64.node', fallbackNode);
+ fs.ensureDirSync(V8_PROFILES_DIR);
 
-  if (!fs.existsSync(builtNode)) {
-    throw new Error(`Missing pre-built binary for v8-profiles at: ${builtNode}. Please run "npm run build:native" first.`);
+ // Clean any legacy .node binaries that might be left in v8-profiles directory
+ if (fs.existsSync(V8_PROFILES_DIR)) {
+  const files = fs.readdirSync(V8_PROFILES_DIR);
+  for (const f of files) {
+   if (f.endsWith('.node')) {
+    fs.removeSync(path.join(V8_PROFILES_DIR, f));
+   }
   }
-  fs.ensureDirSync(path.dirname(DEST_NODE));
-  fs.copyFileSync(builtNode, DEST_NODE);
-  logger.dim('Installed Linux profiler_electron_linux_x64.node');
+ }
 
-  if (!fs.existsSync(INDEX_JS)) {
-    throw new Error('v8-profiles/index.js not found — did extraction overlay app.asar.unpacked?');
-  }
-  let c = fs.readFileSync(INDEX_JS, 'utf8');
-  if (c.includes("require('./profiler_electron_linux_x64.node')")) {
-    logger.dim('v8-profiles/index.js already has linux branch');
-  } else {
-    if (!c.includes(MAC_REQUIRE)) {
-      throw new Error('patch-v8-profiles: anchor ' + MAC_REQUIRE + ' not found in index.js — bundle format changed, update the patch');
-    }
-    c = c.replace(MAC_REQUIRE, LINUX_REQUIRE);
-    fs.writeFileSync(INDEX_JS, c, 'utf8');
-    logger.dim('Patched v8-profiles/index.js with linux branch');
-  }
+ fs.writeFileSync(INDEX_JS, MOCK_INDEX_CONTENT, 'utf8');
 
-  // Post-conditions (fail loud). The .node is Electron-ABI (raw V8), so we do NOT
-  // require() it here under plain Node — that would be a false ABI-mismatch failure;
-  // the real load test runs under Electron (smoke boot).
-  if (!fs.existsSync(DEST_NODE) || fs.statSync(DEST_NODE).size === 0) {
-    throw new Error(`patch-v8-profiles: post-condition failed — ${DEST_NODE} missing/empty`);
-  }
-  const after = fs.readFileSync(INDEX_JS, 'utf8');
-  if (!after.includes("require('./profiler_electron_linux_x64.node')")) {
-    throw new Error('patch-v8-profiles: post-condition failed — linux require not present in index.js');
-  }
+ // Verify stub loads under standard Node.js runtime without errors
+ delete require.cache[require.resolve(INDEX_JS)];
+ const stub = require(INDEX_JS);
+ if (typeof stub.startProfiling !== 'function' || typeof stub.stopProfiling !== 'function') {
+  throw new Error('v8-profiles stub failed to export expected profiling interface');
+ }
 
-  logger.success('v8-profiles built and installed');
+ logger.success('v8-profiles JS mock stub installed');
 }
 
 if (require.main === module) {
-  main().catch(e => { logger.error(e.message); process.exit(1); });
+ main().catch(e => {
+  logger.error(e.message);
+  process.exit(1);
+ });
 }
 
 module.exports = { main };

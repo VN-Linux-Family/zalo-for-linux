@@ -41,7 +41,6 @@ native/addons/
 | [file-utils](./file-utils)            | ✅ Đã hoàn thành | Các tiện ích truy cập hệ thống file và quản lý file                         |
 | [mp4thumb](./mp4thumb)                | ✅ Đã hoàn thành | Trích xuất ảnh thumbnail từ file video MP4                                  |
 | [os-sys-info](./os-sys-info)          | ✅ Đã hoàn thành | Bộ đọc thông tin hệ điều hành và ID tiến trình                              |
-| [v8-profiles](./v8-profiles)          | ✅ Đã hoàn thành | Công cụ phân tích hiệu năng CPU native cho Zalo                             |
 | [zfile](./zfile)                      | ✅ Đã hoàn thành | Cung cấp thông tin ổ đĩa (dung lượng trống, điểm gắn)                       |
 | [zimage](./zimage)                    | ✅ Đã hoàn thành | Xử lý ảnh, thay đổi kích thước và chuyển đổi định dạng                      |
 | [zjxl](./zjxl)                        | ✅ Đã hoàn thành | Hỗ trợ giải mã và mã hóa ảnh JPEG XL (JXL)                                  |
