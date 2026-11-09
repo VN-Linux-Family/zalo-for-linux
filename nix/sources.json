@@ -3,22 +3,22 @@
   "assets": {
     "zadark": {
       "aarch64-linux": {
-        "name": "Zalo-26.11.10+ZaDark-26.3-3680a0e-aarch64.AppImage",
-        "hash": "sha256-Tj+5XNdptjbUtMpV6+P4Plidg3RJKSJXdtbz0BqIv5I="
+        "name": "Zalo-26.11.10+ZaDark-26.3-2155926-aarch64.AppImage",
+        "hash": "sha256-EbhsXdu29gDu/wYdhiA7DIbFOvCimcSDctDOKFxD638="
       },
       "x86_64-linux": {
-        "name": "Zalo-26.11.10+ZaDark-26.3-3680a0e-x86_64.AppImage",
-        "hash": "sha256-HF0CwiyD6m2WhIV9qGg7xBVN6RHxM35awNBsh0pPI7k="
+        "name": "Zalo-26.11.10+ZaDark-26.3-2155926-x86_64.AppImage",
+        "hash": "sha256-o77gZ82B129WqNhv2ZgVvkWE++au2rTwLRk2g8HSVhg="
       }
     },
     "original": {
       "aarch64-linux": {
-        "name": "Zalo-26.11.10-Original-3680a0e-aarch64.AppImage",
-        "hash": "sha256-nrpxqvnoSfoOCeuN8MaxeTOwu58xRpe0bvZOjjs/ntU="
+        "name": "Zalo-26.11.10-Original-2155926-aarch64.AppImage",
+        "hash": "sha256-REWVxcZcVhBMPHdSYnNRq+J+6gf/ovAvMzpbDOkh+Ws="
       },
       "x86_64-linux": {
-        "name": "Zalo-26.11.10-Original-3680a0e-x86_64.AppImage",
-        "hash": "sha256-7xfB9t+p5+pZRK19MavyfimJD45tuQWRn/y+pEL4mHA="
+        "name": "Zalo-26.11.10-Original-2155926-x86_64.AppImage",
+        "hash": "sha256-9/VDM9kj+dADf4kvM8S+5s9um996Kf1bzynvT3HWhRI="
       }
     }
   }
