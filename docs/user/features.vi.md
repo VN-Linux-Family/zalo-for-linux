@@ -40,6 +40,7 @@ Tùy chỉnh nhạc chuông cuộc gọi đến và âm chờ cuộc gọi đi t
   - **Nhạc chuông (Ringtone)**: File âm thanh khi có cuộc gọi đến.
   - **Âm chờ (Ringback)**: File âm thanh phát trong lúc chờ người nhận bắt máy.
 - **Lưu ý**: Hỗ trợ duyệt file từ ổ cứng, nghe thử trước khi lưu và có nút khôi phục về mặc định. Cài đặt được lưu lại qua các phiên làm việc.
+- **Chế độ nhà phát triển**: Bật trong **Cài đặt → Nâng cao...** để cho phép DevTools từ `Ctrl+Shift+I` và menu khay hệ thống. Mặc định tắt. Biến môi trường `ZALO_DEV_MODE=1` bật cưỡng bức mà không thay đổi cấu hình đã lưu.
 
 ---
 

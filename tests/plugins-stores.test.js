@@ -65,7 +65,25 @@ describe('Plugin Stores & Persistence', () => {
   });
 
   describe('Advanced Settings Store', () => {
-    it('reads and initializes settings with empty values and default screenshot delays', () => {
+    it('preserves settings owned by other plugins when writing advanced settings', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zalo-settings-shared-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'zalo-linux-settings.json'), JSON.stringify({
+        devMode: 1,
+        externalPluginSetting: 'keep-me'
+      }));
+      const store = advancedStore.createStore(dir);
+      store.saveScreenshotDelay('withZalo', 250);
+      const saved = JSON.parse(fs.readFileSync(path.join(dir, 'zalo-linux-settings.json'), 'utf8'));
+      assert.equal(saved.devMode, 1);
+      assert.equal(saved.externalPluginSetting, 'keep-me');
+      assert.equal(saved.screenshotDelayWithZalo, 250);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads and initializes settings with empty values and default screenshot delays', () => {
       const store = advancedStore.createStore(path.join(tmpDir, 'adv'));
       const settings = store.read();
       assert.ok(settings !== undefined);
@@ -74,7 +92,6 @@ describe('Plugin Stores & Persistence', () => {
       assert.strictEqual(settings.screenshotDelayWithZalo, 100);
       assert.strictEqual(settings.screenshotDelayWithoutZalo, 500);
     });
-
     it('validates sound kinds properly', () => {
       const store = advancedStore.createStore(path.join(tmpDir, 'adv'));
       assert.throws(() => store.save('invalid_kind', '/dummy/path.mp3'));
