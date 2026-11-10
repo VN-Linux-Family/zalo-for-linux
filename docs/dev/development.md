@@ -83,6 +83,22 @@ npm run main:build
 | `ZALO_VERSION` | Specify exact Zalo version to download/extract | `ZALO_VERSION="25.11.20"` |
 | `ZADARK_VERSION` | Specify exact ZaDark version to download/integrate | `ZADARK_VERSION="v8.3.4"` |
 | `FORCE_DOWNLOAD` | Force re-download even if file exists | `FORCE_DOWNLOAD=true` |
+| `ZALO_KEEP_LOCALES` | Keep every Electron locale pack in the AppImage (default: keep `vi`, `en-US`, `en-GB`) | `ZALO_KEEP_LOCALES=1` |
+| `ZALO_TRIM_SWIFTSHADER` | Drop the software Vulkan fallback. Only useful when no GPU/VM fallback is needed | `ZALO_TRIM_SWIFTSHADER=1` |
+| `ZALO_TRIM_VULKAN` | Drop the Vulkan loader. Breaks hardware/software Vulkan acceleration | `ZALO_TRIM_VULKAN=1` |
+
+### Payload trimming
+
+`scripts/clean-unused.js` strips non-Linux binaries, native build sources
+(`.rs`, `Cargo.*`, `.cargo`) and addon build-only files (`zlang/index.ts`,
+`zlang/scripts`, ...) before packaging, then warns if any non-Linux `.node`
+survives the sweep.
+
+`scripts/trim-appdir.js` runs from `scripts/build-stage2.sh` right before the
+AppDir is repacked, so it applies to both the Original and the reused ZaDark
+AppDir. By default it keeps only the `vi`, `en-US` and `en-GB` locale packs;
+missing locales fall back to `en-US` at runtime. The GPU fallbacks are opt-in
+because VMs and remote desktops may depend on them.
 
 ## Versioned Mode Example
 
