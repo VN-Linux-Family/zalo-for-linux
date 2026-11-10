@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('./utils/logger');
 
-const { APP_DIR, APP_NATIVE_LIBS, ZCALL_DIR } = require('./utils/paths');
+const { APP_DIR, APP_NATIVE_LIBS } = require('./utils/paths');
 
 const CLEAN_NATIVELiBS = [
   "db-cross-v4/prebuilt/darwin",
@@ -67,21 +67,6 @@ async function sweep(dir, { platformBinaries }) {
   return removed;
 }
 
-async function cleanZcallCrate() {
-  const binary = path.join(ZCALL_DIR, 'native-engine', 'zcall-audio');
-  const crate = path.join(ZCALL_DIR, 'audio');
-
-  if (!(await fs.pathExists(crate))) return 0;
-  // Keep the crate when the binary is missing so a rebuild can still produce it.
-  if (!(await fs.pathExists(binary))) {
-    logger.warn('zcall-audio binary missing; keeping native/engines/zcall/audio');
-    return 0;
-  }
-
-  await fs.remove(crate);
-  return 1;
-}
-
 async function main() {
   logger.info('Cleaning unused nativelibs...');
 
@@ -96,13 +81,9 @@ async function main() {
     }
   }
 
-  const cleanedCrate = await cleanZcallCrate();
   const cleanedBinaries = await sweep(APP_NATIVE_LIBS, { platformBinaries: true });
-  const cleanedSources = await sweep(APP_DIR, { platformBinaries: false })
-    + await sweep(path.join(ZCALL_DIR, 'native-engine'), { platformBinaries: false })
-    + await sweep(path.join(ZCALL_DIR, 'tools'), { platformBinaries: false });
+  const cleanedSources = await sweep(APP_DIR, { platformBinaries: false });
 
-  if (cleanedCrate) logger.dim('Cleaned the zcall Rust crate source (native/engines/zcall/audio)');
   if (cleanedBinaries) logger.dim(`Cleaned ${cleanedBinaries} non-Linux binar(ies)`);
   if (cleanedSources) logger.dim(`Cleaned ${cleanedSources} build-only file(s)/dir(s)`);
 }
