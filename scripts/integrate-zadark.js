@@ -9,6 +9,18 @@ const { ZADARK_VENDOR_DIR } = require('./utils/paths');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
+function zaloVersion(zaloRoot) {
+  if (process.env.ZALO_VERSION) return process.env.ZALO_VERSION;
+  // extract.js keeps the extracted app's manifest as app/package.json.bak.
+  for (const file of ['package.json.bak', 'package.json']) {
+    const full = path.join(zaloRoot, 'app', file);
+    if (fs.existsSync(full)) {
+      return JSON.parse(fs.readFileSync(full, 'utf8')).version;
+    }
+  }
+  return null;
+}
+
 async function integrate(zaloRoot) {
   const appDir = path.join(zaloRoot, 'app');
   const modulePath = path.join(ZADARK_VENDOR_DIR, 'build', 'pc', 'zadark-pc.js');
@@ -41,7 +53,7 @@ function writeBuildInfo(zaloRoot) {
   fs.writeFileSync(
     path.join(pcDist, 'build-info.json'),
     JSON.stringify({
-      version: process.env.ZALO_VERSION,
+      version: zaloVersion(zaloRoot),
       zadarkVersion: version,
       commit: buildCommit(),
       buildDate: new Date().toISOString(),
@@ -52,16 +64,22 @@ function writeBuildInfo(zaloRoot) {
 }
 
 function writePackageVersion(zaloRoot) {
+  const version = zaloVersion(zaloRoot);
   const file = path.join(zaloRoot, 'package.json');
+  if (!version || !fs.existsSync(file)) return false;
+
   const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
-  pkg.version = process.env.ZALO_VERSION;
-  fs.writeFileSync(file, JSON.stringify(pkg, null, 2), 'utf8');
+  pkg.version = version;
+  fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+  return true;
 }
 
 async function main(zaloRoot = REPO_ROOT) {
   await integrate(zaloRoot);
   writeBuildInfo(zaloRoot);
-  writePackageVersion(zaloRoot);
+  if (!writePackageVersion(zaloRoot)) {
+    logger.dim('package.json version left unchanged (no version resolved)');
+  }
   logger.success(`ZaDark applied to ${path.relative(process.cwd(), zaloRoot) || '.'}`);
 }
 
