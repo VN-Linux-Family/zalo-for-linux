@@ -43,7 +43,7 @@ addons.
 | [zimage](./zimage) | ✅ Implemented | Image processing, resizing, and format conversions |
 | [zjxl](./zjxl) | ✅ Implemented | JPEG XL (JXL) image decoding and encoding support |
 | [zwalker](./zwalker) | ✅ Implemented | Media-cache garbage collecting support |
-| [zcall-audio](../engines/zcall/audio) | ✅ Implemented | Native PulseAudio/PipeWire low-latency audio engine for calls |
+| [zcall-audio](../engines/zcall-audio) | ✅ Implemented | Native PulseAudio/PipeWire low-latency audio engine for calls |
 | [zlang](./zlang) | ✅ Implemented | Natural language identification for Linux (whatlang) |
 
 ## Building an Addon

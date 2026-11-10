@@ -136,7 +136,8 @@ async function buildZaDarkAssets() {
     logger.dim('Installing dependencies...');
     execSync('npm install --silent', {
       cwd: ZADARK_DIR,
-      stdio: 'pipe'
+      stdio: 'pipe',
+      env: { ...process.env, npm_config_allow_git: 'all' }
     });
 
     // Build PC version

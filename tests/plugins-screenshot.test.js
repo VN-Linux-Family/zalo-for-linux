@@ -49,8 +49,8 @@ test('Screenshot Plugin - Built-in Linux Screen Capture', async (t) => {
       const realFontFile = findFont(realPcFonts) || findFont(path.join(__dirname, '..', 'app'));
       if (realFontFile) {
         await main();
-        const extractedFont = path.join(pluginDir, 'ui', 'fonts', 'zalo-pc-screencap.ttf');
-        assert.ok(fs.existsSync(extractedFont), 'font extracted to plugins/screenshot/ui/fonts/zalo-pc-screencap.ttf');
+        const extractedFont = path.join(__dirname, '..', 'app', 'screenshot-assets', 'ui', 'fonts', 'zalo-pc-screencap.ttf');
+        assert.ok(fs.existsSync(extractedFont), 'font extracted to app/screenshot-assets/ui/fonts/zalo-pc-screencap.ttf');
         assert.ok(fs.statSync(extractedFont).size > 1000, 'extracted font size > 1000 bytes');
       }
     }

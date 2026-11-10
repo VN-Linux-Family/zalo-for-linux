@@ -2,7 +2,7 @@
  * extract-screenshot-assets.js
  *
  * Extracts Zalo's screen capture icon font from app/pc-dist/fonts/
- * into plugins/screenshot/ui/fonts/zalo-pc-screencap.ttf at build/prepare time.
+ * into app/screenshot-assets/ui/fonts/zalo-pc-screencap.ttf at build/prepare time.
  * Nothing is committed to source control: the proprietary font is extracted
  * from the app bundle.
  */

@@ -133,34 +133,9 @@ function checkEnginePackaged(dir) {
 // `<root>/app`, so no submodule change is needed.
 async function integrateZaDark(zaloRoot = BASE_DIR) {
   logger.info("Applying ZaDark patches...");
-  const targetAppDir = path.join(zaloRoot, "app");
 
   try {
-    // Verify ZaDark module is available
-    const zadarkModulePath = path.join(
-      ZADARK_VENDOR_DIR,
-      "build",
-      "pc",
-      "zadark-pc.js",
-    );
-    if (!fs.existsSync(zadarkModulePath)) {
-      throw new Error(
-        'ZaDark PC module not found - run "npm run prepare-zadark" first',
-      );
-    }
-
-    const zadarkPC = require(zadarkModulePath);
-    zadarkPC.copyZaDarkAssets(zaloRoot);
-    zadarkPC.writeIndexFile(zaloRoot);
-    zadarkPC.writeBootstrapFile(zaloRoot);
-    zadarkPC.writePopupViewerFile(zaloRoot);
-
-    // Route ZaDark translate requests to Google Translate (api.zadark.com is dead).
-    await require("./patches/patch-zadark-translate").main(targetAppDir);
-
-
-    // Zalo's dark theme strips ZaDark's CSS/scripts from the page (#66).
-    await require("./patches/patch-zadark-keep").main(targetAppDir);
+    await require("./integrate-zadark").integrate(zaloRoot);
     logger.success("ZaDark patches applied successfully");
     return true;
   } catch (error) {
