@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+# Directory of this adapter, so helper scripts resolve no matter which cwd the
+# caller used before the packs below change directory.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
 # Adapter between scripts/build.js and the AppImage toolchain (quick-sharun +
 # appimagetool). All naming decisions live in build.js so there is only one
 # source of truth; this script refuses to guess them.
@@ -112,6 +116,10 @@ fi
 # Remove any previous output before repacking
 cd "$DIST_DIR"
 rm -f "$OUTNAME"
+
+# Trim the Electron runtime payload before repacking. Runs for both the fresh
+# build and the reused ZaDark AppDir, and is idempotent.
+node "${SCRIPT_DIR}/trim-appdir.js" "$APPDIR"
 
 if [[ -z "${DWARFS_COMP:-}" ]]; then
   # Run on GitHub Actions AND (main branch OR tag) AND not a PR
