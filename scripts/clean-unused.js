@@ -18,7 +18,6 @@ const CLEAN_NATIVELiBS = [
   "os-sys-info/darwin_x64",
   "sqlite3/binding/napi-v6-darwin-arm64",
   "sqlite3/binding/napi-v6-darwin-x64",
-  "v8-profiles/profiler_electron1.8_mac.node",
   "zcall/zcall_mac.node",
   "zfile/win32",
   "zfile/win64",
@@ -30,6 +29,10 @@ const CLEAN_NATIVELiBS = [
   "zocr/darwin-x64",
   "zwalker/darwin-arm64",
   "zwalker/darwin-x64",
+  "zlang/darwin-x64",
+  "zlang/darwin-arm64",
+  "zlang/win32-ia32",
+  "zlang/win32-x64",
 ]
 
 // Linux-native addons always sit under a path containing "linux".
