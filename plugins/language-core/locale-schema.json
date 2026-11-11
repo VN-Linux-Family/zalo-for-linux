@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Zalo plugin locale dictionary",
+  "type": "object",
+  "required": ["schemaVersion", "plugin", "messages"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "plugin": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "messages": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9-]*\\.[a-z0-9]+(?:[.-][a-z0-9]+)*$": {
+          "type": "object",
+          "required": ["vi", "en"],
+          "additionalProperties": false,
+          "properties": {
+            "vi": { "type": "string" },
+            "en": { "type": "string" }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

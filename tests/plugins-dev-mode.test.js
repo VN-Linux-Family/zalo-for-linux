@@ -102,6 +102,35 @@ describe('Dev Mode plugin', () => {
     }
   });
 
+  it('localizes its tray item through Language Core requests', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zalo-dev-mode-locale-'));
+    try {
+      const app = new EventEmitter();
+      app.getPath = () => dir;
+      const BrowserWindow = { getAllWindows: () => [], getFocusedWindow: () => null };
+      const devMode = devModePlugin.register({ app, BrowserWindow });
+      devMode.setEnabled(true);
+
+      assert.equal(devMode.getLocale(), 'vi');
+      assert.equal(devMode.getTrayMenuItems()[0].label, 'Bật/tắt DevTools');
+      assert.equal(devMode.onLanguageUpdateRequest({
+        type: 'LANGUAGE_UPDATE_REQUEST',
+        locale: 'en'
+      }), true);
+      assert.equal(devMode.getLocale(), 'en');
+      assert.equal(devMode.getTrayMenuItems()[0].label, 'Toggle DevTools');
+
+      assert.equal(devMode.onLanguageUpdateRequest({
+        type: 'LANGUAGE_UPDATE_REQUEST',
+        locale: 'fr'
+      }), false);
+      assert.equal(devMode.getTrayMenuItems()[0].label, 'Toggle DevTools');
+      devMode.dispose();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('rejects non-boolean updates', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zalo-dev-mode-invalid-'));
     try {

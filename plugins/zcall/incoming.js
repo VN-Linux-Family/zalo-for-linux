@@ -10,6 +10,9 @@
 'use strict';
 
 const path = require('path');
+const localeMessages = require('./ui/locale.json').messages;
+let locale = 'vi';
+const translate = (key) => { const entry = localeMessages['zcall.' + key]; return entry ? entry[locale] : key; };
 
 // Measured on Zalo for macOS (CSS px = pt): 344 wide, 232 for a voice call,
 // 290 with "Trả lời không mở camera"; flush with the top of the work area,
@@ -55,7 +58,7 @@ function show(state, assetsDir) {
     alwaysOnTop: false, // set once shown, see below
     skipTaskbar: false,
     show: false,
-    title: 'Zalo: cuộc gọi đến',
+    title: 'Zalo: ' + translate('incoming'),
     backgroundColor: '#3989ff',
     // Local static page; the only remote content is the avatar image.
     webPreferences: { contextIsolation: false, nodeIntegration: true },
@@ -67,6 +70,7 @@ function show(state, assetsDir) {
     if (win !== notice || notice.isDestroyed()) return;
     ready = true;
     if (pending) notice.webContents.send('zcall-incoming-state', pending);
+    notice.webContents.send('zcall-ui-language', locale);
     notice.showInactive();
     // alwaysOnTop of the constructor does not reach a window shown later (X11:
     // no _NET_WM_STATE_ABOVE, the notice stayed under Zalo's main window).
@@ -91,8 +95,18 @@ function close() {
   notice.destroy();
 }
 
+function setLocale(nextLocale) {
+  if (nextLocale !== 'vi' && nextLocale !== 'en') return false;
+  locale = nextLocale;
+  if (win && !win.isDestroyed()) {
+    win.setTitle('Zalo: ' + translate('incoming'));
+    if (ready) win.webContents.send('zcall-ui-language', locale);
+  }
+  return true;
+}
+
 function isOpen() {
   return !!(win && !win.isDestroyed());
 }
 
-module.exports = { show, close, isOpen };
+module.exports = { show, close, isOpen, setLocale };

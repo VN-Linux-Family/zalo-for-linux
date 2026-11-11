@@ -79,6 +79,7 @@ describe('Plugins Orchestrator', () => {
     assert.strictEqual(typeof plugins.initEarly, 'function');
     assert.strictEqual(typeof plugins.register, 'function');
     assert.strictEqual(typeof plugins.onMainWindowCreated, 'function');
+    assert.strictEqual(typeof plugins._plugins.languageCorePlugin.register, 'function');
   });
 
   it('runs initEarly without throwing on mock context', () => {
@@ -93,6 +94,26 @@ describe('Plugins Orchestrator', () => {
     assert.doesNotThrow(() => {
       plugins.register(ctx);
     });
+  });
+
+  it('routes Language Core locale updates to the Dev Mode tray label', () => {
+    const ctx = createMockContext();
+    const previousOverride = process.env.ZALO_DEV_MODE;
+    process.env.ZALO_DEV_MODE = '1';
+    ctx.app.removeListener = () => {};
+    let devMode;
+    try {
+      devMode = plugins.register(ctx);
+      assert.equal(devMode.getTrayMenuItems()[0].label, 'Bật/tắt DevTools');
+      assert.equal(plugins.updateLanguage('en'), true);
+      assert.equal(devMode.getTrayMenuItems()[0].label, 'Toggle DevTools');
+      assert.equal(plugins.updateLanguage('fr'), false);
+      assert.equal(devMode.getTrayMenuItems()[0].label, 'Toggle DevTools');
+    } finally {
+      if (devMode) devMode.dispose();
+      if (previousOverride === undefined) delete process.env.ZALO_DEV_MODE;
+      else process.env.ZALO_DEV_MODE = previousOverride;
+    }
   });
 
   it('forwards main window to plugins via onMainWindowCreated', () => {

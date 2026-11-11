@@ -7,6 +7,26 @@ const { pathToFileURL } = require('url');
 const SOUND_KINDS = ['ringtone', 'ringback'];
 const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus', 'webm'];
 
+const ERROR_CODES = Object.freeze({
+  INVALID_SOUND_KIND: 'ADVANCED_SETTINGS_INVALID_SOUND_KIND',
+  INVALID_DELAY: 'ADVANCED_SETTINGS_INVALID_DELAY',
+  NEGATIVE_DELAY: 'ADVANCED_SETTINGS_NEGATIVE_DELAY',
+  MAX_DELAY_EXCEEDED: 'ADVANCED_SETTINGS_MAX_DELAY_EXCEEDED',
+  INVALID_PATH: 'ADVANCED_SETTINGS_INVALID_PATH',
+  ABSOLUTE_PATH_REQUIRED: 'ADVANCED_SETTINGS_ABSOLUTE_PATH_REQUIRED',
+  UNSUPPORTED_AUDIO_FORMAT: 'ADVANCED_SETTINGS_UNSUPPORTED_AUDIO_FORMAT',
+  AUDIO_FILE_UNREADABLE: 'ADVANCED_SETTINGS_AUDIO_FILE_UNREADABLE',
+  INVALID_VALUE: 'ADVANCED_SETTINGS_INVALID_VALUE',
+  INVALID_SCREENSHOT_KIND: 'ADVANCED_SETTINGS_INVALID_SCREENSHOT_KIND',
+  INVALID_DEV_MODE_VALUE: 'ADVANCED_SETTINGS_INVALID_DEV_MODE_VALUE'
+});
+
+function createError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
+}
+
 const DEFAULT_SETTINGS = Object.freeze({
   ringtone: '',
   ringback: '',
@@ -16,7 +36,7 @@ const DEFAULT_SETTINGS = Object.freeze({
 });
 
 function defaultSoundUrl(kind) {
-  if (!SOUND_KINDS.includes(kind)) throw new Error('Loại âm thanh không hợp lệ.');
+  if (!SOUND_KINDS.includes(kind)) throw createError(ERROR_CODES.INVALID_SOUND_KIND);
   const devAssets = path.join(__dirname, '..', '..', 'app', 'zcall-assets');
   const assets = fs.existsSync(devAssets) ? devAssets :
     path.join(path.dirname(process.execPath), 'app', 'zcall-assets');
@@ -29,13 +49,13 @@ function validateScreenshotDelay(value, fallbackDefault = 0) {
   }
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || isNaN(parsed)) {
-    throw new Error('Thời gian chờ phải là một số hợp lệ.');
+    throw createError(ERROR_CODES.INVALID_DELAY);
   }
   if (parsed < 0) {
-    throw new Error('Thời gian chờ không được nhỏ hơn 0 mili-giây.');
+    throw createError(ERROR_CODES.NEGATIVE_DELAY);
   }
   if (parsed > 10000) {
-    throw new Error('Thời gian chờ tối đa là 10000 mili-giây (10 giây).');
+    throw createError(ERROR_CODES.MAX_DELAY_EXCEEDED);
   }
   return Math.round(parsed);
 }
@@ -74,21 +94,21 @@ function createStore(userDataDir) {
   }
 
   function validateKind(kind) {
-    if (!SOUND_KINDS.includes(kind)) throw new Error('Loại âm thanh không hợp lệ.');
+    if (!SOUND_KINDS.includes(kind)) throw createError(ERROR_CODES.INVALID_SOUND_KIND);
   }
 
   function validatePath(value) {
-    if (typeof value !== 'string') throw new Error('Đường dẫn không hợp lệ.');
+    if (typeof value !== 'string') throw createError(ERROR_CODES.INVALID_PATH);
     if (!value) return '';
-    if (!path.isAbsolute(value)) throw new Error('Hãy nhập đường dẫn tuyệt đối đến tệp âm thanh.');
+    if (!path.isAbsolute(value)) throw createError(ERROR_CODES.ABSOLUTE_PATH_REQUIRED);
     if (!AUDIO_EXTENSIONS.includes(path.extname(value).slice(1).toLowerCase())) {
-      throw new Error('Định dạng âm thanh không được hỗ trợ.');
+      throw createError(ERROR_CODES.UNSUPPORTED_AUDIO_FORMAT);
     }
     try {
       if (!fs.statSync(value).isFile()) throw new Error('not a file');
       fs.accessSync(value, fs.constants.R_OK);
     } catch (_) {
-      throw new Error('Không thể đọc tệp âm thanh. Hãy kiểm tra lại đường dẫn và quyền truy cập.');
+      throw createError(ERROR_CODES.AUDIO_FILE_UNREADABLE);
     }
     return path.normalize(value);
   }
@@ -109,7 +129,7 @@ function createStore(userDataDir) {
   }
 
   function setKeepRecalled(value) {
-    if (typeof value !== 'boolean') throw new Error('Giá trị không hợp lệ.');
+    if (typeof value !== 'boolean') throw createError(ERROR_CODES.INVALID_VALUE);
     return write({ ...read(), keepRecalled: value });
   }
   function saveScreenshotDelay(kind, value) {
@@ -122,7 +142,7 @@ function createStore(userDataDir) {
       key = 'screenshotDelayWithoutZalo';
       fallback = DEFAULT_SETTINGS.screenshotDelayWithoutZalo;
     } else {
-      throw new Error('Loại chụp màn hình không hợp lệ.');
+      throw createError(ERROR_CODES.INVALID_SCREENSHOT_KIND);
     }
 
     const validated = validateScreenshotDelay(value, fallback);
@@ -144,4 +164,4 @@ function createStore(userDataDir) {
   return { read, save, saveScreenshotDelay, setKeepRecalled, soundUrls, validateKind, validatePath };
 }
 
-module.exports = { createStore, AUDIO_EXTENSIONS, defaultSoundUrl, DEFAULT_SETTINGS, validateScreenshotDelay };
+module.exports = { createStore, AUDIO_EXTENSIONS, defaultSoundUrl, DEFAULT_SETTINGS, validateScreenshotDelay, ERROR_CODES, createError };

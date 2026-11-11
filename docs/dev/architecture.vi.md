@@ -52,6 +52,11 @@ zalo-for-linux/
 │   ├── start-hidden  # Khởi động ẩn trong khay hệ thống
 │   ├── tray-badge    # Vẽ số tin nhắn chưa đọc lên icon khay hệ thống
 │   ├── userscripts   # Trình quản lý userscript Tampermonkey
+│   ├── advanced-settings # Cửa sổ cài đặt Linux, âm thanh cuộc gọi và điều hướng
+│   ├── dev-mode          # Chế độ nhà phát triển và điều khiển DevTools
+│   ├── language-core     # Locale bridge dùng chung và API plugin renderer
+│   ├── recalled-messages # Giao diện và lưu trữ tin nhắn đã thu hồi
+│   ├── tray-menu         # Menu khay hệ thống có bản địa hóa
 │   ├── zadark        # Tiện ích giao diện tối và quyền riêng tư
 │   └── zcall         # Cửa sổ gọi điện và thông báo cuộc gọi đến
 ├── scripts

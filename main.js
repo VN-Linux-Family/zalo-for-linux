@@ -1,4 +1,6 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, dialog } = require('electron');
+const { registerMainTransport } = require('./plugins/language-core/main-transport');
+const { buildTrayMenuTemplate } = require('./plugins/tray-menu');
 const path = require('path');
 const fs = require('fs');
 
@@ -20,6 +22,63 @@ let tray = null;
 let mainWindow = null;
 let isAppQuitting = false;
 let devMode = null;
+let trayLocale = null;
+const ZALO_LANGUAGE_PAGE_PATTERN = /\/pc-dist\/(?:index|child|login|compact-app)\.html(?:[?#]|$)/;
+const ZALO_PRIMARY_LANGUAGE_PAGE_PATTERN = /\/pc-dist\/(?:index|login)\.html(?:[?#]|$)/;
+function getLanguageSourceWindows() {
+  try {
+    const candidates = BrowserWindow.getAllWindows().filter((win) => {
+      try {
+        return win && !win.isDestroyed() && win.webContents &&
+          ZALO_PRIMARY_LANGUAGE_PAGE_PATTERN.test(win.webContents.getURL());
+      } catch (_) { return false; }
+    });
+    if (mainWindow && !mainWindow.isDestroyed() && candidates.includes(mainWindow)) {
+      return [mainWindow];
+    }
+    // The app-usage helper may be created before the actual Zalo page; never
+    // authorize it as a locale source. Fall back only to a primary UI page.
+    return candidates.slice(0, 1);
+  } catch (_) {
+    return [];
+  }
+}
+const languageTransport = registerMainTransport({
+  ipcMain,
+  // Only the primary index/login renderer owns the app-wide locale. Child and
+  // Compact App renderers receive snapshots through the relay below.
+  getWindows: getLanguageSourceWindows,
+  onLocale: (locale, event) => {
+    // Ignore renderer-to-main echoes after a locale has already been fanned out.
+    const previousLocale = trayLocale;
+    if (previousLocale === locale) return;
+    trayLocale = locale;
+
+    // Relay the authoritative locale snapshot to the other Zalo UI renderers.
+    // Their Language Core instances then update renderer-owned plugins locally.
+    const source = event && event.sender;
+    const state = JSON.stringify({ version: 1, locale, timestamp: Date.now() });
+    const relayScript = `(() => { const state = ${state}; window.__ZALO_LANGUAGE_BRIDGE__ = state; window.dispatchEvent(new CustomEvent('zalo-language:changed', { detail: state })); })();`;
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        if (!win || win.isDestroyed() || !win.webContents || win.webContents === source ||
+            !ZALO_LANGUAGE_PAGE_PATTERN.test(win.webContents.getURL())) continue;
+        win.webContents.executeJavaScript(relayScript, true).catch((error) => {
+          console.warn('[language-core] Cannot relay locale to Zalo renderer:', error.message);
+        });
+      } catch (error) {
+        console.warn('[language-core] Cannot relay locale to Zalo renderer:', error.message);
+      }
+    }
+
+    // In-memory snapshot only; refresh native/plugin-owned UI without persisting locale.
+    if (plugins && typeof plugins.updateLanguage === 'function') plugins.updateLanguage(locale);
+    updateTrayVisibilityMenu();
+    if (zcall && typeof zcall.onLanguageUpdateRequest === 'function') {
+      zcall.onLanguageUpdateRequest({ type: 'LANGUAGE_UPDATE_REQUEST', requestId: 'main-zcall-' + Date.now(), locale, previousLocale, source: 'zalo', timestamp: Date.now() });
+    }
+  }
+});
 
 // Hidden windows Zalo uses as background processes, never the main window.
 const BACKGROUND_WINDOW_TITLES = ['Shared Worker', 'SQLite'];
@@ -80,31 +139,28 @@ function updateTrayVisibilityMenu() {
     mainWindow.isVisible() &&
     !mainWindow.isMinimized()
   );
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: visible ? 'Ẩn Zalo' : 'Mở Zalo',
-      click: () => {
-        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {
-          mainWindow.hide();
-        } else {
-          showMainWindow();
-        }
-        updateTrayVisibilityMenu();
+  const contextMenu = Menu.buildFromTemplate(buildTrayMenuTemplate({
+    locale: trayLocale,
+    visible,
+    // Dev Mode owns these items. Pass them through without inspection or mutation.
+    devModeItems: devMode ? devMode.getTrayMenuItems() : [],
+    onToggleVisibility: () => {
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {
+        mainWindow.hide();
+      } else {
+        showMainWindow();
       }
+      updateTrayVisibilityMenu();
     },
-    ...(devMode ? devMode.getTrayMenuItems() : []),
-    {
-      label: 'Thoát',
-      click: () => {
-        isAppQuitting = true;
-        if (tray) {
-          tray.destroy();
-          tray = null;
-        }
-        app.quit();
+    onQuit: () => {
+      isAppQuitting = true;
+      if (tray) {
+        tray.destroy();
+        tray = null;
       }
+      app.quit();
     }
-  ]);
+  }));
   tray.setContextMenu(contextMenu);
 }
 
@@ -133,6 +189,7 @@ app.on('before-quit', () => {
 // again, so 'before-quit' fires twice; 'will-quit' fires once, after every
 // window is closed. The native call engine hangs up a call in progress.
 app.on('will-quit', () => {
+  languageTransport.dispose();
   if (isPrimaryInstance()) zcall.stop();
 });
 

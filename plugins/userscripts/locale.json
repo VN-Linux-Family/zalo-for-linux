@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "plugin": "userscripts",
+  "messages": {
+    "userscripts.managerBrand": {
+      "vi": "Userscripts",
+      "en": "Userscripts"
+    },
+    "userscripts.managerNavTitle": {
+      "vi": "Userscript Manager",
+      "en": "Userscript Manager"
+    },
+    "userscripts.managerEditorAria": {
+      "vi": "Mã nguồn userscript",
+      "en": "Userscript source code"
+    },
+    "userscripts.managerVersion": {
+      "vi": "Phiên bản",
+      "en": "Version"
+    },
+    "userscripts.managerNoDescription": {
+      "vi": "Không có mô tả",
+      "en": "No description"
+    },
+    "userscripts.managerSaved": {
+      "vi": "Đã lưu. Script sẽ chạy từ lần tải trang Zalo tiếp theo.",
+      "en": "Saved. The script will run the next time a Zalo page loads."
+    },
+    "userscripts.managerEnabled": {
+      "vi": "Đã bật userscript.",
+      "en": "Userscript enabled."
+    },
+    "userscripts.managerDisabled": {
+      "vi": "Đã tắt userscript.",
+      "en": "Userscript disabled."
+    },
+    "userscripts.managerDeleteConfirm": {
+      "vi": "Xóa userscript “{name}”?",
+      "en": "Delete userscript “{name}”?"
+    },
+    "userscripts.managerDeleted": {
+      "vi": "Đã xóa userscript.",
+      "en": "Userscript deleted."
+    },
+    "userscripts.managerScriptNamePlaceholder": {
+      "vi": "Tên userscript mới",
+      "en": "My Zalo userscript"
+    },
+    "userscripts.back": {
+      "vi": "← Nâng cao",
+      "en": "← Advanced"
+    },
+    "userscripts.injectScripts": {
+      "vi": "Inject scripts vào Zalo",
+      "en": "Inject scripts into Zalo"
+    },
+    "userscripts.create": {
+      "vi": "+ Tạo mới",
+      "en": "+ Create"
+    },
+    "userscripts.import": {
+      "vi": "Nhập tệp",
+      "en": "Import file"
+    },
+    "userscripts.search": {
+      "vi": "Tìm userscript…",
+      "en": "Search userscripts…"
+    },
+    "userscripts.empty": {
+      "vi": "Chưa có userscript",
+      "en": "No userscripts yet"
+    },
+    "userscripts.emptyHint": {
+      "vi": "Tạo mới, dán mã hoặc nhập tệp .user.js.",
+      "en": "Create one, paste code, or import a .user.js file."
+    },
+    "userscripts.managerWelcome": {
+      "vi": "Trình quản lý Userscripts",
+      "en": "Userscripts manager"
+    },
+    "userscripts.managerWelcomeHint": {
+      "vi": "Chọn một script để chỉnh sửa hoặc tạo userscript mới.",
+      "en": "Select a script to edit or create a new userscript."
+    },
+    "userscripts.managerWarning": {
+      "vi": "Userscript có toàn quyền truy cập nội dung Zalo. Chỉ chạy mã mà bạn tin tưởng.",
+      "en": "Userscripts have full access to Zalo content. Only run code you trust."
+    },
+    "userscripts.scriptName": {
+      "vi": "Tên userscript",
+      "en": "Userscript name"
+    },
+    "userscripts.enabled": {
+      "vi": "Đã bật",
+      "en": "Enabled"
+    },
+    "userscripts.metadata": {
+      "vi": "Hỗ trợ metadata Tampermonkey:",
+      "en": "Tampermonkey metadata supported:"
+    },
+    "userscripts.appliedNext": {
+      "vi": "Thay đổi được áp dụng từ lần tải trang Zalo tiếp theo.",
+      "en": "Changes take effect the next time a Zalo page loads."
+    },
+    "userscripts.delete": {
+      "vi": "Xóa",
+      "en": "Delete"
+    },
+    "userscripts.cancel": {
+      "vi": "Hủy",
+      "en": "Cancel"
+    },
+    "userscripts.saveCode": {
+      "vi": "Lưu",
+      "en": "Save"
+    },
+    "userscripts.managerWindowLabel": {
+      "vi": "Trình quản lý Userscripts",
+      "en": "Userscripts Manager"
+    },
+    "userscripts.errorEmpty": {
+      "vi": "Nội dung userscript không được để trống.",
+      "en": "Userscript content cannot be empty."
+    },
+    "userscripts.errorTooLarge": {
+      "vi": "Userscript không được lớn hơn 2 MB.",
+      "en": "Userscripts cannot be larger than 2 MB."
+    },
+    "userscripts.errorNameTooLong": {
+      "vi": "Tên userscript không được dài hơn 160 ký tự.",
+      "en": "Userscript names cannot exceed 160 characters."
+    },
+    "userscripts.errorNotFound": {
+      "vi": "Không tìm thấy userscript.",
+      "en": "Userscript not found."
+    },
+    "userscripts.importDialogTitle": {
+      "vi": "Nhập userscript",
+      "en": "Import userscript"
+    },
+    "userscripts.importFileType": {
+      "vi": "Userscript",
+      "en": "Userscript"
+    },
+    "userscripts.allFiles": {
+      "vi": "Tất cả tệp",
+      "en": "All files"
+    },
+    "userscripts.defaultScriptName": {
+      "vi": "Userscript Zalo mới",
+      "en": "New Zalo userscript"
+    }
+  }
+}

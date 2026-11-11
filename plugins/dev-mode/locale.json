@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "plugin": "dev-mode",
+  "messages": {
+    "dev-mode.toggleDevTools": {
+      "vi": "Bật/tắt DevTools",
+      "en": "Toggle DevTools"
+    }
+  }
+}

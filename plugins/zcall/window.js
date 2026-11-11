@@ -87,6 +87,7 @@ let videoMode = false;
 let compact = null; // the normal bounds while the window is compact
 let camStartOff = false; // "Trả lời không mở camera": the call window starts with the camera off
 let sharingScreen = false;
+let languageLocale = 'vi';
 let expandedAt = 0;
 
 // --- devices: { mic, speaker } PulseAudio names, camera { id, label }; '' / null = default ---
@@ -274,6 +275,7 @@ function ensureWindow() {
   win.setContentSize(VOICE_WIDTH, VOICE_HEIGHT);
   win.webContents.on('did-finish-load', () => {
     winReady = true;
+    win.webContents.send('zcall-ui-language', languageLocale);
     if (lastState) win.webContents.send('zcall-ui-state', lastState);
   });
   // Closing the window during a call ends it.
@@ -458,7 +460,7 @@ async function onEngineMessage(m) {
     camStartOff = false;
     if (incoming.isOpen()) incoming.close();
     if (!win || win.isDestroyed()) { lastState = null; return; }
-    pushState({ ...(lastState || {}), phase: 'ended', text: m.text || 'Đã kết thúc' });
+    pushState({ ...(lastState || {}), phase: 'ended', statusCode: m.statusCode || 'ended', statusParams: m.statusParams || {} });
     closeTimer = setTimeout(() => {
       lastState = null;
       if (win && !win.isDestroyed()) win.destroy();
@@ -524,7 +526,7 @@ function onConnection(sock) {
     if (client !== sock) return;
     client = null;
     // Engine died mid-call: do not leave a dead window around.
-    if (lastState) onEngineMessage({ type: 'close', text: 'Mất kết nối với bộ gọi điện' });
+    if (lastState) onEngineMessage({ type: 'close', statusCode: 'disconnected' });
   });
 }
 
@@ -646,6 +648,14 @@ function start() {
   });
 }
 
+function setLocale(locale) {
+  if (locale !== 'vi' && locale !== 'en') return false;
+  languageLocale = locale;
+  incoming.setLocale(locale);
+  if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-language', locale);
+  return true;
+}
+
 function stop() {
   if (win && !win.isDestroyed()) win.destroy();
   incoming.close();
@@ -653,4 +663,4 @@ function stop() {
   server = null;
 }
 
-module.exports = { start, stop, readEngineMessages };
+module.exports = { start, stop, setLocale, readEngineMessages };

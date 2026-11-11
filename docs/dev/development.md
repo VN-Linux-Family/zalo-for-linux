@@ -176,16 +176,25 @@ Always check for the expected pattern before replacing — Zalo versions change,
 
 ## Debugging the Extracted App
 
-- **DevTools**: Press `Ctrl+Shift+I` in the Zalo window
-- **Tray menu**: Right-click the tray icon → "Toggle DevTools"
-- **Logs**: Check `~/.config/Zalo/logs/` or run with `ELECTRON_ENABLE_LOGGING=1`
+- **Enable Developer Mode**: Open **Settings → Advanced Settings... → Developer Mode** and turn on the switch. DevTools access is disabled by default.
+- **Open DevTools**: Press `Ctrl+Shift+I` in a Zalo window, or right-click the tray icon and select **Toggle DevTools**.
+- **Environment override**: Set `ZALO_DEV_MODE=1` to force Developer Mode on without changing the saved setting.
+- **Logs**: Check `~/.config/Zalo/logs/` or run with `ELECTRON_ENABLE_LOGGING=1`.
 
 ## Plugin Development
 
-The project supports plugins under `plugins/`:
+Plugins and plugin-related modules live under `plugins/`. The application has two integration points:
 
-- `zadark/` — Dark mode extension (git submodule from
-  [quaric/zadark](https://github.com/quaric/zadark))
-- `zalux/` — Linux UX improvements (screenshot button, etc.)
+- `plugins/index.js` coordinates feature-plugin lifecycle. It calls `initEarly()` for initialization that must happen before window creation, then calls each plugin's `register()` with the Electron services and dependencies it needs. Registration is isolated so a failure in one plugin does not prevent the remaining plugins from loading.
+- `main.js` connects runtime components that need to participate directly in application startup, window management, tray construction, or the call-engine lifecycle. A directory under `plugins/` is not necessarily registered by `plugins/index.js`.
 
-Each plugin is loaded in `main.js`. See existing plugins for examples.
+### Adding or changing a plugin
+
+1. Identify where the feature belongs in the startup lifecycle. Use `plugins/index.js` for coordinated feature-plugin registration; use the direct integration in `main.js` only when the feature must be wired there.
+2. Keep the plugin's state, UI, persistence, and cleanup within its own module where practical. Receive Electron services and dependencies through the registration context instead of importing application globals unnecessarily.
+3. Preserve existing ownership boundaries and behavior. In particular, do not take over menu items, shortcuts, IPC channels, or settings owned by another plugin.
+4. Isolate failures, validate IPC inputs, and remove listeners, timers, and window references when the plugin or its windows are disposed.
+5. Add or update focused tests under `tests/`, then run `npm test` and `git diff --check`.
+
+### Multilingual Plugin Integration
+For multilingual plugin development, see the [Plugin Multilingual Integration Guide](./plugin-multilingual-integration.md).

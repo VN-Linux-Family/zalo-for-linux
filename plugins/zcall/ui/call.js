@@ -13,6 +13,28 @@
 const { ipcRenderer } = require('electron');
 const { setIcon, playSound, stopSound, params } = window.zcallAssets;
 const $ = (id) => document.getElementById(id);
+const tr = (key, params) => window.zcallI18n.t(key, params);
+ipcRenderer.on('zcall-ui-language', (_event, locale) => {
+  if (!window.zcallI18n.apply(locale)) return;
+  document.querySelectorAll('[data-i18n-key]').forEach((el) => {
+    const value = tr(el.dataset.i18nKey);
+    if (el.hasAttribute('title')) el.title = value;
+    else el.textContent = value;
+  });
+  const s = state || {};
+  $('mute').title = s.muted ? tr('unmute') : tr('mute');
+  $('cam').title = sharing ? tr('sharing') : (noCamera ? tr('noCamera') : (camOn ? tr('cameraOff') : tr('cameraOn')));
+  $('camCaret').title = sharing ? tr('sharing') : tr('chooseCamera');
+  $('screen').title = sharing ? tr('stopScreen') : tr('screen');
+  const tilesOn = document.body.classList.contains('has-tiles');
+  $('layout').title = tilesOn ? (groupLayout === 'grid' ? tr('speakerLayout') : tr('gridLayout')) : tr('layout');
+  selfTile.title = tr('pin');
+  selfName.textContent = tr('self');
+  $('compactBtn').textContent = compactMode ? tr('expand') : tr('compact');
+  $('compactBtn').title = compactMode ? tr('expand') : tr('compact');
+  $('full').title = fullScreen ? tr('leaveFullscreen') : tr('fullscreen');
+  refreshLocalizedStatuses();
+});
 const TEST_PATTERN = params.get('test') === '1';
 
 // Global state variables
@@ -61,7 +83,7 @@ ipcRenderer.on('zcall-ui-fullscreen', (_e, on) => {
   fullScreen = !!on;
   document.body.classList.toggle('fullscreen', fullScreen);
   setIcon($('fullIcon'), fullScreen ? 'fullscreenOff' : 'fullscreen');
-  $('full').title = fullScreen ? 'Thoát toàn màn hình (Esc)' : 'Toàn màn hình (F11)';
+  $('full').title = fullScreen ? tr('leaveFullscreen') : tr('fullscreen');
 });
 ipcRenderer.on('zcall-ui-compact', (_e, on) => {
   compactMode = on;
@@ -90,6 +112,25 @@ function sounds(before) {
   if (state.phase === 'ended' && before && before !== 'ended') playSound('end', false);
 }
 
+function refreshLocalizedCallStatus() {
+  const s = state || {};
+  const ended = s.phase === 'ended';
+  const statusCode = s.statusCode || ({ outgoing: 'calling', connecting: 'connecting', ended: 'ended' }[s.phase] || '');
+  $('status').textContent = s.phase === 'connected' && !ended && !s.group ? '' : (statusCode ? tr(statusCode, s.statusParams) : '');
+}
+
+function refreshLocalizedStatuses() {
+  refreshLocalizedCallStatus();
+  const s = state || {};
+  const ended = s.phase === 'ended';
+  $('audioNotice').textContent = s.noticeCode ? tr(s.noticeCode, s.noticeParams) : '';
+  $('audioNotice').classList.toggle('hide', !s.noticeCode || ended);
+  for (const tile of tiles.values()) {
+    const code = tile.memberState;
+    tile.status.textContent = ['calling', 'ringing', 'busy', 'declined'].includes(code) ? tr(code) : '';
+  }
+}
+
 function render() {
   const s = state;
   const ended = s.phase === 'ended';
@@ -103,7 +144,7 @@ function render() {
   } else {
     document.body.classList.remove('has-tiles', 'conference');
   }
-  $('status').textContent = s.phase === 'connected' && !ended ? '' : (s.text || '');
+  refreshLocalizedCallStatus();
   $('peerName').textContent = name;
   const av = $('avatar'), bg = $('bg');
   if (s.avatar) {
@@ -127,25 +168,25 @@ function render() {
   $('peerMic').classList.toggle('hide', !(s.peerMuted && s.phase === 'connected'));
   $('peerShare').classList.toggle('hide', !(s.peerSharing && s.phase === 'connected'));
   // Our microphone / speaker stopped (no sound server, device gone): shown in every layout.
-  $('audioNotice').textContent = s.notice || '';
-  $('audioNotice').classList.toggle('hide', !s.notice || ended);
+  $('audioNotice').textContent = s.noticeCode ? tr(s.noticeCode, s.noticeParams) : '';
+  $('audioNotice').classList.toggle('hide', !s.noticeCode || ended);
   // Micro: on / off. Camera: only in a video call (grey in a voice call, as in Zalo).
   setIcon($('micIcon'), s.muted ? 'micOff' : 'mic');
-  $('mute').title = s.muted ? 'Bật micro' : 'Tắt micro';
+  $('mute').title = s.muted ? tr('unmute') : tr('mute');
   const camUsable = (!!s.video || !!s.group) && !noCamera && !sharing;
   $('cam').disabled = !camUsable;
   $('camCaret').disabled = !(s.video || s.group) || sharing;
   setIcon($('camIcon'), !camUsable ? 'camDisabled' : (camOn ? 'cam' : 'camOff'));
   setIcon($('camCaret').firstElementChild, ((s.video || s.group) && !sharing) ? 'caret' : 'caretDisabled');
-  $('cam').title = sharing ? 'Đang chia sẻ màn hình' : (noCamera ? 'Không có camera' : (camOn ? 'Tắt camera' : 'Bật camera'));
-  $('camCaret').title = sharing ? 'Đang chia sẻ màn hình' : 'Chọn camera';
+  $('cam').title = sharing ? tr('sharing') : (noCamera ? tr('noCamera') : (camOn ? tr('cameraOff') : tr('cameraOn')));
+  $('camCaret').title = sharing ? tr('sharing') : tr('chooseCamera');
   setIcon($('screenIcon'), sharing ? 'shareOff' : 'share');
-  $('screen').title = sharing ? 'Dừng chia sẻ màn hình' : 'Chia sẻ màn hình';
+  $('screen').title = sharing ? tr('stopScreen') : tr('screen');
   const tilesOn = document.body.classList.contains('has-tiles');
   setIcon($('layout').firstElementChild, tilesOn && groupLayout === 'grid' ? 'conference' : 'grid');
-  $('layout').title = tilesOn ? (groupLayout === 'grid' ? 'Bố cục người nói chính' : 'Bố cục lưới') : 'Đổi bố cục';
+  $('layout').title = tilesOn ? (groupLayout === 'grid' ? tr('speakerLayout') : tr('gridLayout')) : tr('layout');
   $('compactBtn').classList.toggle('hide', !(compactMode || sharing));
-  $('compactBtn').textContent = compactMode ? 'Phóng to' : 'Thu gọn';
+  $('compactBtn').textContent = compactMode ? tr('expand') : tr('compact');
   clearInterval(tick);
   const upd = () => { $('timer').textContent = s.since && !ended ? fmt(Date.now() - s.since) : ''; };
   upd(); if (s.since && !ended) tick = setInterval(upd, 500);
@@ -159,7 +200,7 @@ function render() {
 const selfTile = document.createElement('div');
 selfTile.className = 'tile novideo';
 selfTile.dataset.src = 'self';
-selfTile.title = 'Bấm để ghim / bỏ ghim';
+selfTile.title = tr('pin');
 // The pin mark of a pinned tile (Zalo's pin.svg, through setIcon: the assets' path).
 function pinMark() { const img = document.createElement('img'); img.className = 'pinMark'; img.alt = ''; setIcon(img, 'pin'); return img; }
 selfTile.appendChild(pinMark());
@@ -167,7 +208,7 @@ selfTile.appendChild(pinMark());
 const selfAvBg = document.createElement('div'); selfAvBg.className = 'tavbg';
 const selfAv = document.createElement('div'); selfAv.className = 'tav';
 const selfLabel = document.createElement('span'); selfLabel.className = 'label';
-const selfName = document.createElement('span'); selfName.className = 'name'; selfName.textContent = 'Bạn';
+const selfName = document.createElement('span'); selfName.className = 'name'; selfName.textContent = tr('self');
 const selfMic = document.createElement('img'); selfMic.className = 'micx hide'; selfMic.alt = ''; setIcon(selfMic, 'micMuted');
 selfLabel.append(selfName, selfMic);
 selfTile.append(selfAvBg, selfAv, selfLabel);
@@ -320,7 +361,7 @@ function ensureTile(key) {
   const box = document.createElement('div');
   box.className = 'tile novideo';
   box.dataset.src = key;
-  box.title = 'Bấm để ghim / bỏ ghim';
+  box.title = tr('pin');
   const avbg = document.createElement('div'); avbg.className = 'tavbg';
   const av = document.createElement('div'); av.className = 'tav';
   const status = document.createElement('div'); status.className = 'tstatus';
@@ -372,13 +413,9 @@ function syncMembers(list) {
     keep.add(key);
     const t = ensureTile(key);
     t.fromList = true;
-    t.name.textContent = m.name || 'Thành viên';
-    let stText = '';
-    if (m.state === 'calling') stText = 'Đang gọi…';
-    else if (m.state === 'ringing') stText = 'Đang đổ chuông…';
-    else if (m.state === 'busy') stText = 'Bận';
-    else if (m.state === 'declined') stText = 'Từ chối';
-    t.status.textContent = stText;
+    t.name.textContent = m.name || tr('member');
+    t.memberState = m.state;
+    t.status.textContent = ['calling', 'ringing', 'busy', 'declined'].includes(m.state) ? tr(m.state) : '';
     t.mic.classList.toggle('hide', !m.muted);
     t.camOff = !!m.camOff;
     if ((m.avatar || '') !== t.avatar) {
@@ -971,23 +1008,23 @@ async function sections(kind) {
     for (const k of ['mic', 'speaker']) {
       const list = k === 'mic' ? d.mics : d.speakers;
       out.push({
-        kind: k, title: k === 'mic' ? 'Chọn micro' : 'Chọn loa', icon: k === 'mic' ? 'menuMic' : 'menuSpeaker',
-        items: list.concat([{ id: '', label: 'Thiết bị mặc định' }]),
+        kind: k, title: k === 'mic' ? tr('chooseMic') : tr('chooseSpeaker'), icon: k === 'mic' ? 'menuMic' : 'menuSpeaker',
+        items: list.concat([{ id: '', label: tr('defaultDevice') }]),
         current: list.some((x) => x.id === d.prefs[k]) ? d.prefs[k] : '',
       });
     }
   }
   if ((kind === 'camera' && !sharing) || (kind === 'all' && state.video && !sharing)) {
     const items = await cameras();
-    out.push({ kind: 'camera', title: 'Chọn camera', icon: 'menuCam', items, current: curCamId || (await chosenCamera()) || (items[0] && items[0].id) });
+    out.push({ kind: 'camera', title: tr('chooseCamera'), icon: 'menuCam', items, current: curCamId || (await chosenCamera()) || (items[0] && items[0].id) });
   }
   if (kind === 'share') {
     out.push({
       kind: 'share',
       noHeader: true,
       items: [
-        { id: 'screen:0:0', label: 'Toàn màn hình' },
-        { id: 'window:select', label: 'Chọn cửa sổ' },
+        { id: 'screen:0:0', label: tr('chooseScreen') },
+        { id: 'window:select', label: tr('chooseWindow') },
       ],
     });
   }
@@ -1013,11 +1050,11 @@ async function openMenu(kind, anchor) {
       h.dataset.kind = sec.kind;
       const hi = document.createElement('img'); setIcon(hi, sec.icon);
       h.append(hi, sec.title); menu.appendChild(h);
-      if (!sec.items.length) { const r = document.createElement('div'); r.className = 'h'; r.textContent = 'Không tìm thấy thiết bị'; menu.appendChild(r); }
+      if (!sec.items.length) { const r = document.createElement('div'); r.className = 'h'; r.textContent = tr('noDevices'); menu.appendChild(r); }
     }
     if (sec.noHeader && !sec.items.length) {
       const r = document.createElement('div'); r.className = 'h';
-      r.textContent = sec.kind === 'share-windows' ? 'Không có cửa sổ khác' : 'Trống';
+      r.textContent = sec.kind === 'share-windows' ? tr('noWindows') : tr('empty');
       menu.appendChild(r);
     }
     for (const it of sec.items) {
@@ -1054,14 +1091,14 @@ function micVolumeRow() {
   const row = document.createElement('div'); row.className = 'vol';
   const title = document.createElement('div'); title.className = 'volTitle';
   micPct = document.createElement('span'); micPct.className = 'volPct';
-  title.append('Âm lượng micro', micPct);
+  title.append(tr('micVolume'), micPct);
   micSlider = document.createElement('input');
   Object.assign(micSlider, { type: 'range', min: 0, max: 100, step: 1, value: state.micVolume });
-  micSlider.setAttribute('aria-label', 'Âm lượng micro');
+  micSlider.setAttribute('aria-label', tr('micVolume'));
   micMeter = document.createElement('div'); micMeter.className = 'meter';
   const fill = document.createElement('div'); fill.className = 'fill'; micMeter.appendChild(fill);
   const hint = document.createElement('div'); hint.className = 'volHint';
-  hint.textContent = 'Nói to bình thường: vạch không nên chạm đỏ.';
+  hint.textContent = tr('micHint');
   micPct.textContent = state.micVolume + '%';
   let last = null; // one message per value: input and change both end here
   const send = () => { const v = Number(micSlider.value); if (v === last) return; last = v; micSentAt = Date.now(); act('micVolume', { value: v }); };

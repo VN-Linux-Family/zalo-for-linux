@@ -9,6 +9,17 @@
 const { ipcRenderer } = require('electron');
 const { setIcon, playSound, stopSound } = window.zcallAssets;
 const $ = (id) => document.getElementById(id);
+const tr = (key, params) => window.zcallI18n.t(key, params);
+let currentIncomingState = null;
+ipcRenderer.on('zcall-ui-language', (_event, locale) => {
+  if (!window.zcallI18n.apply(locale)) return;
+  $('close').title = tr('close');
+  $('reject').title = tr('reject');
+  $('accept').title = tr('answer');
+  const label = $('noCam').querySelector('span');
+  if (label) label.textContent = tr('answerNoCamera');
+  if (currentIncomingState) updateIncomingSubtitle(currentIncomingState);
+});
 const act = (action, extra) => ipcRenderer.send('zcall-ui-action', Object.assign({ action }, extra || {}));
 
 let answered = false;
@@ -59,21 +70,28 @@ $('reject').onclick = decline;
 $('close').onclick = decline;
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') decline(); });
 
+function updateIncomingSubtitle(s) {
+  const sub = $('sub');
+  sub.textContent = '';
+  const statusCode = s.statusCode || (s.video ? 'incomingVideo' : 'incomingVoice');
+  const statusParams = { ...(s.statusParams || {}) };
+  if (!statusParams.inviter) statusParams.inviter = s.inviter || tr('unknownCaller');
+  const message = tr(statusCode, statusParams);
+  sub.textContent = s.noAnswer || s.inviter || s.group ? message : 'Zalo: ' + message;
+  sub.title = sub.textContent;
+}
+
 ipcRenderer.on('zcall-incoming-state', (_e, s) => {
+  currentIncomingState = s;
   const name = s.name || 'Zalo';
   document.title = name + ' - Zalo';
   $('name').textContent = name;
-  const sub = $('sub');
-  sub.textContent = '';
-  if (s.inviter) {
-    // "<b>Người gọi</b> mời bạn vào cuộc gọi nhóm"
-    const b = document.createElement('b');
-    b.textContent = s.inviter;
-    sub.append(b, ' mời bạn vào cuộc gọi nhóm');
-  } else {
-    sub.textContent = s.noAnswer ? (s.text || '') : 'Zalo: ' + (s.text || (s.video ? 'Cuộc gọi video đến' : 'Cuộc gọi thoại đến'));
-  }
-  sub.title = sub.textContent;
+  updateIncomingSubtitle(s);
+  $('close').title = tr('close');
+  $('reject').title = tr('reject');
+  $('accept').title = tr('answer');
+  const noCamLabel = $('noCam').querySelector('span');
+  if (noCamLabel) noCamLabel.textContent = tr('answerNoCamera');
   const av = $('avatar');
   if (s.avatar) { av.style.backgroundImage = 'url("' + String(s.avatar).replace(/["\\\n]/g, '') + '")'; av.textContent = ''; }
   else { av.style.backgroundImage = ''; av.textContent = name.trim().charAt(0).toUpperCase(); }

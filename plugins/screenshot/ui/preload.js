@@ -3,6 +3,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('screencap', {
+  onLanguageUpdate: (callback) => {
+    if (typeof callback !== 'function') return;
+    ipcRenderer.on('screencap:language', (_event, locale) => callback(locale));
+  },
   onInit: (callback) => {
     ipcRenderer.on('screencap:init', (_event, data) => callback(data));
   },

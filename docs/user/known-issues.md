@@ -39,12 +39,12 @@ Quick diagnostic lookup table for common runtime and configuration issues on Lin
 - **Message Synchronization (E2EE) & Info Panel:**
   - **Issue:** Missing `db-cross-v4` native module caused end-to-end encryption messages, conversation info panel media, and emoji reactions to fail on Linux.
   - **Solution:** Reimplemented clean-room `db-cross-v4` addon in C++.
-  - **Credits:** [@realdtn2](https://github.com/realdtn2), [@DMKha2k7](https://github.com/DMKha2k7). See [PR #24](https://github.com/VN-Linux-Family/zalo-for-linux/pull/24), [Issue #15](https://github.com/VN-Linux-Family/zalo-for-linux/issues/15).
+  - **Credits:** [@realdtn2](https://github.com/realdtn2), [@DMKha241](https://github.com/DMKha241). See [PR #24](https://github.com/VN-Linux-Family/zalo-for-linux/pull/24), [Issue #15](https://github.com/VN-Linux-Family/zalo-for-linux/issues/15).
 
 - **Pasting & Sending Images:**
   - **Issue:** Pressing `Ctrl+V` failed to paste copied images, and sending images defaulted to raw file attachments instead of inline photos.
   - **Solution:** Clipboard image files are pasted via `wl-clipboard` (Wayland) and `xclip` (X11).
-  - **Credits:** [@realdtn2](https://github.com/realdtn2), [@DMKha2k7](https://github.com/DMKha2k7) ([PR #25](https://github.com/VN-Linux-Family/zalo-for-linux/pull/25)), [@brucenguyen1102](https://github.com/brucenguyen1102) ([PR #34](https://github.com/VN-Linux-Family/zalo-for-linux/pull/34)).
+  - **Credits:** [@realdtn2](https://github.com/realdtn2), [@DMKha241](https://github.com/DMKha241) ([PR #25](https://github.com/VN-Linux-Family/zalo-for-linux/pull/25)), [@brucenguyen1102](https://github.com/brucenguyen1102) ([PR #34](https://github.com/VN-Linux-Family/zalo-for-linux/pull/34)).
 
 - **Linux Auto-Launch on Startup:**
   - **Issue:** Built-in "Start Zalo on system startup" setting failed on Linux.
@@ -66,7 +66,7 @@ Quick diagnostic lookup table for common runtime and configuration issues on Lin
   - **Solution:** Built a standalone native screenshot tool directly into the application with no third-party screenshot software dependencies:
     - **Wayland & X11 capture:** Supports silent capture via XDG Desktop Portal (`org.freedesktop.portal.Screenshot` with non-interactive mode), `grim` (wlroots/Sway/Hyprland), and Electron/X11 fallbacks.
     - **Native Zalo PC UI:** Built-in screenshot overlay utilizing the original `zalo-pc-screencap` icon font and UI design, complete with magnification loupe, region selection with 8 resize handles, annotation tools (rectangle, ellipse, arrow, line, freehand doodle, text, and mosaic blur), undo/redo history, stroke/color palette, and direct auto-paste into chat.
-    - **Configurable Capture Delays:** In Advanced Settings ("Cài đặt nâng cao"), users can configure individual delay timings for both "Capture with Zalo" (default 100 ms) and "Capture without Zalo" (default 500 ms) to avoid capturing residual desktop animations or unhidden window frames on slow/effect-heavy desktop environments.
+    - **Configurable Capture Delays:** In **Advanced Settings...**, users can configure individual delay timings for both "Capture with Zalo" (default 100 ms) and "Capture without Zalo" (default 500 ms) to avoid capturing residual desktop animations or unhidden window frames on slow/effect-heavy desktop environments.
   - **Credits:** Initial integration by [@hthienloc](https://github.com/hthienloc) (see [Issue #19](https://github.com/VN-Linux-Family/zalo-for-linux/issues/19)). Standalone native screenshot engine and UI update by [@akimiya7742](https://github.com/akimiya7742).
 
 - **Freeze on Login Screen:**

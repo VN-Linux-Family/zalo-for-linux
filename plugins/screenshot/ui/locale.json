@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "plugin": "screenshot",
+  "messages": {
+    "screenshot.hint": {
+      "vi": "Kéo thả chuột để chọn vùng chụp • Nhấp đúp hoặc Enter để hoàn tất • Chuột phải hoặc Esc để hủy",
+      "en": "Drag to select an area • Double-click or press Enter to finish • Right-click or press Esc to cancel"
+    },
+    "screenshot.rect": {
+      "vi": "Vẽ hình chữ nhật",
+      "en": "Draw rectangle"
+    },
+    "screenshot.circle": {
+      "vi": "Vẽ hình elip / tròn",
+      "en": "Draw ellipse / circle"
+    },
+    "screenshot.arrow": {
+      "vi": "Vẽ mũi tên",
+      "en": "Draw arrow"
+    },
+    "screenshot.line": {
+      "vi": "Vẽ đường thẳng",
+      "en": "Draw line"
+    },
+    "screenshot.doodle": {
+      "vi": "Bút vẽ tự do",
+      "en": "Freehand pen"
+    },
+    "screenshot.mosaic": {
+      "vi": "Làm mờ / Che thông tin",
+      "en": "Blur / redact information"
+    },
+    "screenshot.text": {
+      "vi": "Chèn văn bản",
+      "en": "Insert text"
+    },
+    "screenshot.undo": {
+      "vi": "Hoàn tác (Ctrl+Z)",
+      "en": "Undo (Ctrl+Z)"
+    },
+    "screenshot.redo": {
+      "vi": "Làm lại (Ctrl+Y)",
+      "en": "Redo (Ctrl+Y)"
+    },
+    "screenshot.save": {
+      "vi": "Lưu thành tệp (Ctrl+S)",
+      "en": "Save to file (Ctrl+S)"
+    },
+    "screenshot.copy": {
+      "vi": "Sao chép (Ctrl+C)",
+      "en": "Copy (Ctrl+C)"
+    },
+    "screenshot.cancel": {
+      "vi": "Hủy (Esc)",
+      "en": "Cancel (Esc)"
+    },
+    "screenshot.accept": {
+      "vi": "Xong (Enter)",
+      "en": "Done (Enter)"
+    },
+    "screenshot.small": {
+      "vi": "Nét mảnh",
+      "en": "Thin stroke"
+    },
+    "screenshot.medium": {
+      "vi": "Nét vừa",
+      "en": "Medium stroke"
+    },
+    "screenshot.large": {
+      "vi": "Nét đậm",
+      "en": "Thick stroke"
+    },
+    "screenshot.saveTitle": {
+      "vi": "Lưu ảnh chụp màn hình",
+      "en": "Save screenshot"
+    }
+  }
+}

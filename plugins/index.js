@@ -8,12 +8,19 @@ const screenshotPlugin = require('./screenshot');
 const launcherBadgePlugin = require('./launcher-badge');
 const trayBadgePlugin = require('./tray-badge');
 const userscriptsPlugin = require('./userscripts');
+const languageCorePlugin = require('./language-core');
 const advancedSettingsPlugin = require('./advanced-settings');
 const devModePlugin = require('./dev-mode');
 const waylandTitlebarPlugin = require('./wayland-titlebar');
 const offlinePlugin = require('./offline');
 const zadarkPlugin = require('./zadark');
 const recalledMessagesPlugin = require('./recalled-messages');
+
+let activeAdvancedSettings = null;
+let activeScreenshot = null;
+let activeDevMode = null;
+let currentLanguageLocale = null;
+let languageRequestSequence = 0;
 
 /**
  * Safely executes a plugin lifecycle function with isolated error handling.
@@ -83,6 +90,11 @@ function register(context = {}) {
   return null;
  });
 
+ activeDevMode = devMode;
+ if (currentLanguageLocale && activeDevMode && typeof activeDevMode.setLocale === 'function') {
+  activeDevMode.setLocale(currentLanguageLocale);
+ }
+
  // 2. Standalone IPC/UI plugins
  safeRegister('trayBadge', () => {
   if (trayBadgePlugin && typeof trayBadgePlugin.register === 'function') {
@@ -98,7 +110,8 @@ function register(context = {}) {
 
  safeRegister('screenshot', () => {
   if (screenshotPlugin && typeof screenshotPlugin.register === 'function') {
-   screenshotPlugin.register({ app, ipcMain });
+   activeScreenshot = screenshotPlugin.register({ app, ipcMain });
+   if (currentLanguageLocale && activeScreenshot && typeof activeScreenshot.setLocale === 'function') activeScreenshot.setLocale(currentLanguageLocale);
   }
  });
 
@@ -114,7 +127,14 @@ function register(context = {}) {
   }
  });
 
- // 3. Settings & Userscripts (chained dependency)
+ // 3. Language Core must be injected before userscripts that may consume its API.
+ safeRegister('languageCore', () => {
+  if (languageCorePlugin && typeof languageCorePlugin.register === 'function') {
+   languageCorePlugin.register({ app, getInitialLocale: () => currentLanguageLocale });
+  }
+ });
+
+ // 4. Settings & Userscripts (chained dependency)
  const advancedSettings = safeRegister('advancedSettings', () => {
   if (advancedSettingsPlugin && typeof advancedSettingsPlugin.register === 'function') {
    return advancedSettingsPlugin.register({
@@ -128,6 +148,8 @@ function register(context = {}) {
   }
   return null;
  });
+ activeAdvancedSettings = advancedSettings;
+ if (currentLanguageLocale && activeAdvancedSettings && typeof activeAdvancedSettings.setLocale === 'function') activeAdvancedSettings.setLocale(currentLanguageLocale);
 
  safeRegister('userscripts', () => {
   if (userscriptsPlugin && typeof userscriptsPlugin.register === 'function') {
@@ -141,13 +163,39 @@ function register(context = {}) {
   }
  });
 
- // 4. ZaDark Theme Synchronization Plugin (if active in build)
+ // 5. ZaDark Theme Synchronization Plugin (if active in build)
  safeRegister('zadark', () => {
   if (zadarkPlugin && typeof zadarkPlugin.register === 'function') {
    zadarkPlugin.register({ app, ipcMain, appDir });
   }
  });
  return devMode;
+}
+
+/**
+ * Main-process fan-out for plugin-owned windows that cannot access the
+ * Zalo renderer's ZaloLanguage global. Locale is an in-memory snapshot only.
+ */
+function updateLanguage(locale) {
+ if (locale !== 'vi' && locale !== 'en') return false;
+ const previousLocale = currentLanguageLocale;
+ currentLanguageLocale = locale;
+ const request = Object.freeze({
+  type: 'LANGUAGE_UPDATE_REQUEST',
+  requestId: 'main-language-' + Date.now() + '-' + (++languageRequestSequence),
+  locale,
+  previousLocale,
+  source: 'zalo',
+  timestamp: Date.now()
+ });
+ for (const [name, target] of [['advanced-settings', activeAdvancedSettings], ['screenshot', activeScreenshot], ['dev-mode', activeDevMode]]) {
+  try {
+   if (target && typeof target.onLanguageUpdateRequest === 'function') target.onLanguageUpdateRequest(request);
+  } catch (error) {
+   console.error('[plugins] Language update failed for ' + name + ':', error);
+  }
+ }
+ return true;
 }
 
 /**
@@ -168,12 +216,14 @@ function onMainWindowCreated(mainWindow) {
 module.exports = {
  initEarly,
  register,
+ updateLanguage,
  onMainWindowCreated,
  _plugins: {
   screenshotPlugin,
   launcherBadgePlugin,
   trayBadgePlugin,
   userscriptsPlugin,
+  languageCorePlugin,
   advancedSettingsPlugin,
   devModePlugin,
   waylandTitlebarPlugin,

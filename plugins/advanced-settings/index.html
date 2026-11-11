@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; media-src file:">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Nâng cao</title>
+  <title></title>
   <link rel="stylesheet" href="../userscripts/manager.css">
   <link rel="stylesheet" href="settings.css">
 </head>
@@ -12,153 +12,153 @@
   <main id="advanced-view" class="settings-view" aria-labelledby="advanced-title">
     <div class="settings-content">
       <header class="settings-heading">
-        <span class="eyebrow">ZALO TRÊN LINUX</span>
-        <h1 id="advanced-title" tabindex="-1">Nâng cao</h1>
-        <p>Cá nhân hóa cuộc gọi và mở rộng Zalo theo cách của bạn.</p>
+        <span class="eyebrow" data-i18n="eyebrow"></span>
+        <h1 id="advanced-title" tabindex="-1" data-i18n="title"></h1>
+        <p data-i18n="tagline"></p>
       </header>
       <section class="settings-card" aria-labelledby="sound-title">
-        <h2 id="sound-title">Âm thanh cuộc gọi</h2>
-        <p class="section-description">Chọn tệp âm thanh trên máy. Để trống đường dẫn để dùng âm thanh mặc định.</p>
+        <h2 id="sound-title" data-i18n="soundTitle"></h2>
+        <p class="section-description" data-i18n="soundDescription"></p>
         <form class="sound-setting" data-sound="ringtone">
-          <label for="ringtone-path">Nhạc chuông <span>(ringtone)</span></label>
-          <p id="ringtone-description">Phát khi có cuộc gọi đến.</p>
+          <label for="ringtone-path" data-i18n="ringtone"></label>
+          <p id="ringtone-description" data-i18n="ringtoneDescription"></p>
           <div class="path-row">
-            <input id="ringtone-path" name="path" placeholder="Mặc định của Zalo" aria-describedby="ringtone-description" autocomplete="off" spellcheck="false">
-            <button type="button" class="button" data-action="browse">Chọn tệp…</button>
+            <input id="ringtone-path" name="path" data-i18n-placeholder="defaultZalo" placeholder="" aria-describedby="ringtone-description" autocomplete="off" spellcheck="false">
+            <button type="button" class="button" data-action="browse" data-i18n="browse"></button>
           </div>
           <div class="sound-actions">
-            <button type="button" class="button" data-action="preview">Nghe thử</button>
-            <button type="button" class="button" data-action="reset">Mặc định</button>
-            <button type="submit" class="button primary">Lưu</button>
+            <button type="button" class="button" data-action="preview" data-i18n="preview"></button>
+            <button type="button" class="button" data-action="reset" data-i18n="reset"></button>
+            <button type="submit" class="button primary" data-i18n="save"></button>
           </div>
           <span class="sound-status" role="status" aria-live="polite"></span>
         </form>
         <form class="sound-setting" data-sound="ringback">
-          <label for="ringback-path">Nhạc chờ <span>(ringback)</span></label>
-          <p id="ringback-description">Phát trên máy bạn trong lúc chờ người nhận trả lời.</p>
+          <label for="ringback-path" data-i18n="ringback"></label>
+          <p id="ringback-description" data-i18n="ringbackDescription"></p>
           <div class="path-row">
-            <input id="ringback-path" name="path" placeholder="Mặc định của Zalo" aria-describedby="ringback-description" autocomplete="off" spellcheck="false">
-            <button type="button" class="button" data-action="browse">Chọn tệp…</button>
+            <input id="ringback-path" name="path" data-i18n-placeholder="defaultZalo" placeholder="" aria-describedby="ringback-description" autocomplete="off" spellcheck="false">
+            <button type="button" class="button" data-action="browse" data-i18n="browse"></button>
           </div>
           <div class="sound-actions">
-            <button type="button" class="button" data-action="preview">Nghe thử</button>
-            <button type="button" class="button" data-action="reset">Mặc định</button>
-            <button type="submit" class="button primary">Lưu</button>
+            <button type="button" class="button" data-action="preview" data-i18n="preview"></button>
+            <button type="button" class="button" data-action="reset" data-i18n="reset"></button>
+            <button type="submit" class="button primary" data-i18n="save"></button>
           </div>
           <span class="sound-status" role="status" aria-live="polite"></span>
         </form>
-        <p class="sound-hint">MP3, WAV, OGG, M4A, AAC, FLAC, OPUS, WEBM. Thay đổi áp dụng từ lần phát tiếp theo. Hãy giữ tệp ở đường dẫn đã chọn.</p>
+        <p class="sound-hint" data-i18n="soundHint"></p>
       </section>
       <section class="settings-card" aria-labelledby="screenshot-title">
-        <h2 id="screenshot-title">Chụp màn hình</h2>
-        <p class="section-description">Tùy chỉnh thời gian chờ (delay) trước khi chụp ảnh màn hình để tránh hiệu ứng chuyển cảnh của Desktop Environment (DE) hoặc cửa sổ chưa kịp ẩn.</p>
+        <h2 id="screenshot-title" data-i18n="screenshotTitle"></h2>
+        <p class="section-description" data-i18n="screenshotDescription"></p>
         <form class="screenshot-setting" data-screenshot-delay="withZalo">
-          <label for="delay-with-zalo">Chế độ chụp có Zalo <span>(mili-giây)</span></label>
-          <p id="delay-with-zalo-desc">Thời gian chờ khi chụp kèm cửa sổ Zalo trên màn hình.</p>
+          <label for="delay-with-zalo" data-i18n="withZalo"></label>
+          <p id="delay-with-zalo-desc" data-i18n="withZaloDescription"></p>
           <div class="delay-row">
             <input type="number" id="delay-with-zalo" name="delay" min="0" max="10000" step="50" placeholder="100" aria-describedby="delay-with-zalo-desc" autocomplete="off">
-            <span class="unit">ms</span>
+            <span class="unit" data-i18n="managerMsUnit"></span>
             <div class="delay-actions">
-              <button type="button" class="button" data-action="reset">Mặc định</button>
-              <button type="submit" class="button primary">Lưu</button>
+              <button type="button" class="button" data-action="reset" data-i18n="reset"></button>
+              <button type="submit" class="button primary" data-i18n="save"></button>
             </div>
           </div>
           <span class="screenshot-status" role="status" aria-live="polite"></span>
         </form>
         <form class="screenshot-setting" data-screenshot-delay="withoutZalo">
-          <label for="delay-without-zalo">Chế độ chụp không có Zalo <span>(mili-giây)</span></label>
-          <p id="delay-without-zalo-desc">Thời gian chờ sau khi ẩn/thu nhỏ cửa sổ Zalo để compositor hoàn tất hiệu ứng chuyển cảnh.</p>
+          <label for="delay-without-zalo" data-i18n="withoutZalo"></label>
+          <p id="delay-without-zalo-desc" data-i18n="withoutZaloDescription"></p>
           <div class="delay-row">
             <input type="number" id="delay-without-zalo" name="delay" min="0" max="10000" step="50" placeholder="500" aria-describedby="delay-without-zalo-desc" autocomplete="off">
-            <span class="unit">ms</span>
+            <span class="unit" data-i18n="managerMsUnit"></span>
             <div class="delay-actions">
-              <button type="button" class="button" data-action="reset">Mặc định</button>
-              <button type="submit" class="button primary">Lưu</button>
+              <button type="button" class="button" data-action="reset" data-i18n="reset"></button>
+              <button type="submit" class="button primary" data-i18n="save"></button>
             </div>
           </div>
           <span class="screenshot-status" role="status" aria-live="polite"></span>
         </form>
-        <p class="sound-hint">Giá trị từ 0 đến 10000 mili-giây (1000 ms = 1 giây). Thay đổi áp dụng ngay cho lần chụp tiếp theo.</p>
+        <p class="sound-hint" data-i18n="delayHint"></p>
       </section>
       <section class="settings-card" aria-labelledby="recalled-title">
         <div class="toggle-row">
           <div>
-            <h2 id="recalled-title">Giữ tin nhắn đã thu hồi</h2>
-            <p id="recalled-description" class="section-description">Giữ lại nội dung tin nhắn bị thu hồi để xem lại qua nút <strong>Thu hồi</strong> phía trên ô soạn tin.</p>
+            <h2 id="recalled-title" data-i18n="recalledTitle"></h2>
+            <p id="recalled-description" class="section-description" data-i18n="recalledDescription"></p>
           </div>
-          <label class="toggle-label"><span class="visually-hidden">Giữ tin nhắn đã thu hồi</span><input id="keep-recalled" type="checkbox" aria-describedby="recalled-description recalled-hint"><i></i></label>
+          <label class="toggle-label"><span class="visually-hidden" data-i18n="recalledTitle"></span><input id="keep-recalled" type="checkbox" aria-describedby="recalled-description recalled-hint"><i></i></label>
         </div>
-        <p id="recalled-hint" class="toggle-hint">Chỉ giữ được tin bị thu hồi lúc Zalo đang mở. Tin được lưu trên máy này, tối đa 500 tin. Tắt tính năng sẽ xoá các tin đã giữ.</p>
+        <p id="recalled-hint" class="toggle-hint" data-i18n="recalledHint"></p>
         <span id="recalled-status" class="sound-status" role="status" aria-live="polite"></span>
       </section>
       <section class="settings-card userscripts-card" aria-labelledby="userscripts-title">
         <div class="brand-icon" aria-hidden="true">&lt;/&gt;</div>
-        <div class="userscripts-description"><h2 id="userscripts-title">Userscript Manager</h2><p>Tạo, chỉnh sửa và quản lý các script chạy trong Zalo.</p></div>
-        <button id="open-userscripts" class="button">Mở trình quản lý <span aria-hidden="true">→</span></button>
+        <div class="userscripts-description"><h2 id="userscripts-title" data-i18n="userscriptsTitle"></h2><p data-i18n="userscriptsDescription"></p></div>
+        <button id="open-userscripts" class="button"><span data-i18n="openManager"></span> <span aria-hidden="true">→</span></button>
       </section>
       <section class="settings-card" aria-labelledby="dev-mode-title">
         <div class="toggle-row">
           <div>
-            <h2 id="dev-mode-title">Chế độ nhà phát triển</h2>
+            <h2 id="dev-mode-title" data-i18n="devModeTitle"></h2>
           </div>
-          <label class="toggle-label"><span class="visually-hidden">Chế độ nhà phát triển</span><input id="dev-mode" type="checkbox" aria-describedby="dev-mode-status"><i></i></label>
+          <label class="toggle-label"><span class="visually-hidden" data-i18n="devModeTitle"></span><input id="dev-mode" type="checkbox" aria-describedby="dev-mode-status"><i></i></label>
         </div>
         <p id="dev-mode-status" class="sound-status" role="status" aria-live="polite"></p>
       </section>
     </div>
   </main>
 
-  <section id="userscripts-view" class="settings-view" aria-label="Userscript Manager" inert aria-hidden="true">
+  <section id="userscripts-view" class="settings-view" data-i18n-plugin="userscripts" data-i18n-aria-label="managerWindowLabel" aria-label="" inert aria-hidden="true">
     <header class="manager-navigation">
-      <button id="back-to-advanced" class="button" type="button">← Nâng cao</button>
-      <span>Userscript Manager</span>
+      <button id="back-to-advanced" class="button" type="button" data-i18n="back"></button>
+      <span data-i18n="managerNavTitle"></span>
     </header>
     <div class="manager-layout">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-icon">&lt;/&gt;</div>
-      <div><h1>Userscripts</h1><p>Inject scripts vào Zalo</p></div>
+      <div><h1 data-i18n="managerBrand"></h1><p data-i18n="injectScripts"></p></div>
     </div>
     <div class="toolbar">
-      <button id="create-button" class="button primary">+ Create</button>
-      <button id="import-button" class="button">Import file</button>
+      <button id="create-button" class="button primary" data-i18n="create"></button>
+      <button id="import-button" class="button" data-i18n="import"></button>
     </div>
-    <label class="search"><span>⌕</span><input id="search-input" placeholder="Tìm userscript…"></label>
+    <label class="search"><span>⌕</span><input id="search-input" data-i18n-placeholder="search" placeholder=""></label>
     <div id="script-list" class="script-list"></div>
     <div id="empty-state" class="empty-state">
       <div class="empty-icon">JS</div>
-      <strong>Chưa có userscript</strong>
-      <span>Tạo mới, paste code hoặc import file <code>.user.js</code>.</span>
+      <strong data-i18n="empty"></strong>
+      <span data-i18n="emptyHint"></span>
     </div>
   </aside>
 
   <main class="editor-pane">
     <section id="welcome" class="welcome">
       <div class="welcome-icon">{ }</div>
-      <h2>Userscripts manager</h2>
-      <p>Chọn một script để chỉnh sửa hoặc tạo userscript mới.</p>
-      <p class="warning">Userscript có toàn quyền truy cập nội dung Zalo. Chỉ chạy code mà bạn tin tưởng.</p>
+      <h2 data-i18n="managerWelcome"></h2>
+      <p data-i18n="managerWelcomeHint"></p>
+      <p class="warning" data-i18n="managerWarning"></p>
     </section>
 
     <form id="editor" class="editor hidden">
       <header class="editor-header">
         <div class="name-field">
-          <label for="script-name">Tên userscript</label>
-          <input id="script-name" maxlength="160" required placeholder="My Zalo userscript">
+          <label for="script-name" data-i18n="scriptName"></label>
+          <input id="script-name" maxlength="160" required data-i18n-placeholder="managerScriptNamePlaceholder" placeholder="">
         </div>
-        <label class="toggle-label"><span>Enabled</span><input id="script-enabled" type="checkbox"><i></i></label>
+        <label class="toggle-label"><span data-i18n="enabled"></span><input id="script-enabled" type="checkbox"><i></i></label>
       </header>
       <div class="editor-meta">
-        Hỗ trợ metadata Tampermonkey: <code>@name</code>, <code>@description</code>, <code>@version</code>,
+        <span data-i18n="metadata"></span> <code>@name</code>, <code>@description</code>, <code>@version</code>,
         <code>@match</code>, <code>@include</code>, <code>@exclude</code>.
       </div>
-      <textarea id="script-code" spellcheck="false" aria-label="Userscript source code"></textarea>
+      <textarea id="script-code" spellcheck="false" data-i18n-aria-label="managerEditorAria" aria-label=""></textarea>
       <footer class="editor-footer">
-        <span id="status-text">Thay đổi được áp dụng từ lần tải trang Zalo tiếp theo.</span>
+        <span id="status-text" data-i18n="appliedNext"></span>
         <div class="actions">
-          <button id="delete-button" type="button" class="button danger">Delete</button>
-          <button id="cancel-button" type="button" class="button">Cancel</button>
-          <button type="submit" class="button primary">Save</button>
+          <button id="delete-button" type="button" class="button danger" data-i18n="delete"></button>
+          <button id="cancel-button" type="button" class="button" data-i18n="cancel"></button>
+          <button type="submit" class="button primary" data-i18n="saveCode"></button>
         </div>
       </footer>
     </form>
