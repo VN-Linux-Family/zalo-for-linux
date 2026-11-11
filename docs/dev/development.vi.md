@@ -128,8 +128,9 @@ remote desktop có thể cần tới.
 
 ## Gỡ lỗi và kiểm tra ứng dụng (Debugging)
 
-- **DevTools**: Nhấn phím `Ctrl` + `Shift` + `I` trong cửa sổ Zalo.
-- **Menu khay hệ thống**: Nhấp chuột phải vào biểu tượng khay $\rightarrow$ chọn **"Toggle DevTools"**.
+- **Bật Chế độ nhà phát triển**: Mở **Cài đặt → Nâng cao... → Chế độ nhà phát triển** và bật công tắc. DevTools mặc định không được phép mở.
+- **Mở DevTools**: Nhấn `Ctrl` + `Shift` + `I` trong cửa sổ Zalo, hoặc nhấp chuột phải vào biểu tượng khay hệ thống và chọn **Bật/tắt DevTools**.
+- **Ghi đè bằng biến môi trường**: Đặt `ZALO_DEV_MODE=1` để bật cưỡng bức Chế độ nhà phát triển mà không thay đổi cấu hình đã lưu.
 - **Log terminal**: Khởi chạy với biến môi trường `ELECTRON_ENABLE_LOGGING=1`.
 
 ## Chạy kiểm thử tự động
@@ -139,3 +140,22 @@ npm test
 ```
 
 Kiểm thử toàn bộ các test suite JS và thuật toán mã hóa cuộc gọi ZRTP/SRTP.
+
+## Phát triển plugin
+
+Các plugin và module liên quan nằm trong `plugins/`. Ứng dụng có hai điểm tích hợp:
+
+- `plugins/index.js` điều phối lifecycle của các plugin tính năng. Module cần khởi tạo trước khi tạo cửa sổ có thể dùng `initEarly()`; sau đó orchestrator gọi `register()` và truyền vào các dịch vụ Electron cùng dependency cần thiết. Lỗi đăng ký của một plugin được cô lập để không ngăn các plugin còn lại được nạp.
+- `main.js` kết nối những thành phần cần tham gia trực tiếp vào quá trình khởi động ứng dụng, quản lý cửa sổ, dựng tray hoặc lifecycle của call engine. Không phải thư mục nào trong `plugins/` cũng được đăng ký thông qua `plugins/index.js`.
+
+### Thêm hoặc chỉnh sửa plugin
+
+1. Xác định vị trí của tính năng trong lifecycle khởi động. Dùng `plugins/index.js` để đăng ký plugin tính năng theo cơ chế điều phối chung; chỉ tích hợp trực tiếp trong `main.js` khi tính năng thực sự cần được kết nối tại đó.
+2. Khi phù hợp, giữ state, UI, persistence và cleanup trong module của plugin. Nhận dịch vụ Electron và dependency qua context đăng ký thay vì phụ thuộc không cần thiết vào biến toàn cục của ứng dụng.
+3. Giữ nguyên ranh giới sở hữu và hành vi hiện có. Không tiếp quản menu item, shortcut, IPC channel hoặc cài đặt thuộc plugin khác.
+4. Cô lập lỗi, kiểm tra dữ liệu IPC đầu vào và dọn listener, timer, tham chiếu cửa sổ khi plugin hoặc cửa sổ được dispose.
+5. Bổ sung hoặc cập nhật test riêng trong `tests/`, sau đó chạy `npm test` và `git diff --check`.
+
+### Tích hợp đa ngôn ngữ cho plugin
+
+Đối với phát triển plugin đa ngôn ngữ, xem [Hướng dẫn tích hợp đa ngôn ngữ cho plugin](./plugin-multilingual-integration.vi.md).

@@ -40,7 +40,6 @@ Tùy chỉnh nhạc chuông cuộc gọi đến và âm chờ cuộc gọi đi t
   - **Nhạc chuông (Ringtone)**: File âm thanh khi có cuộc gọi đến.
   - **Âm chờ (Ringback)**: File âm thanh phát trong lúc chờ người nhận bắt máy.
 - **Lưu ý**: Hỗ trợ duyệt file từ ổ cứng, nghe thử trước khi lưu và có nút khôi phục về mặc định. Cài đặt được lưu lại qua các phiên làm việc.
-- **Chế độ nhà phát triển**: Bật trong **Cài đặt → Nâng cao...** để cho phép DevTools từ `Ctrl+Shift+I` và menu khay hệ thống. Mặc định tắt. Biến môi trường `ZALO_DEV_MODE=1` bật cưỡng bức mà không thay đổi cấu hình đã lưu.
 
 ---
 
@@ -48,7 +47,7 @@ Tùy chỉnh nhạc chuông cuộc gọi đến và âm chờ cuộc gọi đi t
 
 Chạy các đoạn mã JavaScript mở rộng chuẩn Tampermonkey trực tiếp bên trong giao diện Zalo.
 
-- **Cách truy cập**: Mở **Cài đặt → Nâng cao... → Userscript Manager**.
+- **Cách truy cập**: Mở **Cài đặt → Nâng cao...**, sau đó chọn **Mở trình quản lý** trong mục Userscripts.
 - **Tính năng hỗ trợ**:
   - Tạo mới, chỉnh sửa, dán mã, nhập file (`.js`, `.user.js`), bật/tắt và xóa script.
   - Nhận diện metadata Tampermonkey: `@name`, `@description`, `@version`, `@match`, `@include`, `@exclude`.
@@ -78,3 +77,13 @@ Giữ lại nội dung tin nhắn mà người khác thu hồi, để bạn xem 
   - Chỉ giữ được tin bị thu hồi lúc Zalo đang mở trên máy.
   - Giữ tin chữ, link, ảnh và video. Với ảnh và video, chỉ giữ đường link tới máy chủ Zalo; nếu Zalo xoá tệp trên máy chủ thì không xem lại được.
   - Lưu trên máy này, tối đa 500 tin. Tắt tính năng sẽ xoá toàn bộ tin đã giữ.
+
+---
+
+## Chế độ nhà phát triển
+
+Chế độ nhà phát triển quyết định việc có thể mở Chrome DevTools cho các cửa sổ Zalo hay không. Tính năng này mặc định tắt.
+
+- **Cách bật**: Mở **Cài đặt → Nâng cao... → Chế độ nhà phát triển** và bật công tắc.
+- **Mở DevTools**: Nhấn `Ctrl` + `Shift` + `I` trong cửa sổ Zalo, hoặc nhấp chuột phải vào biểu tượng khay hệ thống và chọn **Bật/tắt DevTools**.
+- **Ghi đè bằng biến môi trường**: Đặt `ZALO_DEV_MODE=1` để bật cưỡng bức Chế độ nhà phát triển mà không thay đổi cấu hình đã lưu.

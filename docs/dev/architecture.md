@@ -52,6 +52,10 @@ zalo-for-linux/
 │   ├── tray-badge         # Draws the unread count onto the tray icon
 │   ├── tray-host          # Check if the host have a system tray, if it doesn't have, quit the app immediately
 │   ├── advanced-settings  # Linux settings window, call sounds and navigation
+│   ├── dev-mode           # Developer Mode and DevTools controls
+│   ├── language-core      # Shared locale bridge and renderer plugin API
+│   ├── recalled-messages  # Recalled-message UI and storage
+│   ├── tray-menu          # Localized system tray menu
 │   ├── userscripts        # Userscript storage, injection and editor
 │   ├── window-state       # Check the window state for avoid disappearing window
 │   ├── zadark             # Dark mode, privacy features, and additional functionality extension

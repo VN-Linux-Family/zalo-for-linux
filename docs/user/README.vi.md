@@ -155,10 +155,10 @@ Về engine gọi điện native, xem [`zcall-native/README.md`](../../zcall-nat
 
 ## 🐛 Xử lý sự cố và gỡ lỗi
 
-Nếu gặp lỗi hoặc muốn xem ứng dụng đang hoạt động thế nào, bạn có thể mở Chrome Developer Tools (DevTools) bằng một trong hai cách:
+Để mở Chrome Developer Tools (DevTools), trước tiên hãy bật **Chế độ nhà phát triển** trong **Cài đặt → Nâng cao...**. Sau đó, dùng một trong hai cách:
 
-- **Phím tắt**: nhấn `Ctrl` + `Shift` + `I` khi đang ở cửa sổ Zalo.
-- **Menu ở khay hệ thống**: nhấp chuột phải vào biểu tượng Zalo ở khay hệ thống và chọn **"Toggle DevTools"**.
+- **Phím tắt**: nhấn `Ctrl` + `Shift` + `I` trong cửa sổ Zalo.
+- **Menu khay hệ thống**: nhấp chuột phải vào biểu tượng Zalo và chọn **Bật/tắt DevTools**.
 
 ## Những người đóng góp
 

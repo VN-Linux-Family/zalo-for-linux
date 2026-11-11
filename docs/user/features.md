@@ -35,12 +35,11 @@ Launch Zalo hidden in the system tray on startup or from the command line.
 
 Customize call ringtones and audio playback without modifying application assets.
 
-- **How to access**: Open **Settings → Nâng cao... (Advanced)**.
+- **How to access**: Open **Settings → Advanced Settings...**.
 - **Configurable sounds**:
   - **Ringtone**: Custom audio file for incoming calls.
   - **Ringback**: Custom audio file played while waiting for outgoing calls to connect.
 - **Notes**: Supports browsing local audio files with built-in preview and reset-to-default buttons. Persists across restarts.
-- **Developer mode**: Enable it in **Settings → Nâng cao... (Advanced)** to allow DevTools from `Ctrl+Shift+I` and the tray menu. Disabled by default. `ZALO_DEV_MODE=1` forces it on without changing the saved setting.
 
 ---
 
@@ -48,7 +47,7 @@ Customize call ringtones and audio playback without modifying application assets
 
 Run custom Tampermonkey-compatible JavaScript extensions directly inside Zalo.
 
-- **How to access**: Open **Settings → Nâng cao... → Userscript Manager**.
+- **How to access**: Open **Settings → Advanced Settings...**, then select **Open manager** in the Userscripts section.
 - **Supported features**:
   - Create, edit, paste, import (`.js`, `.user.js`), toggle, and delete scripts.
   - Supports Tampermonkey metadata: `@name`, `@description`, `@version`, `@match`, `@include`, `@exclude`.
@@ -72,9 +71,19 @@ Native dark mode, privacy enhancements, and custom UI personalization powered by
 
 Keeps the content of messages that others recall, so you can read them later. Off by default.
 
-- **How to enable**: Open **Settings → Nâng cao...** and turn on **Giữ tin nhắn đã thu hồi**. It applies immediately, without restarting Zalo.
-- **How to view**: When a message is recalled, a **Thu hồi** button appears above the message composer. The list has two tabs: the current conversation and all conversations. Photos and videos show as thumbnails; click one to view the photo full size or play the video. The delete action follows the tab: the current conversation or everything.
+- **How to enable**: Open **Settings → Advanced Settings...** and turn on **Keep recalled messages**. It applies immediately, without restarting Zalo.
+- **How to view**: When a message is recalled, a **Recalled** button appears above the message composer. The list has two tabs: **This conversation** and **All**. Photos and videos show as thumbnails; click one to view the photo full size or play the video. The delete action follows the tab: **Clear conversation** or **Clear all**.
 - **Limitations**:
   - Only messages recalled while Zalo is running on this computer are kept.
   - Text, links, photos and videos are kept. For photos and videos only the link to Zalo's server is stored, so a file that Zalo deletes from its server can no longer be shown.
   - Stored on this computer, up to 500 messages. Turning the feature off deletes everything it kept.
+
+---
+
+## Developer Mode
+
+Developer Mode controls whether Chrome DevTools can be opened for Zalo windows. It is disabled by default.
+
+- **How to enable**: Open **Settings → Advanced Settings... → Developer Mode** and turn on the switch.
+- **Open DevTools**: Press `Ctrl+Shift+I` in a Zalo window, or right-click the system tray icon and select **Toggle DevTools**.
+- **Environment override**: Set `ZALO_DEV_MODE=1` to force Developer Mode on without changing the saved setting.

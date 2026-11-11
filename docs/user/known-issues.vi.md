@@ -39,12 +39,12 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
 - **Đồng bộ tin nhắn mã hóa đầu cuối (E2EE) & Bảng thông tin hội thoại:**
   - **Lỗi:** Thiếu native module `db-cross-v4` khiến tin nhắn E2EE, media trong panel thông tin và thả cảm xúc emoji bị lỗi trên Linux.
   - **Khắc phục:** Viết lại addon native `db-cross-v4` bằng C++.
-  - **Đóng góp:** [@realdtn2](https://github.com/realdtn2), [@DMKha2k7](https://github.com/DMKha2k7). Xem [PR #24](https://github.com/VN-Linux-Family/zalo-for-linux/pull/24), [Issue #15](https://github.com/VN-Linux-Family/zalo-for-linux/issues/15).
+  - **Đóng góp:** [@realdtn2](https://github.com/realdtn2), [@DMKha241](https://github.com/DMKha241). Xem [PR #24](https://github.com/VN-Linux-Family/zalo-for-linux/pull/24), [Issue #15](https://github.com/VN-Linux-Family/zalo-for-linux/issues/15).
 
 - **Dán và gửi ảnh từ clipboard:**
   - **Lỗi:** Nhấn `Ctrl+V` không dán được ảnh, gửi ảnh bị biến thành file đính kèm thô thay vì ảnh xem trước.
   - **Khắc phục:** Tích hợp bộ dán ảnh qua `wl-clipboard` (Wayland) và `xclip` (X11).
-  - **Đóng góp:** [@realdtn2](https://github.com/realdtn2), [@DMKha2k7](https://github.com/DMKha2k7) ([PR #25](https://github.com/VN-Linux-Family/zalo-for-linux/pull/25)), [@brucenguyen1102](https://github.com/brucenguyen1102) ([PR #34](https://github.com/VN-Linux-Family/zalo-for-linux/pull/34)).
+  - **Đóng góp:** [@realdtn2](https://github.com/realdtn2), [@DMKha241](https://github.com/DMKha241) ([PR #25](https://github.com/VN-Linux-Family/zalo-for-linux/pull/25)), [@brucenguyen1102](https://github.com/brucenguyen1102) ([PR #34](https://github.com/VN-Linux-Family/zalo-for-linux/pull/34)).
 
 - **Khởi động Zalo cùng hệ thống trên Linux:**
   - **Lỗi:** Tùy chọn "Khởi động cùng hệ thống" trong cài đặt Zalo không hoạt động trên Linux.
@@ -66,7 +66,7 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
   - **Khắc phục:** Xây dựng công cụ chụp màn hình độc lập tích hợp sẵn trong ứng dụng, hoàn toàn không phụ thuộc vào ứng dụng chụp màn hình bên thứ ba:
     - **Hỗ trợ Wayland & X11:** Tự động chụp tĩnh ngầm qua XDG Desktop Portal (`org.freedesktop.portal.Screenshot` chế độ non-interactive), `grim` (trên wlroots/Sway/Hyprland) và fallback Electron/X11.
     - **Giao diện nguyên bản từ Zalo PC:** Overlay chụp màn hình sử dụng đúng bộ icon font gốc `zalo-pc-screencap` và phong cách Zalo, hỗ trợ kính lúp phóng to pixel, vùng chọn với 8 điểm neo tùy chỉnh, đầy đủ công cụ vẽ chú thích (chữ nhật, elip, mũi tên, đường thẳng, vẽ tự do, văn bản, làm mờ/mosaic), hoàn tác/làm lại (Undo/Redo), bảng màu, và tự động dán ảnh chụp vào khung chat khi hoàn tất.
-    - **Tùy chỉnh thời gian chờ (delay) chụp ảnh:** Trong "Cài đặt nâng cao", người dùng có thể tùy chỉnh thời gian chờ riêng biệt cho 2 chế độ "Chụp có Zalo" (mặc định 100 ms) và "Chụp không có Zalo" (mặc định 500 ms) để tránh việc Zalo chưa kịp ẩn hoặc hiệu ứng chuyển cảnh (minimize/fade effect) của Desktop Environment (DE) làm ảnh hưởng đến ảnh chụp.
+    - **Tùy chỉnh thời gian chờ (delay) chụp ảnh:** Trong mục **Nâng cao...**, người dùng có thể tùy chỉnh thời gian chờ riêng biệt cho 2 chế độ "Chụp có Zalo" (mặc định 100 ms) và "Chụp không có Zalo" (mặc định 500 ms) để tránh việc Zalo chưa kịp ẩn hoặc hiệu ứng chuyển cảnh (minimize/fade effect) của Desktop Environment (DE) làm ảnh hưởng đến ảnh chụp.
   - **Đóng góp:** Giải pháp tích hợp ban đầu bởi [@hthienloc](https://github.com/hthienloc) (xem [Issue #19](https://github.com/VN-Linux-Family/zalo-for-linux/issues/19)). Cập nhật bộ công cụ chụp màn hình và UI độc lập bởi [@akimiya7742](https://github.com/akimiya7742).
 
 - **Treo ở màn hình đăng nhập:**
