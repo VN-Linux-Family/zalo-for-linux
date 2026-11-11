@@ -7,6 +7,7 @@ const path = require('path');
 const os = require('os');
 const advancedStore = require(path.join(__dirname, '..', 'plugins', 'advanced-settings', 'store'));
 const offlineStore = require(path.join(__dirname, '..', 'plugins', 'offline', 'store'));
+const userscripts = require(path.join(__dirname, '..', 'plugins', 'userscripts'));
 
 describe('Plugin Stores & Persistence', () => {
   const tmpDir = path.join(os.tmpdir(), `zalo-test-${Date.now()}`);
@@ -92,6 +93,26 @@ describe('Plugin Stores & Persistence', () => {
       assert.strictEqual(settings.screenshotDelayWithZalo, 100);
       assert.strictEqual(settings.screenshotDelayWithoutZalo, 500);
     });
+    it('uses stable error codes for validation failures', () => {
+      const store = advancedStore.createStore(path.join(tmpDir, 'adv-codes'));
+      assert.throws(() => store.save('invalid_kind', '/dummy/path.mp3'), (error) =>
+        error.code === advancedStore.ERROR_CODES.INVALID_SOUND_KIND && error.message === error.code);
+      assert.throws(() => store.saveScreenshotDelay('unknownKind', 100), (error) =>
+        error.code === advancedStore.ERROR_CODES.INVALID_SCREENSHOT_KIND);
+      assert.throws(() => store.saveScreenshotDelay('withZalo', 'not_a_number'), (error) =>
+        error.code === advancedStore.ERROR_CODES.INVALID_DELAY);
+      assert.throws(() => store.saveScreenshotDelay('withZalo', -1), (error) =>
+        error.code === advancedStore.ERROR_CODES.NEGATIVE_DELAY);
+      assert.throws(() => store.saveScreenshotDelay('withZalo', 10001), (error) =>
+        error.code === advancedStore.ERROR_CODES.MAX_DELAY_EXCEEDED);
+      assert.throws(() => store.validatePath('relative.mp3'), (error) =>
+        error.code === advancedStore.ERROR_CODES.ABSOLUTE_PATH_REQUIRED);
+      assert.throws(() => store.validatePath('/tmp/file.exe'), (error) =>
+        error.code === advancedStore.ERROR_CODES.UNSUPPORTED_AUDIO_FORMAT);
+      assert.throws(() => store.validatePath('/no/such/file.mp3'), (error) =>
+        error.code === advancedStore.ERROR_CODES.AUDIO_FILE_UNREADABLE);
+    });
+
     it('validates sound kinds properly', () => {
       const store = advancedStore.createStore(path.join(tmpDir, 'adv'));
       assert.throws(() => store.save('invalid_kind', '/dummy/path.mp3'));
@@ -124,6 +145,17 @@ describe('Plugin Stores & Persistence', () => {
       assert.strictEqual(resetWith.screenshotDelayWithZalo, 100);
       const resetWithout = store.saveScreenshotDelay('withoutZalo', '');
       assert.strictEqual(resetWithout.screenshotDelayWithoutZalo, 500);
+    });
+  });
+
+  describe('Userscripts validation errors', () => {
+    it('uses stable error codes for invalid scripts', () => {
+      assert.throws(() => userscripts.normalizeScript({ code: '' }), (error) =>
+        error.code === userscripts.ERROR_CODES.EMPTY_SCRIPT && error.message === error.code);
+      assert.throws(() => userscripts.normalizeScript({ code: 'x'.repeat(2 * 1024 * 1024 + 1) }), (error) =>
+        error.code === userscripts.ERROR_CODES.SCRIPT_TOO_LARGE);
+      assert.throws(() => userscripts.normalizeScript({ code: 'console.log(1)', name: 'x'.repeat(161) }), (error) =>
+        error.code === userscripts.ERROR_CODES.NAME_TOO_LONG);
     });
   });
 });

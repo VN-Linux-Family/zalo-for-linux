@@ -5,6 +5,19 @@ const fs = require('fs');
 const path = require('path');
 
 const MAX_SCRIPT_SIZE = 2 * 1024 * 1024;
+const ERROR_CODES = Object.freeze({
+  EMPTY_SCRIPT: 'USERSCRIPTS_EMPTY_SCRIPT',
+  SCRIPT_TOO_LARGE: 'USERSCRIPTS_SCRIPT_TOO_LARGE',
+  NAME_TOO_LONG: 'USERSCRIPTS_NAME_TOO_LONG',
+  SCRIPT_NOT_FOUND: 'USERSCRIPTS_SCRIPT_NOT_FOUND'
+});
+function createError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
+}
+const localeMessages = require('./locale.json').messages;
+const translate = (key, locale) => { const entry = localeMessages['userscripts.' + key]; return entry ? entry[locale === 'en' ? 'en' : 'vi'] : key; };
 const IPC = {
   list: 'userscripts:list',
   save: 'userscripts:save',
@@ -46,16 +59,16 @@ function firstMetadataValue(metadata, key) {
 
 function normalizeScript(input, existing) {
   const code = typeof input.code === 'string' ? input.code : '';
-  if (!code.trim()) throw new Error('Nội dung userscript không được để trống.');
+  if (!code.trim()) throw createError(ERROR_CODES.EMPTY_SCRIPT);
   if (Buffer.byteLength(code, 'utf8') > MAX_SCRIPT_SIZE) {
-    throw new Error('Userscript không được lớn hơn 2 MB.');
+    throw createError(ERROR_CODES.SCRIPT_TOO_LARGE);
   }
 
   const metadata = parseMetadata(code);
   const suppliedName = typeof input.name === 'string' ? input.name.trim() : '';
   const name = suppliedName || firstMetadataValue(metadata, 'name') ||
     (existing && existing.name) || 'Untitled userscript';
-  if (name.length > 160) throw new Error('Tên userscript không được dài hơn 160 ký tự.');
+  if (name.length > 160) throw createError(ERROR_CODES.NAME_TOO_LONG);
 
   return {
     id: existing ? existing.id : crypto.randomBytes(16).toString('hex'),
@@ -197,7 +210,7 @@ function registerIpc(ipcMain) {
     assertManagerSender(event);
     const scripts = readScripts();
     const index = input.id ? scripts.findIndex((script) => script.id === input.id) : -1;
-    if (input.id && index < 0) throw new Error('Không tìm thấy userscript.');
+    if (input.id && index < 0) throw createError(ERROR_CODES.SCRIPT_NOT_FOUND);
     const saved = normalizeScript(input, index >= 0 ? scripts[index] : null);
     if (index >= 0) scripts[index] = saved;
     else scripts.unshift(saved);
@@ -208,7 +221,7 @@ function registerIpc(ipcMain) {
     assertManagerSender(event);
     const scripts = readScripts();
     const next = scripts.filter((script) => script.id !== id);
-    if (next.length === scripts.length) throw new Error('Không tìm thấy userscript.');
+    if (next.length === scripts.length) throw createError(ERROR_CODES.SCRIPT_NOT_FOUND);
     writeScripts(next);
     return true;
   });
@@ -216,7 +229,7 @@ function registerIpc(ipcMain) {
     assertManagerSender(event);
     const scripts = readScripts();
     const script = scripts.find((item) => item.id === id);
-    if (!script) throw new Error('Không tìm thấy userscript.');
+    if (!script) throw createError(ERROR_CODES.SCRIPT_NOT_FOUND);
     script.enabled = Boolean(enabled);
     script.updatedAt = new Date().toISOString();
     writeScripts(scripts);
@@ -229,16 +242,16 @@ function registerIpc(ipcMain) {
     })();
     if (!activeDialog) return null;
     const result = await activeDialog.showOpenDialog(advancedSettings.getWindow(), {
-      title: 'Import userscript',
+      title: translate('importDialogTitle', advancedSettings.getLocale()),
       properties: ['openFile'],
       filters: [
-        { name: 'Userscript', extensions: ['js'] },
-        { name: 'All files', extensions: ['*'] }
+        { name: translate('importFileType', advancedSettings.getLocale()), extensions: ['js'] },
+        { name: translate('allFiles', advancedSettings.getLocale()), extensions: ['*'] }
       ]
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const stat = fs.statSync(result.filePaths[0]);
-    if (stat.size > MAX_SCRIPT_SIZE) throw new Error('Userscript không được lớn hơn 2 MB.');
+    if (stat.size > MAX_SCRIPT_SIZE) throw createError(ERROR_CODES.SCRIPT_TOO_LARGE);
     const code = fs.readFileSync(result.filePaths[0], 'utf8');
     const metadata = parseMetadata(code);
     return { code, suggestedName: firstMetadataValue(metadata, 'name') || path.basename(result.filePaths[0], '.js') };
@@ -260,4 +273,4 @@ function register({ app, ipcMain, advancedSettings: settings, dialog }) {
   });
 }
 
-module.exports = { register, parseMetadata, scriptMatches, normalizeScript, buildExecution };
+module.exports = { register, parseMetadata, scriptMatches, normalizeScript, buildExecution, ERROR_CODES };

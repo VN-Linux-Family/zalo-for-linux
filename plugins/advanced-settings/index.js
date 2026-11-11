@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { createStore, AUDIO_EXTENSIONS, defaultSoundUrl } = require('./store');
+const { createStore, AUDIO_EXTENSIONS, defaultSoundUrl, ERROR_CODES, createError } = require('./store');
 
 function register({ app, ipcMain, BrowserWindow, dialog, devMode }) {
   const store = createStore(app.getPath('userData'));
@@ -12,6 +12,7 @@ function register({ app, ipcMain, BrowserWindow, dialog, devMode }) {
   }
   let settingsWindow = null;
   let mainWindow = null;
+  let currentLocale = 'vi';
 
   function getWindow() { return settingsWindow; }
 
@@ -36,7 +37,7 @@ function register({ app, ipcMain, BrowserWindow, dialog, devMode }) {
       height: 680,
       minWidth: 760,
       minHeight: 520,
-      title: 'Nâng cao',
+      title: translate('title'),
       backgroundColor: '#f4f6f8',
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
@@ -55,7 +56,7 @@ function register({ app, ipcMain, BrowserWindow, dialog, devMode }) {
 
   ipcMain.handle('linux-settings:get', (event) => {
     assertSender(event);
-    return { ...store.read(), ...devMode.getStatus() };
+    return { ...store.read(), ...devMode.getStatus(), locale: currentLocale };
   });
   ipcMain.handle('linux-settings:save-sound', (event, kind, value) => {
     assertSender(event);
@@ -67,17 +68,17 @@ function register({ app, ipcMain, BrowserWindow, dialog, devMode }) {
   });
   ipcMain.handle('linux-settings:set-dev-mode', (event, enabled) => {
     assertSender(event);
-    if (typeof enabled !== 'boolean') throw new Error('Giá trị dev mode không hợp lệ.');
+    if (typeof enabled !== 'boolean') throw createError(ERROR_CODES.INVALID_DEV_MODE_VALUE);
     return devMode.setEnabled(enabled);
   });
   ipcMain.handle('linux-settings:pick-sound', async (event, kind) => {
     assertSender(event);
     store.validateKind(kind);
     const result = await dialog.showOpenDialog(settingsWindow, {
-      title: kind === 'ringtone' ? 'Chọn nhạc chuông' : 'Chọn nhạc chờ',
+      title: translate(kind === 'ringtone' ? 'chooseRingtone' : 'chooseRingback'),
       defaultPath: store.read()[kind] || undefined,
       properties: ['openFile'],
-      filters: [{ name: 'Âm thanh', extensions: AUDIO_EXTENSIONS }]
+      filters: [{ name: translate('audioFiles'), extensions: AUDIO_EXTENSIONS }]
     });
     if (result.canceled || !result.filePaths[0]) return null;
     return store.validatePath(result.filePaths[0]);
@@ -90,6 +91,9 @@ function register({ app, ipcMain, BrowserWindow, dialog, devMode }) {
   });
 
   const menuScript = fs.readFileSync(path.join(__dirname, 'inject-menu.js'), 'utf8');
+  const localeMessages = require('./locale.json').messages;
+  const menuMessages = JSON.stringify(localeMessages);
+  const translate = (key) => { const entry = localeMessages['advanced-settings.' + key]; return entry ? entry[currentLocale] : key; };
   app.on('browser-window-created', (_event, win) => {
     const isZaloPage = () => /\/pc-dist\/(index|child)\.html(?:[?#]|$)/.test(win.webContents.getURL());
     win.on('page-title-updated', (event, title) => {
@@ -100,13 +104,23 @@ function register({ app, ipcMain, BrowserWindow, dialog, devMode }) {
     });
     win.webContents.on('dom-ready', () => {
       if (!isZaloPage()) return;
-      win.webContents.executeJavaScript(menuScript, true).catch((error) => {
+      const localizedMenuScript = 'window.__zaloAdvancedSettingsMessages = ' + menuMessages + ';\n' + menuScript;
+      win.webContents.executeJavaScript(localizedMenuScript, true).catch((error) => {
         console.error('[advanced-settings] Cannot inject menu:', error.message);
       });
     });
   });
 
-  return { getWindow, assertSender, store };
+  function setLocale(locale) {
+    if (locale !== 'vi' && locale !== 'en') return false;
+    currentLocale = locale;
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+      settingsWindow.webContents.send('linux-settings:language-update', locale);
+    }
+    return true;
+  }
+
+  return { getWindow, getLocale: () => currentLocale, assertSender, store, setLocale, onLanguageUpdateRequest: (request) => request && request.type === 'LANGUAGE_UPDATE_REQUEST' && setLocale(request.locale) };
 }
 
 module.exports = { register };

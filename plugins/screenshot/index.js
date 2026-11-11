@@ -20,6 +20,8 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const { captureScreen } = require('./capture');
 const { createStore, DEFAULT_SETTINGS } = require('../advanced-settings/store');
+const screenshotLocaleMessages = require('./ui/locale.json').messages;
+const screenshotText = (key, locale = _locale) => { const entry = screenshotLocaleMessages['screenshot.' + key]; return entry ? entry[locale] : key; };
 
 const appDir = fs.existsSync(path.join(__dirname, '..', '..', 'app'))
  ? path.join(path.join(__dirname, '..', '..', 'app'))
@@ -32,6 +34,7 @@ let _overlayWindow = null;
 let _isCapturing = false;
 let _ipcMain = null;
 let _app = null;
+let _locale = 'vi';
 
 function setApp(app) {
   _app = app;
@@ -161,6 +164,25 @@ function register({ ipcMain: customIpcMain, app: customApp } = {}) {
     }
     return originalHandle(channel, handler);
   };
+  return {
+    setLocale(locale) {
+      if (locale !== 'vi' && locale !== 'en') return false;
+      _locale = locale;
+      if (_overlayWindow && !_overlayWindow.isDestroyed()) {
+        _overlayWindow.webContents.send('screencap:language', { locale, messages: screenshotLocaleMessages });
+      }
+      return true;
+    },
+    onLanguageUpdateRequest(request) {
+      if (!request || request.type !== 'LANGUAGE_UPDATE_REQUEST') return false;
+      if (request.locale !== 'vi' && request.locale !== 'en') return false;
+      _locale = request.locale;
+      if (_overlayWindow && !_overlayWindow.isDestroyed()) {
+        _overlayWindow.webContents.send('screencap:language', { locale: _locale, messages: screenshotLocaleMessages });
+      }
+      return true;
+    }
+  };
 }
 
 function restoreMainWindow(wasHidden) {
@@ -245,6 +267,11 @@ async function startInteractiveScreenshot(event) {
     const htmlPath = path.join(__dirname, 'ui', 'index.html');
     const fontUrl = pathToFileURL(fontPath).href;
     _overlayWindow.loadFile(htmlPath, { query: { img: fileUrl, font: fontUrl } });
+    _overlayWindow.webContents.once('did-finish-load', () => {
+      if (_overlayWindow && !_overlayWindow.isDestroyed()) {
+        _overlayWindow.webContents.send('screencap:language', { locale: _locale, messages: screenshotLocaleMessages });
+      }
+    });
 
     _overlayWindow.once('ready-to-show', () => {
       if (_overlayWindow && !_overlayWindow.isDestroyed()) {
@@ -342,7 +369,7 @@ async function startInteractiveScreenshot(event) {
           let filePath = null;
           if (electron.dialog && electron.dialog.showSaveDialog) {
             const res = await electron.dialog.showSaveDialog(_mainWindow, {
-              title: 'Lưu ảnh chụp màn hình',
+              title: screenshotText('saveTitle'),
               defaultPath,
               filters: [{ name: 'PNG Image', extensions: ['png'] }]
             });

@@ -32,6 +32,34 @@ const elements = {
 let scripts = [];
 let selectedId = null;
 let toastTimer;
+let currentLocale = 'vi';
+let localeRevision = 0;
+const tr = (key) => window.userscripts && window.userscripts.translate
+  ? window.userscripts.translate(key, currentLocale)
+  : key;
+function applyLocale(locale) {
+  if (locale !== 'vi' && locale !== 'en') return false;
+  currentLocale = locale;
+  localeRevision += 1;
+  renderList();
+  return true;
+}
+if (window.linuxSettings) {
+  if (typeof window.linuxSettings.onLanguageUpdate === 'function') {
+    window.linuxSettings.onLanguageUpdate(applyLocale);
+  }
+  // A settings window may be opened after Zalo has already changed language;
+  // the earlier push event is gone, so hydrate from the current Main snapshot.
+  if (typeof window.linuxSettings.get === 'function') {
+    const requestRevision = localeRevision;
+    window.linuxSettings.get().then((settings) => {
+      if (localeRevision !== requestRevision || !settings) return;
+      applyLocale(settings.locale);
+    }).catch((error) => {
+      console.warn('[userscripts] Cannot read initial locale:', error.message);
+    });
+  }
+}
 
 function showToast(message, isError) {
   clearTimeout(toastTimer);
@@ -41,7 +69,15 @@ function showToast(message, isError) {
 }
 
 function errorMessage(error) {
-  return (error && error.message ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': Error:\s*/, '');
+  const message = String(error && error.message ? error.message : error).replace(/^Error invoking remote method '[^']+': Error:\s*/, '');
+  const code = error && error.code ? error.code : message;
+  const keys = {
+    USERSCRIPTS_EMPTY_SCRIPT: 'errorEmpty',
+    USERSCRIPTS_SCRIPT_TOO_LARGE: 'errorTooLarge',
+    USERSCRIPTS_NAME_TOO_LONG: 'errorNameTooLong',
+    USERSCRIPTS_SCRIPT_NOT_FOUND: 'errorNotFound'
+  };
+  return keys[code] ? tr(keys[code]) : message;
 }
 
 function renderList() {
@@ -67,7 +103,7 @@ function renderList() {
     title.textContent = script.name;
     const description = document.createElement('div');
     description.className = 'script-description';
-    description.textContent = script.description || (script.version ? 'Version ' + script.version : 'Không có mô tả');
+    description.textContent = script.description || (script.version ? tr('managerVersion') + ' ' + script.version : tr('managerNoDescription'));
     details.append(title, description);
     item.append(state, details);
     item.addEventListener('click', () => selectScript(script.id));
@@ -93,7 +129,7 @@ function selectScript(id) {
   renderList();
 }
 
-function createScript(code = STARTER, name = 'New Zalo userscript') {
+function createScript(code = STARTER, name = tr('defaultScriptName')) {
   selectedId = null;
   openEditor({ name, code, enabled: true });
   renderList();
@@ -125,7 +161,7 @@ elements.editor.addEventListener('submit', async (event) => {
     });
     selectedId = saved.id;
     await refresh(saved.id);
-    showToast('Đã lưu. Script sẽ chạy từ lần tải trang Zalo tiếp theo.');
+    showToast(tr('managerSaved'));
   } catch (error) { showToast(errorMessage(error), true); }
 });
 
@@ -136,21 +172,21 @@ elements.enabled.addEventListener('change', async () => {
     const index = scripts.findIndex((script) => script.id === selectedId);
     if (index >= 0) scripts[index] = updated;
     renderList();
-    showToast(elements.enabled.checked ? 'Đã bật userscript.' : 'Đã tắt userscript.');
+    showToast(elements.enabled.checked ? tr('managerEnabled') : tr('managerDisabled'));
   } catch (error) { showToast(errorMessage(error), true); }
 });
 
 elements.deleteButton.addEventListener('click', async () => {
   if (!selectedId) return;
   const script = scripts.find((item) => item.id === selectedId);
-  if (!confirm(`Xóa userscript “${script ? script.name : ''}”?`)) return;
+  if (!confirm(tr('managerDeleteConfirm').replace('{name}', script ? script.name : ''))) return;
   try {
     await window.userscripts.remove(selectedId);
     selectedId = null;
     elements.editor.classList.add('hidden');
     elements.welcome.classList.remove('hidden');
     await refresh();
-    showToast('Đã xóa userscript.');
+    showToast(tr('managerDeleted'));
   } catch (error) { showToast(errorMessage(error), true); }
 });
 

@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 1,
+  "plugin": "zcall",
+  "messages": {
+    "zcall.self": {
+      "vi": "Bạn",
+      "en": "You"
+    },
+    "zcall.peerCamOff": {
+      "vi": "Đã tắt camera",
+      "en": "Camera is off"
+    },
+    "zcall.peerMicOff": {
+      "vi": "Đã tắt micro",
+      "en": "Microphone is off"
+    },
+    "zcall.peerSharing": {
+      "vi": "Đang chia sẻ màn hình",
+      "en": "Screen is being shared"
+    },
+    "zcall.compact": {
+      "vi": "Thu gọn",
+      "en": "Minimize"
+    },
+    "zcall.expand": {
+      "vi": "Phóng to",
+      "en": "Expand"
+    },
+    "zcall.screen": {
+      "vi": "Chia sẻ màn hình",
+      "en": "Share screen"
+    },
+    "zcall.stopScreen": {
+      "vi": "Dừng chia sẻ màn hình",
+      "en": "Stop screen sharing"
+    },
+    "zcall.end": {
+      "vi": "Kết thúc",
+      "en": "End call"
+    },
+    "zcall.mute": {
+      "vi": "Tắt micro",
+      "en": "Mute microphone"
+    },
+    "zcall.unmute": {
+      "vi": "Bật micro",
+      "en": "Unmute microphone"
+    },
+    "zcall.cameraOff": {
+      "vi": "Tắt camera",
+      "en": "Turn camera off"
+    },
+    "zcall.cameraOn": {
+      "vi": "Bật camera",
+      "en": "Turn camera on"
+    },
+    "zcall.noCamera": {
+      "vi": "Không có camera",
+      "en": "No camera available"
+    },
+    "zcall.sharing": {
+      "vi": "Đang chia sẻ màn hình",
+      "en": "Screen is being shared"
+    },
+    "zcall.chooseCamera": {
+      "vi": "Chọn camera",
+      "en": "Choose camera"
+    },
+    "zcall.fullscreen": {
+      "vi": "Toàn màn hình (F11)",
+      "en": "Full screen (F11)"
+    },
+    "zcall.leaveFullscreen": {
+      "vi": "Thoát toàn màn hình (Esc)",
+      "en": "Exit full screen (Esc)"
+    },
+    "zcall.devices": {
+      "vi": "Thiết bị",
+      "en": "Devices"
+    },
+    "zcall.layout": {
+      "vi": "Đổi bố cục",
+      "en": "Change layout"
+    },
+    "zcall.speakerLayout": {
+      "vi": "Bố cục người nói chính",
+      "en": "Speaker layout"
+    },
+    "zcall.gridLayout": {
+      "vi": "Bố cục lưới",
+      "en": "Grid layout"
+    },
+    "zcall.pin": {
+      "vi": "Bấm để ghim / bỏ ghim",
+      "en": "Click to pin / unpin"
+    },
+    "zcall.member": {
+      "vi": "Thành viên",
+      "en": "Participant"
+    },
+    "zcall.calling": {
+      "vi": "Đang gọi…",
+      "en": "Calling…"
+    },
+    "zcall.ringing": {
+      "vi": "Đang đổ chuông…",
+      "en": "Ringing…"
+    },
+    "zcall.busy": {
+      "vi": "Bận",
+      "en": "Busy"
+    },
+    "zcall.declined": {
+      "vi": "Từ chối",
+      "en": "Declined"
+    },
+    "zcall.chooseMic": {
+      "vi": "Chọn micro",
+      "en": "Choose microphone"
+    },
+    "zcall.chooseSpeaker": {
+      "vi": "Chọn loa",
+      "en": "Choose speaker"
+    },
+    "zcall.defaultDevice": {
+      "vi": "Thiết bị mặc định",
+      "en": "Default device"
+    },
+    "zcall.chooseScreen": {
+      "vi": "Toàn màn hình",
+      "en": "Entire screen"
+    },
+    "zcall.chooseWindow": {
+      "vi": "Chọn cửa sổ",
+      "en": "Choose a window"
+    },
+    "zcall.noDevices": {
+      "vi": "Không tìm thấy thiết bị",
+      "en": "No devices found"
+    },
+    "zcall.noWindows": {
+      "vi": "Không có cửa sổ khác",
+      "en": "No other windows"
+    },
+    "zcall.empty": {
+      "vi": "Trống",
+      "en": "Empty"
+    },
+    "zcall.micVolume": {
+      "vi": "Âm lượng micro",
+      "en": "Microphone volume"
+    },
+    "zcall.micHint": {
+      "vi": "Nói to bình thường: vạch không nên chạm đỏ.",
+      "en": "Speak at a normal level: the meter should not reach red."
+    },
+    "zcall.incoming": {
+      "vi": "Cuộc gọi đến",
+      "en": "Incoming call"
+    },
+    "zcall.incomingVideo": {
+      "vi": "Cuộc gọi video đến",
+      "en": "Incoming video call"
+    },
+    "zcall.answer": {
+      "vi": "Trả lời",
+      "en": "Answer"
+    },
+    "zcall.reject": {
+      "vi": "Từ chối",
+      "en": "Decline"
+    },
+    "zcall.close": {
+      "vi": "Đóng",
+      "en": "Close"
+    },
+    "zcall.answerNoCamera": {
+      "vi": "Trả lời không mở camera",
+      "en": "Answer with camera off"
+    },
+    "zcall.groupInvite": {
+      "vi": " mời bạn vào cuộc gọi nhóm",
+      "en": " invited you to a group call"
+    },
+    "zcall.ended": {
+      "vi": "Đã kết thúc",
+      "en": "Call ended"
+    },
+    "zcall.chooseDevices": {
+      "vi": "Chọn micro và loa",
+      "en": "Choose microphone and speaker"
+    },
+    "zcall.disconnected": {
+      "vi": "Mất kết nối với bộ gọi điện",
+      "en": "Disconnected from the calling service"
+    },
+    "zcall.missingPackages": {
+      "vi": "Gọi điện cần thêm gói hệ thống. Cài bằng:",
+      "en": "Calling requires additional system packages. Install with:"
+    },
+    "zcall.incomingVoice": {
+      "vi": "Cuộc gọi thoại đến",
+      "en": "Incoming voice call"
+    },
+    "zcall.connecting": {
+      "vi": "Đang kết nối…",
+      "en": "Connecting…"
+    },
+    "zcall.connected": {
+      "vi": "Đã kết nối",
+      "en": "Connected"
+    },
+    "zcall.endedWithDuration": {
+      "vi": "Kết thúc — {duration} giây",
+      "en": "Ended — {duration} s"
+    },
+    "zcall.recipientUnreachable": {
+      "vi": "Người nhận không liên lạc được",
+      "en": "The recipient is unreachable"
+    },
+    "zcall.recipientNoAnswer": {
+      "vi": "Người nhận không trả lời",
+      "en": "The recipient did not answer"
+    },
+    "zcall.recipientDeclined": {
+      "vi": "Người nhận đã từ chối",
+      "en": "The recipient declined"
+    },
+    "zcall.callFailed": {
+      "vi": "Không gọi được",
+      "en": "Call failed"
+    },
+    "zcall.serverUnreachable": {
+      "vi": "Không kết nối được máy chủ",
+      "en": "Could not connect to the server"
+    },
+    "zcall.groupUnsupported": {
+      "vi": "Gọi nhóm chưa được hỗ trợ trên Linux",
+      "en": "Group calls are not supported on Linux"
+    },
+    "zcall.groupCallIgnored": {
+      "vi": "Đã bỏ qua cuộc gọi nhóm",
+      "en": "Ignored group call"
+    },
+    "zcall.groupEnded": {
+      "vi": "Cuộc gọi nhóm đã kết thúc",
+      "en": "Group call ended"
+    },
+    "zcall.groupCallFailed": {
+      "vi": "Không gọi được nhóm",
+      "en": "Could not start the group call"
+    },
+    "zcall.groupCallFailedReason": {
+      "vi": "Không gọi được nhóm: {message}",
+      "en": "Group call failed: {message}"
+    },
+    "zcall.groupJoinRejected": {
+      "vi": "Không vào được cuộc gọi nhóm (máy chủ từ chối)",
+      "en": "Could not join the group call (server rejected the request)"
+    },
+    "zcall.groupDeclined": {
+      "vi": "Đã từ chối cuộc gọi nhóm",
+      "en": "Declined the group call"
+    },
+    "zcall.groupKicked": {
+      "vi": "Bạn đã bị mời ra khỏi cuộc gọi",
+      "en": "You were removed from the call"
+    },
+    "zcall.groupNoAnswer": {
+      "vi": "Không ai trả lời",
+      "en": "No one answered"
+    },
+    "zcall.groupCancelled": {
+      "vi": "Đã huỷ cuộc gọi nhóm",
+      "en": "Group call cancelled"
+    },
+    "zcall.groupCalling": {
+      "vi": "Đang gọi nhóm…",
+      "en": "Calling group…"
+    },
+    "zcall.groupRinging": {
+      "vi": "Đang đổ chuông…",
+      "en": "Ringing…"
+    },
+    "zcall.groupWaitingOthers": {
+      "vi": "Đang chờ người khác…",
+      "en": "Waiting for others…"
+    },
+    "zcall.groupParticipants": {
+      "vi": "{count} người: Bạn, {names}",
+      "en": "{count} people: You, {names}"
+    },
+    "zcall.incomingGroupInvite": {
+      "vi": "{inviter} mời bạn vào cuộc gọi nhóm",
+      "en": "{inviter} invited you to a group call"
+    },
+    "zcall.incomingGroupUnsupported": {
+      "vi": "{inviter} mời bạn vào cuộc gọi nhóm. Gọi nhóm chưa được hỗ trợ trên Linux.",
+      "en": "{inviter} invited you to a group call. Group calls are not supported on Linux."
+    },
+    "zcall.audioMicSpeakerFailed": {
+      "vi": "Không mở được micro và loa. Kiểm tra PipeWire / PulseAudio.",
+      "en": "Could not open the microphone or speakers. Check PipeWire / PulseAudio."
+    },
+    "zcall.audioMicFailed": {
+      "vi": "Không mở được micro, bên kia không nghe thấy bạn. Kiểm tra PipeWire / PulseAudio.",
+      "en": "Could not open the microphone; the other person cannot hear you. Check PipeWire / PulseAudio."
+    },
+    "zcall.audioSpeakerFailed": {
+      "vi": "Không phát được âm thanh ra loa. Kiểm tra PipeWire / PulseAudio.",
+      "en": "Could not play audio through the speakers. Check PipeWire / PulseAudio."
+    },
+    "zcall.unknownCaller": {
+      "vi": "Ai đó",
+      "en": "Someone"
+    }
+  }
+}

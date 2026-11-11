@@ -5,6 +5,40 @@
 
   if (window.__zaloLinuxRecalled) return;
   const { createRecallLog } = window.__zaloLinuxRecallLog;
+  const localeMessages = window.__zaloLinuxRecalledMessages || {};
+  let currentLocale = null;
+  let unregisterLanguage = null;
+
+  function t(key, params = {}) {
+    const entry = localeMessages['recalled-messages.' + key];
+    const template = entry && entry[currentLocale];
+    if (typeof template !== 'string') return '';
+    return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (_match, name) => {
+      const value = params[name];
+      return value == null ? '' : String(value);
+    });
+  }
+
+  function onLanguageUpdateRequest(request) {
+    if (!request || request.type !== 'LANGUAGE_UPDATE_REQUEST' ||
+        (request.locale !== 'vi' && request.locale !== 'en')) return;
+    currentLocale = request.locale;
+    render();
+  }
+
+  function startLanguageSupport() {
+    const api = window.ZaloLanguage;
+    if (!api || typeof api.registerPlugin !== 'function') return false;
+    unregisterLanguage = api.registerPlugin({
+      id: 'recalled-messages',
+      onLanguageUpdateRequest
+    });
+    return true;
+  }
+
+  function onLanguageReady() {
+    if (startLanguageSupport()) window.removeEventListener('zalo-language:ready', onLanguageReady);
+  }
   // The main process flushes storage to disk when it sees this title, the
   // same channel advanced-settings uses to open its window.
   const FLUSH_TITLE = 'LINUX_RECALLED_FLUSH';
@@ -100,7 +134,7 @@
         recallHooked = true;
       }
     }
-    // Without these two, entries still show under "Tất cả".
+    // Without these two, entries still appear in the all-messages view.
     if (!recallStateHooked) {
       const recallState = findModule(req, (h) => typeof h.setRecallMessage === 'function');
       if (recallState) {
@@ -171,21 +205,20 @@
   panel.hidden = true;
   const header = document.createElement('header');
   const title = document.createElement('span');
-  title.textContent = 'Tin nhắn đã thu hồi';
+  title.textContent = t('panel.title');
   const clearButton = document.createElement('button');
   clearButton.type = 'button';
-  clearButton.textContent = 'Xoá hết';
+  clearButton.textContent = t('action.clear-all');
   const closeButton = document.createElement('button');
   closeButton.type = 'button';
-  closeButton.textContent = 'Đóng';
+  closeButton.textContent = t('action.close');
   header.append(title, clearButton, closeButton);
   const tabs = document.createElement('div');
   tabs.className = 'zlr-tabs';
   const tabButtons = {};
-  for (const [key, label] of [['conversation', 'Cuộc trò chuyện này'], ['all', 'Tất cả']]) {
+  for (const key of ['conversation', 'all']) {
     const tab = document.createElement('button');
     tab.type = 'button';
-    tab.dataset.label = label;
     tab.addEventListener('click', () => { view = key; render(); });
     tabButtons[key] = tab;
     tabs.append(tab);
@@ -200,9 +233,9 @@
   viewer.id = 'zalo-linux-recalled-viewer';
   viewer.hidden = true;
   viewer.setAttribute('role', 'dialog');
-  viewer.setAttribute('aria-label', 'Tin đã thu hồi');
+  viewer.setAttribute('aria-label', t('viewer.label'));
   const viewerImage = document.createElement('img');
-  viewerImage.alt = 'Ảnh đã thu hồi';
+  viewerImage.alt = t('media.image-alt');
   viewerImage.referrerPolicy = 'no-referrer';
   const viewerVideo = document.createElement('video');
   viewerVideo.controls = true;
@@ -228,42 +261,47 @@
     const link = document.createElement('button');
     link.type = 'button';
     link.className = 'zlr-video-link';
-    link.textContent = '▶ Xem video';
+    link.textContent = t('media.view-video');
     link.addEventListener('click', () => showMedia({ video: url }));
     return link;
   }
 
   function formatTime(ms) {
     if (!ms) return '?';
-    return new Date(ms).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+    return new Date(ms).toLocaleString(currentLocale === 'en' ? 'en-US' : 'vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
   }
 
   function render() {
     const all = log.load();
     const conversationId = activeConversationId();
     const here = log.forConversation(conversationId);
-    button.hidden = all.length === 0;
+    button.hidden = all.length === 0 || !currentLocale;
+    if (!currentLocale) return;
     const count = conversationId ? here.length : all.length;
-    button.textContent = unseen > 0 ? `Thu hồi (${unseen} mới)` : `Thu hồi (${count})`;
+    button.textContent = unseen > 0 ? t('button.new', { count: unseen }) : t('button.count', { count });
+    title.textContent = t('panel.title');
+    closeButton.textContent = t('action.close');
+    viewer.setAttribute('aria-label', t('viewer.label'));
+    viewerImage.alt = t('media.image-alt');
     button.classList.toggle('has-new', unseen > 0);
     placeButton();
     if (!open) return;
     if (!conversationId) view = 'all';
     tabs.hidden = !conversationId;
-    tabButtons.conversation.textContent = `${tabButtons.conversation.dataset.label} (${here.length})`;
-    tabButtons.all.textContent = `${tabButtons.all.dataset.label} (${all.length})`;
+    tabButtons.conversation.textContent = `${t('tab.conversation')} (${here.length})`;
+    tabButtons.all.textContent = `${t('tab.all')} (${all.length})`;
     for (const [key, tab] of Object.entries(tabButtons)) tab.setAttribute('aria-pressed', String(view === key));
     const items = view === 'conversation' ? here : all;
     // The clear action follows the tab being viewed.
-    clearButton.textContent = view === 'conversation' ? 'Xoá tin cuộc này' : 'Xoá hết';
+    clearButton.textContent = view === 'conversation' ? t('action.clear-conversation') : t('action.clear-all');
     clearButton.disabled = items.length === 0;
     list.replaceChildren();
     if (items.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'zlr-empty';
       empty.textContent = view === 'conversation'
-        ? 'Cuộc trò chuyện này chưa có tin nào bị thu hồi.'
-        : 'Chưa có tin nào bị thu hồi.';
+        ? t('empty.conversation')
+        : t('empty.all');
       list.append(empty);
       return;
     }
@@ -272,25 +310,29 @@
       row.className = 'zlr-item';
       const meta = document.createElement('div');
       meta.className = 'zlr-meta';
-      meta.textContent = `${item.name || 'Không rõ tên'} · gửi ${formatTime(item.sentAt)} · thu hồi ${formatTime(item.recalledAt)}`;
+      meta.textContent = t('meta.format', {
+        name: item.name || t('meta.unknown-name'),
+        sentAt: formatTime(item.sentAt),
+        recalledAt: formatTime(item.recalledAt)
+      });
       row.append(meta);
       if (item.image) {
         const holder = document.createElement('span');
         holder.className = 'zlr-media';
         const image = document.createElement('img');
         image.className = 'zlr-image';
-        image.alt = item.video ? 'Video đã thu hồi' : 'Ảnh đã thu hồi';
+        image.alt = item.video ? t('media.video-alt') : t('media.image-alt');
         image.loading = 'lazy';
         image.referrerPolicy = 'no-referrer';
         image.src = item.image;
-        holder.title = item.video ? 'Bấm để xem video' : 'Bấm để xem ảnh lớn';
+        holder.title = item.video ? t('media.video-title') : t('media.image-title');
         holder.addEventListener('click', () => showMedia(item.video
           ? { video: item.video }
           : { image: item.imageFull || item.image }));
         image.addEventListener('error', () => {
           const gone = document.createElement('div');
           gone.className = 'zlr-empty';
-          gone.textContent = 'Ảnh không còn tải được từ máy chủ Zalo.';
+          gone.textContent = t('media.image-unavailable');
           holder.replaceWith(gone);
           if (item.video) gone.after(videoLink(item.video));
         });
@@ -360,11 +402,11 @@
     const conversationId = activeConversationId();
     if (view === 'conversation' && conversationId) {
       const count = log.forConversation(conversationId).length;
-      if (!count || !window.confirm(`Xoá ${count} tin đã giữ của cuộc trò chuyện này? Không thể khôi phục.`)) return;
+      if (!count || !window.confirm(t('confirm.clear-conversation', { count }))) return;
       log.clearConversation(conversationId);
     } else {
       const count = log.load().length;
-      if (!count || !window.confirm(`Xoá toàn bộ ${count} tin đã giữ của mọi cuộc trò chuyện? Không thể khôi phục.`)) return;
+      if (!count || !window.confirm(t('confirm.clear-all', { count }))) return;
       log.clear();
       unseen = 0;
     }
@@ -389,6 +431,7 @@
 
   document.head.append(style);
   document.body.append(button, panel, viewer);
+  if (!startLanguageSupport()) window.addEventListener('zalo-language:ready', onLanguageReady);
   render();
 
   // The chat pane moves when the window is resized, the conversation list is
@@ -423,6 +466,8 @@
       clearTimeout(hookTimer);
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('zalo-language:ready', onLanguageReady);
+      if (typeof unregisterLanguage === 'function') { unregisterLanguage(); unregisterLanguage = null; }
       // Leave a function alone if a userscript wrapped it after us.
       for (const { target, name, original, wrapper } of hooked) {
         if (target[name] === wrapper) target[name] = original;

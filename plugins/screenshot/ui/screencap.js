@@ -1,6 +1,28 @@
 'use strict';
 
 (function () {
+  let screenshotMessages = {};
+  function applyScreenshotLocale(update) {
+    if (!update || (update.locale !== 'vi' && update.locale !== 'en')) return;
+    const locale = update.locale;
+    if (update.messages) screenshotMessages = update.messages;
+    const t = (key) => {
+      const entry = screenshotMessages['screenshot.' + key];
+      return entry ? entry[locale] : key;
+    };
+    document.documentElement.lang = locale;
+    const hint = document.getElementById('hint-tooltip');
+    if (hint) hint.textContent = t('hint');
+    document.querySelectorAll('[data-tool]').forEach((el) => { el.title = t(el.dataset.i18nKey || el.dataset.tool); });
+    const controls = { 'btn-undo': 'undo', 'btn-redo': 'redo', 'btn-save': 'save', 'btn-copy': 'copy', 'btn-cancel': 'cancel', 'btn-accept': 'accept' };
+    Object.keys(controls).forEach((id) => { const el = document.getElementById(id); if (el) el.title = t(el.dataset.i18nKey || controls[id]); });
+    document.querySelectorAll('[data-size]').forEach((el) => { el.title = t(el.dataset.i18nKey || el.dataset.size); });
+  }
+
+  if (window.screencap && typeof window.screencap.onLanguageUpdate === 'function') {
+    window.screencap.onLanguageUpdate(applyScreenshotLocale);
+  }
+
   const dpr = window.devicePixelRatio || 1;
 
   // DOM elements

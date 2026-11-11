@@ -9,7 +9,9 @@ const MAIN_PAGE = /\/pc-dist\/index\.html(?:[?#]|$)/;
 
 function register({ app, ipcMain, BrowserWindow, advancedSettings }) {
   const store = createStore(app.getPath('userData'));
-  const enableScript = ['log.js', 'renderer.js']
+  const localeMessages = JSON.stringify(require('./locale.json').messages);
+  const localeScript = 'window.__zaloLinuxRecalledMessages = ' + localeMessages + ';\n';
+  const enableScript = localeScript + ['log.js', 'renderer.js']
     .map((name) => fs.readFileSync(path.join(__dirname, name), 'utf8'))
     .join('\n;\n');
   // Turning the feature off also deletes what it kept.

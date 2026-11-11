@@ -11,40 +11,41 @@
     <div id="bg"></div>
     <canvas id="video"></canvas>
     <div id="stage"></div>
-    <div id="pip"><canvas id="self"></canvas><span class="label">Bạn</span></div>
+    <div id="pip"><canvas id="self"></canvas><span class="label" data-i18n-key="self"></span></div>
     <div id="center"><div class="avatar" id="avatar"></div><div id="status"></div></div>
     <div id="timer"></div>
     <div id="peerName" class="label"></div>
     <div class="notes">
-      <span class="note hide" id="peerCam">Đã tắt camera</span>
-      <span class="note hide" id="peerMic">Đã tắt micro</span>
-      <span class="note hide" id="peerShare">Đang chia sẻ màn hình</span>
+      <span class="note hide" id="peerCam" data-i18n-key="peerCamOff"></span>
+      <span class="note hide" id="peerMic" data-i18n-key="peerMicOff"></span>
+      <span class="note hide" id="peerShare" data-i18n-key="peerSharing"></span>
       <span class="note warn hide" id="audioNotice" role="alert"></span>
     </div>
-    <button id="compactBtn" class="hide" title="Thu gọn">Thu gọn</button>
+    <button id="compactBtn" class="hide" title="" data-i18n-key="compact"></button>
   </div>
 
   <div id="bar">
-    <button id="screen" class="tool" title="Chia sẻ màn hình"><img id="screenIcon" data-a="share" alt=""></button>
+    <button id="screen" class="tool" title="" data-i18n-key="screen"><img id="screenIcon" data-a="share" alt=""></button>
     <div class="mid">
       <div class="pill" id="camPill">
-        <button id="cam" title="Tắt camera"><img id="camIcon" data-a="cam" alt=""></button>
-        <button class="caret" id="camCaret" data-kind="camera" title="Chọn camera"><img data-a="caret" alt=""></button>
+        <button id="cam" title="" data-i18n-key="cameraOff"><img id="camIcon" data-a="cam" alt=""></button>
+        <button class="caret" id="camCaret" data-kind="camera" title="" data-i18n-key="chooseCamera"><img data-a="caret" alt=""></button>
       </div>
-      <button id="end" title="Kết thúc"><img data-a="end" alt=""></button>
+      <button id="end" title="" data-i18n-key="end"><img data-a="end" alt=""></button>
       <div class="pill" id="micPill">
-        <button id="mute" title="Tắt micro"><img id="micIcon" data-a="mic" alt=""></button>
-        <button class="caret" id="micCaret" data-kind="mic" title="Chọn micro và loa"><img data-a="caret" alt=""></button>
+        <button id="mute" title="" data-i18n-key="mute"><img id="micIcon" data-a="mic" alt=""></button>
+        <button class="caret" id="micCaret" data-kind="mic" title="" data-i18n-key="chooseDevices"><img data-a="caret" alt=""></button>
       </div>
     </div>
-    <button id="full" class="tool" title="Toàn màn hình (F11)"><img id="fullIcon" data-a="fullscreen" alt=""></button>
-    <button id="layout" class="tool" title="Đổi bố cục"><img data-a="grid" alt=""></button>
-    <button id="settings" class="tool" title="Thiết bị"><img data-a="setting" alt=""></button>
+    <button id="full" class="tool" title="" data-i18n-key="fullscreen"><img id="fullIcon" data-a="fullscreen" alt=""></button>
+    <button id="layout" class="tool" title="" data-i18n-key="layout"><img data-a="grid" alt=""></button>
+    <button id="settings" class="tool" title="" data-i18n-key="devices"><img data-a="setting" alt=""></button>
   </div>
 
   <div id="menu"></div>
 
   <script src="assets.js"></script>
+  <script src="i18n.js"></script>
   <script src="call.js"></script>
 </body>
 </html>

@@ -18,6 +18,9 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const callWindow = require('./window');
+const localeMessages = require('./ui/locale.json').messages;
+let currentLocale = 'vi';
+const translate = (key) => { const entry = localeMessages['zcall.' + key]; return entry ? entry[currentLocale] : key; };
 
 /** A file of zcall-native/: next to the executable when packaged, else in the checkout. */
 function enginePath(...parts) {
@@ -123,7 +126,7 @@ function notify(body) {
 function prepare() {
  const missing = missingPackages();
  if (!missing) return Promise.resolve();
- notify(`Gọi điện cần thêm gói hệ thống. Cài bằng: ${missing}`);
+ notify(translate('missingPackages') + ' ' + missing);
  return Promise.reject(new Error('calls need system packages: ' + missing));
 }
 
@@ -171,4 +174,13 @@ function stop() {
  callWindow.stop();
 }
 
-module.exports = { configure, start, stop };
+function setLocale(locale) {
+ if (locale !== 'vi' && locale !== 'en') return false;
+ currentLocale = locale;
+ return callWindow.setLocale(locale);
+}
+function onLanguageUpdateRequest(request) {
+ if (!request || request.type !== 'LANGUAGE_UPDATE_REQUEST') return false;
+ return setLocale(request.locale);
+}
+module.exports = { configure, start, stop, setLocale, onLanguageUpdateRequest };

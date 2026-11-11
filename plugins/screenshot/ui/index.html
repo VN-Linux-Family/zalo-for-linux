@@ -29,7 +29,7 @@
     <canvas id="mask-canvas"></canvas>
   </div>
 
-  <div id="hint-tooltip">Kéo thả chuột để chọn vùng chụp • Nhấp đúp hoặc Enter để hoàn tất • Chuột phải hoặc Esc để hủy</div>
+  <div id="hint-tooltip" data-i18n-key="hint"></div>
   <div id="size-badge"></div>
 
   <!-- Loupe Magnifier -->
@@ -43,33 +43,33 @@
 
   <!-- Floating Toolbar -->
   <div id="toolbar">
-    <button class="tool-btn" data-tool="rect" title="Vẽ hình chữ nhật"><i class="icon-capture-rec"></i></button>
-    <button class="tool-btn" data-tool="circle" title="Vẽ hình elip / tròn"><i class="icon-capture-circle"></i></button>
-    <button class="tool-btn" data-tool="arrow" title="Vẽ mũi tên"><i class="icon-capture-arrow"></i></button>
-    <button class="tool-btn" data-tool="line" title="Vẽ đường thẳng"><i class="icon-capture-line"></i></button>
-    <button class="tool-btn" data-tool="doodle" title="Bút vẽ tự do"><i class="icon-capture-doodle"></i></button>
-    <button class="tool-btn" data-tool="mosaic" title="Làm mờ / Che thông tin"><i class="icon-capture-censored"></i></button>
-    <button class="tool-btn" data-tool="text" title="Chèn văn bản"><i class="icon-capture-text"></i></button>
+    <button class="tool-btn" data-tool="rect" data-i18n-key="rect" title=""><i class="icon-capture-rec"></i></button>
+    <button class="tool-btn" data-tool="circle" data-i18n-key="circle" title=""><i class="icon-capture-circle"></i></button>
+    <button class="tool-btn" data-tool="arrow" data-i18n-key="arrow" title=""><i class="icon-capture-arrow"></i></button>
+    <button class="tool-btn" data-tool="line" data-i18n-key="line" title=""><i class="icon-capture-line"></i></button>
+    <button class="tool-btn" data-tool="doodle" data-i18n-key="doodle" title=""><i class="icon-capture-doodle"></i></button>
+    <button class="tool-btn" data-tool="mosaic" data-i18n-key="mosaic" title=""><i class="icon-capture-censored"></i></button>
+    <button class="tool-btn" data-tool="text" data-i18n-key="text" title=""><i class="icon-capture-text"></i></button>
 
     <div class="divider"></div>
 
-    <button class="tool-btn disabled" id="btn-undo" title="Hoàn tác (Ctrl+Z)"><i class="icon-capture-undo"></i></button>
-    <button class="tool-btn disabled" id="btn-redo" title="Làm lại (Ctrl+Y)"><i class="icon-capture-redo"></i></button>
+    <button class="tool-btn disabled" id="btn-undo" data-i18n-key="undo" title=""><i class="icon-capture-undo"></i></button>
+    <button class="tool-btn disabled" id="btn-redo" data-i18n-key="redo" title=""><i class="icon-capture-redo"></i></button>
 
     <div class="divider"></div>
 
-    <button class="tool-btn" id="btn-save" title="Lưu thành tệp (Ctrl+S)"><i class="icon-capture-save"></i></button>
-    <button class="tool-btn" id="btn-copy" title="Sao chép (Ctrl+C)"><i class="icon-capture-copy"></i></button>
-    <button class="tool-btn btn-cancel" id="btn-cancel" title="Hủy (Esc)"><i class="icon-capture-cancel"></i></button>
-    <button class="tool-btn btn-accept" id="btn-accept" title="Xong (Enter)"><i class="icon-check"></i></button>
+    <button class="tool-btn" id="btn-save" data-i18n-key="save" title=""><i class="icon-capture-save"></i></button>
+    <button class="tool-btn" id="btn-copy" data-i18n-key="copy" title=""><i class="icon-capture-copy"></i></button>
+    <button class="tool-btn btn-cancel" id="btn-cancel" data-i18n-key="cancel" title=""><i class="icon-capture-cancel"></i></button>
+    <button class="tool-btn btn-accept" id="btn-accept" data-i18n-key="accept" title=""><i class="icon-check"></i></button>
   </div>
 
   <!-- Sub Toolbar for Tool Options -->
   <div id="sub-toolbar">
     <div class="size-picker">
-      <div class="size-dot small" data-size="small" title="Nét mảnh"><div class="size-dot-inner"></div></div>
-      <div class="size-dot medium active" data-size="medium" title="Nét vừa"><div class="size-dot-inner"></div></div>
-      <div class="size-dot large" data-size="large" title="Nét đậm"><div class="size-dot-inner"></div></div>
+      <div class="size-dot small" data-size="small" data-i18n-key="small" title=""><div class="size-dot-inner"></div></div>
+      <div class="size-dot medium active" data-size="medium" data-i18n-key="medium" title=""><div class="size-dot-inner"></div></div>
+      <div class="size-dot large" data-size="large" data-i18n-key="large" title=""><div class="size-dot-inner"></div></div>
     </div>
     <div class="divider"></div>
     <div class="color-palette">

@@ -18,7 +18,20 @@ function register({ app, BrowserWindow, onTrayMenuChanged } = {}) {
   const userDataPath = app.getPath('userData');
   const configPath = path.join(userDataPath, 'zalo-linux-settings.json');
   const isForced = () => process.env[ENV_OVERRIDE] === '1';
+  const messages = require('./locale.json').messages;
+  let currentLocale = 'vi';
   let lastFocusedWindow = null;
+
+  function translate(key) {
+    const entry = messages['dev-mode.' + key];
+    return entry ? entry[currentLocale] : key;
+  }
+
+  function setLocale(locale) {
+    if (locale !== 'vi' && locale !== 'en') return false;
+    currentLocale = locale;
+    return true;
+  }
 
   function readSettings() {
     try {
@@ -113,10 +126,16 @@ function register({ app, BrowserWindow, onTrayMenuChanged } = {}) {
     isForced,
     getStatus,
     toggleDevTools,
+    getLocale: () => currentLocale,
+    setLocale,
+    onLanguageUpdateRequest(request) {
+      if (!request || request.type !== 'LANGUAGE_UPDATE_REQUEST') return false;
+      return setLocale(request.locale);
+    },
     getTrayMenuItems() {
       if (!getStatus().devModeEnabled) return [];
       return [{
-        label: 'Toggle DevTools',
+        label: translate('toggleDevTools'),
         click: toggleDevTools
       }];
     },

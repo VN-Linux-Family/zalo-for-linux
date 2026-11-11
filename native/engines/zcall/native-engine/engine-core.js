@@ -210,7 +210,7 @@ class EngineCore {
     if (c.type === 3) this._camMic();
     this.ui.open({
       title: c.peerName || 'Zalo',
-      text: 'Đang gọi…',
+      statusCode: 'calling',
       avatar: c.avatar,
       video: c.type === 3,
       selfAvatar: (this.local && this.local.avatar) || '',
@@ -226,10 +226,10 @@ class EngineCore {
       if (this.call !== c || c.state === 'connected' || c.state === 'ended') return;
       const unreachable = c.state === 'calling';
       this.log(`outgoing call: ${unreachable ? 'unreachable / no network' : 'no answer'} (timeout)`);
-      const closeText = unreachable ? 'Người nhận không liên lạc được' : 'Người nhận không trả lời';
-      this.ui.status(closeText);
+      const statusCode = unreachable ? 'recipientUnreachable' : 'recipientNoAnswer';
+      this.ui.status(statusCode);
       this.emit({ type: 'sendSignal', command: 405, data: { callId: c.callId, callType: c.type === 3 ? 1 : 0, status: 0, toId: c.peerId } });
-      this._finish(103, closeText);
+      this._finish(103, statusCode);
     }, ms);
     if (c.ringTimer.unref) c.ringTimer.unref();
   }
@@ -285,10 +285,10 @@ class EngineCore {
   // Group calls are not implemented (separate SFU signalling and media).
   // Ours: say so in the call window for a few seconds instead of calling anyone.
   _groupNotSupported(title, avatar) {
-    const text = 'Gọi nhóm chưa được hỗ trợ trên Linux';
+    const statusCode = 'groupUnsupported';
     this.log('group call: not supported');
-    this.ui.open({ title, text, avatar });
-    setTimeout(() => { if (!this.call) this.ui.close(text); }, 3000).unref();
+    this.ui.open({ title, statusCode, avatar });
+    setTimeout(() => { if (!this.call) this.ui.close(statusCode); }, 3000).unref();
   }
 
   // Someone else's (control group_request): show it like an incoming call,
@@ -300,11 +300,12 @@ class EngineCore {
     const dismiss = () => {
       if (this.groupNotice !== notice) return;
       this.groupNotice = null;
-      if (!this.call) this.ui.close('Đã bỏ qua cuộc gọi nhóm');
+      if (!this.call) this.ui.close('groupCallIgnored');
     };
     this.ui.incoming({
       title: d.groupName || 'Cuộc gọi nhóm',
-      text: `${d.Dname || 'Ai đó'} đang gọi nhóm. Gọi nhóm chưa được hỗ trợ trên Linux.`,
+      statusCode: 'incomingGroupUnsupported',
+      statusParams: { inviter: d.Dname || '' },
       avatar: d.groupAvatar || d.avatar || '',
       noAnswer: true,
     }, dismiss, dismiss);
@@ -352,7 +353,7 @@ class EngineCore {
         else if (this.groupNotice) {
           clearTimeout(this.groupNotice);
           this.groupNotice = null;
-          this.ui.close('Đã bỏ qua cuộc gọi nhóm');
+          this.ui.close('groupCallIgnored');
         }
       }
       return;
@@ -364,7 +365,7 @@ class EngineCore {
       case 'ring_ring':
         if (c && c.state === 'calling') {
           c.state = 'ringing';
-          this.ui.status('Đang đổ chuông…');
+          this.ui.status('ringing');
           this._setCallTimeout(c, RING_TIMEOUT_MS);
         }
         return;
@@ -383,7 +384,7 @@ class EngineCore {
         const status = Number(d.status || params.status || 0);
         if (status !== 0) {
           this.log('peer declined, answer status', status);
-          this._finish(160, status === 3 ? 'Người nhận đã từ chối' : 'Không liên lạc được');
+          this._finish(160, status === 3 ? 'recipientDeclined' : 'recipientUnreachable');
           return;
         }
         this._connectCaller(params.rtpSerIp);
@@ -473,10 +474,9 @@ class EngineCore {
     this.emit({ type: 'update', command: 'callState', data: { state: 'incall' } });
     this.emit({ type: 'request', command: 'getAliasName', data: { noisedId: c.peerId } });
     this.emit({ type: 'sendSignal', command: 407, data: { callId: c.callId, callerId: c.peerId } });
-    const kind = c.type === 3 ? 'Cuộc gọi video đến' : 'Cuộc gọi thoại đến';
     this.ui.incoming({
       title: c.peerName || 'Zalo',
-      text: kind,
+      statusCode: c.type === 3 ? 'incomingVideo' : 'incomingVoice',
       avatar: c.avatar,
       video: c.type === 3,
       selfAvatar: (this.local && this.local.avatar) || '',
@@ -505,7 +505,7 @@ class EngineCore {
       peerUid: c.peerUid,
       p2pCandidates: c.p2p,
     });
-    this.ui.status('Đang kết nối…');
+    this.ui.status('connecting');
     this.media.prepare('callee').then((best) => {
       if (this.call !== c || c.state === 'ended') return;
       const p2p = typeof this.media.localCandidates === 'function' ? this.media.localCandidates(best && best.publicAddr) : [];
@@ -523,9 +523,9 @@ class EngineCore {
           status: 0,
         },
       });
-      if (!best && this.media.sendUdp) { this.ui.status('Không kết nối được máy chủ'); this.hangup('no-server'); return; }
+      if (!best && this.media.sendUdp) { this.ui.status('serverUnreachable'); this.hangup('no-server'); return; }
       this.media.start('callee', c.server.rtpaddr);
-      this.ui.status('Đã kết nối', c.startedAt);
+      this.ui.status('connected', c.startedAt);
       if (c.cameraOff) this._camMic(false);
     });
   }
@@ -648,7 +648,7 @@ class EngineCore {
       // until the next 12006 (after a screen share); say it again once it is up.
       setTimeout(() => { if (this.call === c && c.state === 'connected') this._camMic(); }, 2000).unref();
     }
-    this.ui.status('Đã kết nối', c.startedAt);
+    this.ui.status('connected', c.startedAt);
   }
 
   // Peer RTP before the answer control. The first frame means the other phone
@@ -659,7 +659,7 @@ class EngineCore {
     if (!c || c.group || c.role !== 'caller' || c.state === 'connected' || c.state === 'ended') return;
     if (phase === 'first' && c.state === 'calling') {
       c.state = 'ringing';
-      this.ui.status('Đang đổ chuông…');
+      this.ui.status('ringing');
       this.log('peer audio during setup, no ring signal yet');
       this._setCallTimeout(c, RING_TIMEOUT_MS);
       return;
@@ -679,13 +679,12 @@ class EngineCore {
     c.audioFaults = c.audioFaults || new Set();
     if (kind === 'audio') { c.audioFaults.add('mic'); c.audioFaults.add('speaker'); } else c.audioFaults.add(kind);
     const mic = c.audioFaults.has('mic'), speaker = c.audioFaults.has('speaker');
-    const text = (mic && speaker ? 'Không mở được micro và loa'
-      : mic ? 'Không mở được micro, bên kia không nghe thấy bạn'
-        : 'Không phát được âm thanh ra loa') + '. Kiểm tra PipeWire / PulseAudio.';
-    if (text === c.audioNotice) return;
-    c.audioNotice = text;
+    const noticeCode = mic && speaker ? 'audioMicSpeakerFailed'
+      : mic ? 'audioMicFailed' : 'audioSpeakerFailed';
+    if (noticeCode === c.audioNoticeCode) return;
+    c.audioNoticeCode = noticeCode;
     this.log('audio fault:', [...c.audioFaults].join(' '));
-    if (typeof this.ui.notice === 'function') this.ui.notice(text);
+    if (typeof this.ui.notice === 'function') this.ui.notice(noticeCode);
   }
 
   // The other side hung up, cancelled or declined.
@@ -706,7 +705,7 @@ class EngineCore {
         if (!c || c.state !== 'calling') return;
         if (data.status || !Array.isArray(data.servers) || !data.servers.length) {
           this.log('recvSignal 401 without servers', data.status, data.msg);
-          this.ui.status('Không gọi được');
+          this.ui.status('callFailed');
           this._finish(103);
           return;
         }
@@ -729,7 +728,7 @@ class EngineCore {
         this.media.prepare(c.role).then((best) => {
           if (this.call !== c || c.state === 'ended') return;
           const chosen = best ? best.server.raw : data.servers[0];
-          if (!best && this.media.sendUdp) { this.ui.status('Không kết nối được máy chủ'); this.hangup('no-server'); return; }
+          if (!best && this.media.sendUdp) { this.ui.status('serverUnreachable'); this.hangup('no-server'); return; }
           this._send416(c, chosen, best && best.publicAddr);
         });
         return;
@@ -758,7 +757,7 @@ class EngineCore {
           const idle = this.media.lastRxAt ? Date.now() - this.media.lastRxAt : Infinity;
           if (idle < GROUP_MEDIA_IDLE_MS) { this.log('group ping fail:', r.error, r.message || '', '(media still flowing; staying)'); return; }
           this.log('group ping fail:', r.error, r.message || '');
-          this._groupFinish(50, 'Cuộc gọi nhóm đã kết thúc', { signals: true });
+          this._groupFinish(50, 'groupEnded', { signals: true });
         }
         return;
       }
@@ -859,7 +858,7 @@ class EngineCore {
     } else {
       this.emit({ type: 'sendSignal', command: 405, data: { callId: c.callId, callType: c.type === 3 ? 1 : 0, status: 0, toId: c.peerId } });
     }
-    this._finish(c.state === 'connected' ? 50 : 103);
+    this._finish(c.state === 'connected' ? 50 : 103, why === 'no-server' ? 'serverUnreachable' : null);
   }
 
   // ---- Group calls: someone else's (incoming) ----
@@ -887,7 +886,7 @@ class EngineCore {
       case 'group_answer':
         if (c.state === 'incoming' && (!who || who === c.localUid)) {
           this.log('group call over before we answered: answered on another device');
-          this._groupFinish(0, 'Cuộc gọi nhóm đã kết thúc', { signals: false });
+          this._groupFinish(0, 'groupEnded', { signals: false });
           return;
         }
         if (who && who !== c.localUid) { this._groupMember(who, { state: 'incall' }); this._groupGreet(who); }
@@ -902,14 +901,14 @@ class EngineCore {
         // declined on another device (fromId = our UID).
         if (c.state === 'incoming' && (!who || who === c.hostCall || who === c.localUid)) {
           this.log('group call over before we answered:', act, who === c.localUid ? 'handled on another device' : 'cancelled');
-          this._groupFinish(0, 'Cuộc gọi nhóm đã kết thúc', { signals: false });
+          this._groupFinish(0, 'groupEnded', { signals: false });
           return;
         }
         // In the call: Zalo says we left (the server dropped us, or it is the
         // echo of our own 12438, which then finds the call already over).
         if (who === c.localUid) {
           this.log('group call: Zalo reports our own end_call');
-          this._groupFinish(c.state === 'connected' ? 50 : 0, 'Cuộc gọi nhóm đã kết thúc', { signals: false });
+          this._groupFinish(c.state === 'connected' ? 50 : 0, 'groupEnded', { signals: false });
           return;
         }
         if (who) this._groupMemberLeft(who, act);
@@ -996,7 +995,7 @@ class EngineCore {
     }));
     this.ui.open({
       title: c.title,
-      text: 'Đang gọi nhóm…',
+      statusCode: 'groupCalling',
       avatar: c.avatar,
       video: true,
       group: true,
@@ -1029,8 +1028,8 @@ class EngineCore {
     if (status !== 0 || !c.sessId || !c.servers.length || !c.localUid) {
       this.log('group call request refused / incomplete');
       c.state = 'failed';
-      this.ui.status(p.msg ? `Không gọi được: ${p.msg}` : 'Không gọi được nhóm');
-      setTimeout(() => this._groupFinish(0, 'Không gọi được nhóm', { signals: false }), 3000).unref();
+      this.ui.status(p.msg ? 'groupCallFailedReason' : 'groupCallFailed', 0, p.msg ? { message: p.msg } : {});
+      setTimeout(() => this._groupFinish(0, 'groupCallFailed', { signals: false }), 3000).unref();
       return;
     }
     c.state = 'connecting';
@@ -1052,8 +1051,8 @@ class EngineCore {
       if (this.call !== c || c.state !== 'connecting') return;
       if (!best && this.media.sendUdp) {
         c.state = 'failed';
-        this.ui.status('Không vào được cuộc gọi nhóm (máy chủ từ chối)');
-        setTimeout(() => this._groupFinish(0, 'Không vào được cuộc gọi nhóm', { signals: false }), 3000).unref();
+        this.ui.status('groupJoinRejected');
+        setTimeout(() => this._groupFinish(0, 'groupJoinRejected', { signals: false }), 3000).unref();
         return;
       }
       this.media.start('caller', null);
@@ -1134,8 +1133,8 @@ class EngineCore {
     }
     this.emit({ type: 'update', command: 'callState', data: { state: 'incall' } });
     this.emit({ type: 'sendSignal', command: 12439, data: { callId: c.callId, data: jsonCpp({ callType: 1, extraData: '', status: 1 }), hostCall: c.hostCall, session: c.sessId, status: 1 } });
-    const host = (c.members.get(c.hostCall) || {}).name || d.Dname || 'Ai đó';
-    this.ui.incoming({ title: c.title, text: `${host} mời bạn vào cuộc gọi nhóm`, inviter: host, avatar: c.avatar, video: true, group: true, selfAvatar: (this.local && this.local.avatar) || '' },
+    const host = (c.members.get(c.hostCall) || {}).name || d.Dname || '';
+    this.ui.incoming({ title: c.title, statusCode: 'incomingGroupInvite', statusParams: { inviter: host }, inviter: host, avatar: c.avatar, video: true, group: true, selfAvatar: (this.local && this.local.avatar) || '' },
       (camStartOff) => this._groupAnswer(camStartOff), (why) => this._groupReject(why));
   }
 
@@ -1159,16 +1158,16 @@ class EngineCore {
       localUid: c.localUid,
       hostCall: c.hostCall,
     });
-    this.ui.status('Đang kết nối…');
+    this.ui.status('connecting');
     this._groupCameraProfile();
     this.media.prepare('callee').then((best) => {
       if (this.call !== c || c.state !== 'connecting') return;
       if (!best && this.media.sendUdp) {
         // Leave the reason on screen for a moment before the window closes.
         c.state = 'failed';
-        this.ui.status('Không vào được cuộc gọi nhóm (máy chủ từ chối)');
+        this.ui.status('groupJoinRejected');
         this._groupSendAnswer(c, 3);
-        setTimeout(() => this._groupFinish(0, 'Không vào được cuộc gọi nhóm', { signals: false }), 3000).unref();
+        setTimeout(() => this._groupFinish(0, 'groupJoinRejected', { signals: false }), 3000).unref();
         return;
       }
       this.media.start('callee', null);
@@ -1187,7 +1186,7 @@ class EngineCore {
     if (!c || !c.group || c.state !== 'incoming') return;
     this.log('group reject:', why);
     this._groupSendAnswer(c, 3);
-    this._groupFinish(0, 'Đã từ chối cuộc gọi nhóm', { signals: false });
+    this._groupFinish(0, 'groupDeclined', { signals: false });
   }
 
   // 12436: status 0 accept, 3 decline (ZCallGroupInfo::_trySendAcceptSignal / _rejectCurrentCall).
@@ -1341,16 +1340,17 @@ class EngineCore {
     const c = this.call;
     if (!c || !c.group || (c.state !== 'connected' && c.state !== 'calling')) return;
     this._groupMembersToUi();
-    const names = [...c.members.entries()].filter(([uid, m]) => m.state === 'incall' && (!c.shareScreenId || uid !== c.shareScreenId)).map(([, m]) => m.name || 'Thành viên');
+    const names = [...c.members.entries()].filter(([uid, m]) => m.state === 'incall' && (!c.shareScreenId || uid !== c.shareScreenId)).map(([, m]) => m.name || null);
     const hasRinging = [...c.members.values()].some((m) => m.state === 'ringing');
-    const waiting = c.role === 'caller' && !c.answered
-      ? (hasRinging ? 'Đang đổ chuông…' : 'Đang gọi nhóm…')
-      : 'Đang chờ người khác…';
-    const text = names.length ? `${names.length + 1} người: Bạn, ${names.join(', ')}` : waiting;
-    if (text !== c.statusText) {
-      c.statusText = text;
+    const statusCode = names.length ? 'groupParticipants'
+      : c.role === 'caller' && !c.answered ? (hasRinging ? 'groupRinging' : 'groupCalling')
+        : 'groupWaitingOthers';
+    const statusParams = names.length ? { count: names.length + 1, names } : {};
+    const signature = JSON.stringify([statusCode, statusParams]);
+    if (signature !== c.statusSignature) {
+      c.statusSignature = signature;
       const since = c.answered && names.length ? c.startedAt : 0;
-      this.ui.status(text, since);
+      this.ui.status(statusCode, since, statusParams);
     }
   }
 
@@ -1359,7 +1359,7 @@ class EngineCore {
     const c = this.call;
     if (!c || !c.group || c.state === 'ended') return;
     this.log('group call ended by the server:', why);
-    this._groupFinish(c.state === 'connected' ? 50 : 0, why === 'kicked' ? 'Bạn đã bị mời ra khỏi cuộc gọi' : 'Cuộc gọi nhóm đã kết thúc');
+    this._groupFinish(c.state === 'connected' ? 50 : 0, why === 'kicked' ? 'groupKicked' : 'groupEnded');
   }
 
   _groupHangup(why) {
@@ -1382,12 +1382,12 @@ class EngineCore {
         data: { callId: c.callId, data: jsonCpp({ callType: c.callType, duration: 0, extraData: '', groupId: c.groupId }), hostCall: c.hostCall },
       });
     }
-    this._groupFinish(0, why === 'no-answer' ? 'Không ai trả lời' : 'Đã huỷ cuộc gọi nhóm', { signals: false });
+    this._groupFinish(0, why === 'no-answer' ? 'groupNoAnswer' : 'groupCancelled', { signals: false });
   }
 
   // 12438 endcall {callId, hostCall, data {callType, duration, extraData,
   // groupId, status}} (status 7 for reasons 19-23, else 0), then 12446.
-  _groupFinish(status, closeText, { signals = true } = {}) {
+  _groupFinish(status, closeCode = null, { signals = true } = {}) {
     const c = this.call;
     if (!c || c.state === 'ended') return;
     const connected = c.state === 'connected';
@@ -1418,11 +1418,11 @@ class EngineCore {
       });
     }
     this.emit({ type: 'update', command: 'callState', data: { state: 'free' } });
-    this.ui.close(closeText || (connected ? `Kết thúc — ${duration} s` : 'Đã kết thúc'));
+    this.ui.close(closeCode || (connected ? 'endedWithDuration' : 'ended'), connected ? { duration } : {});
     this.call = null;
   }
 
-  _finish(status, closeText, { signals = true } = {}) {
+  _finish(status, closeCode = null, { signals = true } = {}) {
     const c = this.call;
     if (!c || c.state === 'ended') return;
     this._rememberEndedCall(c.callId);
@@ -1456,7 +1456,7 @@ class EngineCore {
       });
     }
     this.emit({ type: 'update', command: 'callState', data: { state: 'free' } });
-    this.ui.close(closeText || (connected ? `Kết thúc — ${duration} s` : 'Đã kết thúc'));
+    this.ui.close(closeCode || (connected ? 'endedWithDuration' : 'ended'), connected ? { duration } : {});
     this.call = null;
   }
 }

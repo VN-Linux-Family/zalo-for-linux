@@ -1,0 +1,250 @@
+{
+  "schemaVersion": 1,
+  "plugin": "advanced-settings",
+  "messages": {
+    "advanced-settings.title": {
+      "vi": "Nâng cao",
+      "en": "Advanced Settings"
+    },
+    "advanced-settings.tagline": {
+      "vi": "Cá nhân hóa cuộc gọi và mở rộng Zalo theo cách của bạn.",
+      "en": "Customize calls and extend Zalo your way."
+    },
+    "advanced-settings.soundTitle": {
+      "vi": "Âm thanh cuộc gọi",
+      "en": "Call sounds"
+    },
+    "advanced-settings.soundDescription": {
+      "vi": "Chọn tệp âm thanh trên máy. Để trống đường dẫn để dùng âm thanh mặc định.",
+      "en": "Choose audio files on this device. Leave the path empty to use the default sound."
+    },
+    "advanced-settings.ringtone": {
+      "vi": "Nhạc chuông (ringtone)",
+      "en": "Ringtone"
+    },
+    "advanced-settings.ringtoneDescription": {
+      "vi": "Phát khi có cuộc gọi đến.",
+      "en": "Played when you receive an incoming call."
+    },
+    "advanced-settings.ringback": {
+      "vi": "Nhạc chờ (ringback)",
+      "en": "Ringback tone"
+    },
+    "advanced-settings.ringbackDescription": {
+      "vi": "Phát trên máy bạn trong lúc chờ người nhận trả lời.",
+      "en": "Played on your device while waiting for the recipient to answer."
+    },
+    "advanced-settings.browse": {
+      "vi": "Chọn tệp…",
+      "en": "Browse…"
+    },
+    "advanced-settings.preview": {
+      "vi": "Nghe thử",
+      "en": "Preview"
+    },
+    "advanced-settings.stopPreview": {
+      "vi": "Dừng nghe thử",
+      "en": "Stop preview"
+    },
+    "advanced-settings.reset": {
+      "vi": "Mặc định",
+      "en": "Default"
+    },
+    "advanced-settings.save": {
+      "vi": "Lưu",
+      "en": "Save"
+    },
+    "advanced-settings.soundHint": {
+      "vi": "MP3, WAV, OGG, M4A, AAC, FLAC, OPUS, WEBM. Thay đổi áp dụng từ lần phát tiếp theo. Hãy giữ tệp ở đường dẫn đã chọn.",
+      "en": "MP3, WAV, OGG, M4A, AAC, FLAC, OPUS, WEBM. Changes apply to the next playback. Keep the file at the selected path."
+    },
+    "advanced-settings.screenshotTitle": {
+      "vi": "Chụp màn hình",
+      "en": "Screenshot"
+    },
+    "advanced-settings.screenshotDescription": {
+      "vi": "Tùy chỉnh thời gian chờ (delay) trước khi chụp ảnh màn hình để tránh hiệu ứng chuyển cảnh của Desktop Environment (DE) hoặc cửa sổ chưa kịp ẩn.",
+      "en": "Set the delay before capturing a screenshot to avoid Desktop Environment (DE) transition effects or a window that has not finished hiding."
+    },
+    "advanced-settings.withZalo": {
+      "vi": "Chế độ chụp có Zalo (mili-giây)",
+      "en": "Capture with Zalo (milliseconds)"
+    },
+    "advanced-settings.withZaloDescription": {
+      "vi": "Thời gian chờ khi chụp kèm cửa sổ Zalo trên màn hình.",
+      "en": "Delay when capturing the screen with the Zalo window visible."
+    },
+    "advanced-settings.withoutZalo": {
+      "vi": "Chế độ chụp không có Zalo (mili-giây)",
+      "en": "Capture without Zalo (milliseconds)"
+    },
+    "advanced-settings.withoutZaloDescription": {
+      "vi": "Thời gian chờ sau khi ẩn/thu nhỏ cửa sổ Zalo để compositor hoàn tất hiệu ứng chuyển cảnh.",
+      "en": "Delay after hiding or minimizing Zalo so the compositor can finish its transition."
+    },
+    "advanced-settings.delayHint": {
+      "vi": "Giá trị từ 0 đến 10000 mili-giây (1000 ms = 1 giây). Thay đổi áp dụng ngay cho lần chụp tiếp theo.",
+      "en": "Enter a value from 0 to 10000 milliseconds (1000 ms = 1 second). Changes apply to the next capture."
+    },
+    "advanced-settings.recalledTitle": {
+      "vi": "Giữ tin nhắn đã thu hồi",
+      "en": "Keep recalled messages"
+    },
+    "advanced-settings.recalledDescription": {
+      "vi": "Giữ lại nội dung tin nhắn bị thu hồi để xem lại qua nút Thu hồi phía trên ô soạn tin.",
+      "en": "Keep the contents of recalled messages so you can review them using the Recalled button above the message composer."
+    },
+    "advanced-settings.recalledHint": {
+      "vi": "Chỉ giữ được tin bị thu hồi lúc Zalo đang mở. Tin được lưu trên máy này, tối đa 500 tin. Tắt tính năng sẽ xoá các tin đã giữ.",
+      "en": "Only messages recalled while Zalo is running can be kept. Up to 500 messages are stored on this device. Turning this off deletes saved messages."
+    },
+    "advanced-settings.userscriptsDescription": {
+      "vi": "Tạo, chỉnh sửa và quản lý các script chạy trong Zalo.",
+      "en": "Create, edit, and manage scripts that run in Zalo."
+    },
+    "advanced-settings.openManager": {
+      "vi": "Mở trình quản lý",
+      "en": "Open manager"
+    },
+    "advanced-settings.managerPageTitle": {
+      "vi": "Userscript Manager — Nâng cao",
+      "en": "Userscript Manager — Advanced"
+    },
+    "advanced-settings.saved": {
+      "vi": "Đã lưu. Áp dụng từ lần phát tiếp theo.",
+      "en": "Saved. Applies from the next playback."
+    },
+    "advanced-settings.resetSound": {
+      "vi": "Đã khôi phục âm thanh mặc định.",
+      "en": "Default sound restored."
+    },
+    "advanced-settings.picked": {
+      "vi": "Bấm Nghe thử để kiểm tra, sau đó Lưu để áp dụng.",
+      "en": "Select Preview to test the file, then Save to apply it."
+    },
+    "advanced-settings.previewError": {
+      "vi": "Không phát được tệp âm thanh này. Hãy chọn tệp khác.",
+      "en": "Unable to play this audio file. Please choose another file."
+    },
+    "advanced-settings.unsaved": {
+      "vi": "Chưa lưu thay đổi.",
+      "en": "Unsaved changes."
+    },
+    "advanced-settings.delaySaved": {
+      "vi": "Đã lưu. Áp dụng ngay cho lần chụp tiếp theo.",
+      "en": "Saved. Applies to the next screenshot."
+    },
+    "advanced-settings.delayReset": {
+      "vi": "Đã khôi phục thời gian chờ mặc định.",
+      "en": "Default delay restored."
+    },
+    "advanced-settings.recalledOn": {
+      "vi": "Đã bật. Áp dụng ngay cho cửa sổ Zalo đang mở.",
+      "en": "Enabled. Applies immediately to open Zalo windows."
+    },
+    "advanced-settings.recalledOff": {
+      "vi": "Đã tắt và xóa các tin đã giữ.",
+      "en": "Disabled and saved recalled messages were deleted."
+    },
+    "advanced-settings.menu.open": {
+      "vi": "Nâng cao...",
+      "en": "Advanced Settings..."
+    },
+    "advanced-settings.menu.title": {
+      "vi": "Cài đặt nâng cao cho Zalo trên Linux",
+      "en": "Advanced settings for Zalo on Linux"
+    },
+    "advanced-settings.recalledConfirm": {
+      "vi": "Tắt tính năng sẽ xoá các tin nhắn đã thu hồi đang giữ. Tiếp tục?",
+      "en": "Turning this off will delete the recalled messages currently being kept. Continue?"
+    },
+    "advanced-settings.chooseRingtone": {
+      "vi": "Chọn nhạc chuông",
+      "en": "Choose ringtone"
+    },
+    "advanced-settings.chooseRingback": {
+      "vi": "Chọn nhạc chờ",
+      "en": "Choose ringback tone"
+    },
+    "advanced-settings.audioFiles": {
+      "vi": "Âm thanh",
+      "en": "Audio files"
+    },
+    "advanced-settings.errorSoundKind": {
+      "vi": "Loại âm thanh không hợp lệ.",
+      "en": "Invalid sound type."
+    },
+    "advanced-settings.errorDelayInvalid": {
+      "vi": "Thời gian chờ phải là một số hợp lệ.",
+      "en": "Delay must be a valid number."
+    },
+    "advanced-settings.errorDelayNegative": {
+      "vi": "Thời gian chờ không được nhỏ hơn 0 mili-giây.",
+      "en": "Delay cannot be less than 0 milliseconds."
+    },
+    "advanced-settings.errorDelayMax": {
+      "vi": "Thời gian chờ tối đa là 10000 mili-giây (10 giây).",
+      "en": "Maximum delay is 10000 milliseconds (10 seconds)."
+    },
+    "advanced-settings.errorPathInvalid": {
+      "vi": "Đường dẫn không hợp lệ.",
+      "en": "Invalid path."
+    },
+    "advanced-settings.errorPathAbsolute": {
+      "vi": "Hãy nhập đường dẫn tuyệt đối đến tệp âm thanh.",
+      "en": "Enter an absolute path to the audio file."
+    },
+    "advanced-settings.errorAudioFormat": {
+      "vi": "Định dạng âm thanh không được hỗ trợ.",
+      "en": "Unsupported audio format."
+    },
+    "advanced-settings.errorAudioRead": {
+      "vi": "Không thể đọc tệp âm thanh. Hãy kiểm tra lại đường dẫn và quyền truy cập.",
+      "en": "Cannot read the audio file. Check the path and file permissions."
+    },
+    "advanced-settings.errorValueInvalid": {
+      "vi": "Giá trị không hợp lệ.",
+      "en": "Invalid value."
+    },
+    "advanced-settings.errorScreenshotKind": {
+      "vi": "Loại chụp màn hình không hợp lệ.",
+      "en": "Invalid screenshot mode."
+    },
+    "advanced-settings.eyebrow": {
+      "vi": "ZALO TRÊN LINUX",
+      "en": "ZALO FOR LINUX"
+    },
+    "advanced-settings.defaultZalo": {
+      "vi": "Mặc định của Zalo",
+      "en": "Zalo default"
+    },
+    "advanced-settings.userscriptsTitle": {
+      "vi": "Userscript Manager",
+      "en": "Userscript Manager"
+    },
+    "advanced-settings.managerMsUnit": {
+      "vi": "ms",
+      "en": "ms"
+    },
+    "advanced-settings.devModeTitle": {
+      "vi": "Chế độ nhà phát triển",
+      "en": "Developer Mode"
+    },
+    "advanced-settings.devModeForced": {
+      "vi": "Được bật bắt buộc bởi biến môi trường ZALO_DEV_MODE.",
+      "en": "Forced on by the ZALO_DEV_MODE environment variable."
+    },
+    "advanced-settings.devModeEnabled": {
+      "vi": "Đã bật DevTools.",
+      "en": "DevTools enabled."
+    },
+    "advanced-settings.devModeDisabled": {
+      "vi": "Đã tắt DevTools.",
+      "en": "DevTools disabled."
+    },
+    "advanced-settings.errorDevModeValue": {
+      "vi": "Giá trị dev mode không hợp lệ.",
+      "en": "Invalid Developer Mode value."
+    }
+  }
+}

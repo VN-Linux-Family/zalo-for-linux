@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "plugin": "tray-menu",
+  "messages": {
+    "tray-menu.show": {
+      "vi": "Mở Zalo",
+      "en": "Open Zalo"
+    },
+    "tray-menu.hide": {
+      "vi": "Ẩn Zalo",
+      "en": "Hide Zalo"
+    },
+    "tray-menu.quit": {
+      "vi": "Thoát",
+      "en": "Quit"
+    }
+  }
+}

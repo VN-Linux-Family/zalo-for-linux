@@ -5,10 +5,10 @@
 // without them (engine run on its own) the zenity window is used instead.
 //
 // Protocol: one JSON object per line.
-//   engine -> ui  {type:"state", phase, name, avatar, text, since, video, muted, speakerOff, peerCamOff, peerMuted, peerSharing, cameraEncode?, members?}
+//   engine -> ui  {type:"state", phase, statusCode, statusParams?, noticeCode?, noticeParams?, name, avatar, since, video, muted, speakerOff, peerCamOff, peerMuted, peerSharing, cameraEncode?, members?}
 //                 {type:"keyframe"}                    encode the next camera frame as a key frame
 //                 {type:"speaking", src, on}           group: member src is talking (or stopped)
-//                 {type:"close", text}
+//                 {type:"close", statusCode, statusParams?}
 //   ui -> engine  {action:"hangup"|"accept"|"reject"|"mute"|"speaker"|"camera", on?}
 //                 {action:"videoFrame", key, data, screen, w, h}   our camera or screen, H.264 Annex-B (base64)
 //                 {action:"device", kind:"mic"|"speaker", id}   PulseAudio source / sink ("" = default)
@@ -19,6 +19,36 @@
 
 const net = require('net');
 const { CallWindow } = require('./call-window');
+
+// The optional zenity fallback has no Language Core renderer; keep its
+// historical Vietnamese labels here. Electron ZCall UI always receives codes.
+const FALLBACK_STATUS = Object.freeze({
+  calling: 'Đang gọi…', ringing: 'Đang đổ chuông…', connecting: 'Đang kết nối…',
+  connected: 'Đã kết nối', ended: 'Đã kết thúc', endedWithDuration: 'Kết thúc — {duration} s', disconnected: 'Mất kết nối với bộ gọi điện',
+  incomingVoice: 'Cuộc gọi thoại đến', incomingVideo: 'Cuộc gọi video đến',
+  recipientUnreachable: 'Người nhận không liên lạc được', recipientNoAnswer: 'Người nhận không trả lời',
+  recipientDeclined: 'Người nhận đã từ chối', callFailed: 'Không gọi được',
+  serverUnreachable: 'Không kết nối được máy chủ', groupUnsupported: 'Gọi nhóm chưa được hỗ trợ trên Linux',
+  groupCallIgnored: 'Đã bỏ qua cuộc gọi nhóm', groupEnded: 'Cuộc gọi nhóm đã kết thúc',
+  groupCallFailed: 'Không gọi được nhóm', groupJoinRejected: 'Không vào được cuộc gọi nhóm (máy chủ từ chối)',
+  groupDeclined: 'Đã từ chối cuộc gọi nhóm', groupKicked: 'Bạn đã bị mời ra khỏi cuộc gọi',
+  groupNoAnswer: 'Không ai trả lời', groupCancelled: 'Đã huỷ cuộc gọi nhóm',
+  groupCalling: 'Đang gọi nhóm…', groupRinging: 'Đang đổ chuông…', groupWaitingOthers: 'Đang chờ người khác…',
+  groupParticipants: '{count} người: Bạn, {names}',
+  groupCallFailedReason: 'Không gọi được: {message}',
+  incomingGroupInvite: '{inviter} mời bạn vào cuộc gọi nhóm',
+  incomingGroupUnsupported: '{inviter} mời bạn vào cuộc gọi nhóm. Gọi nhóm chưa được hỗ trợ trên Linux.',
+  audioMicSpeakerFailed: 'Không mở được micro và loa. Kiểm tra PipeWire / PulseAudio.',
+  audioMicFailed: 'Không mở được micro, bên kia không nghe thấy bạn. Kiểm tra PipeWire / PulseAudio.',
+  audioSpeakerFailed: 'Không phát được âm thanh ra loa. Kiểm tra PipeWire / PulseAudio.',
+});
+
+function fallbackStatusText(statusCode, statusParams = {}) {
+  statusParams = statusParams || {};
+  const template = FALLBACK_STATUS[statusCode] || FALLBACK_STATUS.ended;
+  return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (_match, key) =>
+    statusParams[key] === undefined || statusParams[key] === null ? '' : String(statusParams[key]));
+}
 
 class ElectronCallUi {
   constructor({ port, token, log = () => {} }) {
@@ -46,17 +76,17 @@ class ElectronCallUi {
   onNeedKey(cb) { this.cb.needKey = cb; }
   onTile(cb) { this.cb.tile = cb; }
 
-  open({ title, text, avatar, video = false, group = false, selfAvatar = '', members = null }) {
+  open({ title, statusCode = 'calling', statusParams = {}, avatar, video = false, group = false, selfAvatar = '', members = null }) {
     this.incomingCb = null;
-    const s = { phase: 'outgoing', name: title, avatar, text, since: 0, video, group, selfAvatar, muted: false, speakerOff: false };
+    const s = { phase: 'outgoing', statusCode, statusParams, name: title, avatar, since: 0, video, group, selfAvatar, muted: false, speakerOff: false };
     if (members) s.members = members;
     this._state(s);
   }
 
   // noAnswer: only a dismiss button (a call we cannot take).
-  incoming({ title, text, avatar, video = false, noAnswer = false, inviter = '', group = false, selfAvatar = '', members = null }, onAccept, onReject) {
+  incoming({ title, statusCode, statusParams = {}, avatar, video = false, noAnswer = false, inviter = '', group = false, selfAvatar = '', members = null }, onAccept, onReject) {
     this.incomingCb = { onAccept, onReject };
-    const s = { phase: 'incoming', name: title, avatar, text, since: 0, video, group, selfAvatar, muted: false, speakerOff: false, noAnswer, inviter };
+    const s = { phase: 'incoming', statusCode: statusCode || (video ? 'incomingVideo' : 'incomingVoice'), statusParams, name: title, avatar, since: 0, video, group, selfAvatar, muted: false, speakerOff: false, noAnswer, inviter };
     if (members) s.members = members;
     this._state(s);
     if (this.fallback) this._fallbackIncoming();
@@ -64,22 +94,21 @@ class ElectronCallUi {
 
   _fallbackIncoming() {
     const s = this.state;
-    this.fallback.incoming({ title: s.name, text: s.text },
+    this.fallback.incoming({ title: s.name, text: fallbackStatusText(s.statusCode, s.statusParams) },
       () => this._onAction({ action: 'accept' }), (why) => this._onAction({ action: 'reject', why }));
   }
 
-  status(text, since = 0) {
+  status(statusCode, since = 0, statusParams = {}) {
     if (!this.state) return;
-    this._state({ ...this.state, phase: since ? 'connected' : this.state.phase === 'incoming' ? 'connecting' : this.state.phase, text, since });
+    this._state({ ...this.state, phase: since ? 'connected' : this.state.phase === 'incoming' ? 'connecting' : this.state.phase, statusCode, statusParams, since });
   }
 
-  // A problem the window keeps showing while the call is up (status() text is
-  // hidden once connected): our microphone or speaker stopped.
-  notice(text) {
+  // A coded warning the window keeps showing while the call is up: audio device failure.
+  notice(noticeCode, noticeParams = {}) {
     if (!this.state) return;
-    this.state = { ...this.state, notice: text || '' };
+    this.state = { ...this.state, noticeCode: noticeCode || '', noticeParams };
     this._send({ type: 'state', ...this.state });
-    if (this.fallback) this.fallback.status(text, this.state.since);
+    if (this.fallback) this.fallback.status(fallbackStatusText(noticeCode, noticeParams), this.state.since);
   }
 
   // The microphone's source volume (0..100 %) for the window's slider.
@@ -144,19 +173,20 @@ class ElectronCallUi {
     try { this.sock.write(Buffer.concat([head, payload])); } catch (_) {}
   }
 
-  close(text) {
+  close(statusCode = 'ended', statusParams = {}) {
     this.incomingCb = null;
     this.state = null;
-    this._send({ type: 'close', text: text || '' });
-    if (this.fallback) this.fallback.close(text);
+    this._send({ type: 'close', statusCode: statusCode || 'ended', statusParams });
+    if (this.fallback) this.fallback.close(fallbackStatusText(statusCode, statusParams));
   }
 
   _state(s) {
     this.state = s;
     this._send({ type: 'state', ...s });
     if (this.fallback) {
-      if (s.phase === 'outgoing') this.fallback.open({ title: s.name, text: s.text });
-      else if (s.phase !== 'incoming') this.fallback.status(s.text, s.since);
+      const label = fallbackStatusText(s.statusCode, s.statusParams);
+      if (s.phase === 'outgoing') this.fallback.open({ title: s.name, text: label });
+      else if (s.phase !== 'incoming') this.fallback.status(label, s.since);
     }
   }
 
@@ -237,8 +267,8 @@ class ElectronCallUi {
     if (s.phase === 'incoming' && this.incomingCb) {
       this._fallbackIncoming();
     } else {
-      this.fallback.open({ title: s.name, text: s.text });
-      if (s.since) this.fallback.status(s.text, s.since);
+      this.fallback.open({ title: s.name, text: fallbackStatusText(s.statusCode, s.statusParams) });
+      if (s.since) this.fallback.status(fallbackStatusText(s.statusCode, s.statusParams), s.since);
     }
   }
 }

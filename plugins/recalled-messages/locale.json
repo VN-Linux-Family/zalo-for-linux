@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "plugin": "recalled-messages",
+  "messages": {
+    "recalled-messages.button.count": {
+      "vi": "Thu hồi ({count})",
+      "en": "Recalled ({count})"
+    },
+    "recalled-messages.button.new": {
+      "vi": "Thu hồi ({count} mới)",
+      "en": "Recalled ({count} new)"
+    },
+    "recalled-messages.panel.title": {
+      "vi": "Tin nhắn đã thu hồi",
+      "en": "Recalled messages"
+    },
+    "recalled-messages.action.clear-all": {
+      "vi": "Xoá hết",
+      "en": "Clear all"
+    },
+    "recalled-messages.action.clear-conversation": {
+      "vi": "Xoá tin cuộc này",
+      "en": "Clear conversation"
+    },
+    "recalled-messages.action.close": {
+      "vi": "Đóng",
+      "en": "Close"
+    },
+    "recalled-messages.tab.conversation": {
+      "vi": "Cuộc trò chuyện này",
+      "en": "This conversation"
+    },
+    "recalled-messages.tab.all": {
+      "vi": "Tất cả",
+      "en": "All"
+    },
+    "recalled-messages.viewer.label": {
+      "vi": "Tin đã thu hồi",
+      "en": "Recalled message"
+    },
+    "recalled-messages.media.image-alt": {
+      "vi": "Ảnh đã thu hồi",
+      "en": "Recalled image"
+    },
+    "recalled-messages.media.video-alt": {
+      "vi": "Video đã thu hồi",
+      "en": "Recalled video"
+    },
+    "recalled-messages.media.view-video": {
+      "vi": "▶ Xem video",
+      "en": "▶ View video"
+    },
+    "recalled-messages.media.video-title": {
+      "vi": "Bấm để xem video",
+      "en": "Click to watch video"
+    },
+    "recalled-messages.media.image-title": {
+      "vi": "Bấm để xem ảnh lớn",
+      "en": "Click to view full-size image"
+    },
+    "recalled-messages.media.image-unavailable": {
+      "vi": "Ảnh không còn tải được từ máy chủ Zalo.",
+      "en": "The image is no longer available from Zalo servers."
+    },
+    "recalled-messages.empty.conversation": {
+      "vi": "Cuộc trò chuyện này chưa có tin nào bị thu hồi.",
+      "en": "There are no recalled messages in this conversation."
+    },
+    "recalled-messages.empty.all": {
+      "vi": "Chưa có tin nào bị thu hồi.",
+      "en": "There are no recalled messages."
+    },
+    "recalled-messages.meta.unknown-name": {
+      "vi": "Không rõ tên",
+      "en": "Unknown name"
+    },
+    "recalled-messages.meta.format": {
+      "vi": "{name} · gửi {sentAt} · thu hồi {recalledAt}",
+      "en": "{name} · sent {sentAt} · recalled {recalledAt}"
+    },
+    "recalled-messages.confirm.clear-conversation": {
+      "vi": "Xoá {count} tin đã giữ của cuộc trò chuyện này? Không thể khôi phục.",
+      "en": "Delete {count} saved messages from this conversation? This cannot be undone."
+    },
+    "recalled-messages.confirm.clear-all": {
+      "vi": "Xoá toàn bộ {count} tin đã giữ của mọi cuộc trò chuyện? Không thể khôi phục.",
+      "en": "Delete all {count} saved messages from every conversation? This cannot be undone."
+    }
+  }
+}
