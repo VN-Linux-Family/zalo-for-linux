@@ -12,6 +12,12 @@ async function main() {
 
   logger.info(`Applying platform patches to: ${APP_DIR}...`);
 
+  const { main: patchZaloLanguageBridge } = require('./patches/patch-zalo-language-bridge');
+  await patchZaloLanguageBridge();
+
+  const { main: patchZaloLanguageTransport } = require('./patches/patch-zalo-language-transport');
+  await patchZaloLanguageTransport();
+
   const { main: patchTitlebar } = require('./patches/patch-titlebar');
   await patchTitlebar();
 
