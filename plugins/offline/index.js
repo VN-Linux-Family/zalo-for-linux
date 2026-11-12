@@ -14,7 +14,9 @@ function register({ app, ipcMain, appDir }) {
     ...pages,
     path.resolve(appDir, 'pc-dist', 'shared-worker.html')
   ]);
-  const rendererSource = fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8');
+  const localeMessages = JSON.stringify(require('./locale.json').messages);
+  const rendererSource = "'use strict';\nwindow.__zaloLinuxOfflineMessages = " + localeMessages + ';\n' +
+    fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8').replace(/^'use strict';\s*/, '');
   let generation = 0;
   let offlineActive = false;
 

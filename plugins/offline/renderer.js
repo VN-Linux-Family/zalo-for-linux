@@ -46,13 +46,13 @@ function createOfflineController(env) {
     if (recovered && ready && !stopped && !refreshing) {
       refreshing = true;
       clearTimeout(retryTimer);
-      env.showStatus('Đã kết nối. Đang cập nhật Zalo…');
+      env.showStatus('reconnecting');
       Promise.resolve().then(() => env.reload()).then(started => {
         if (started === false) throw new Error('Reload did not start');
       }).catch(() => {
         if (stopped) return;
         recovered = false;
-        env.showStatus('Chưa thể cập nhật. Zalo sẽ thử lại…');
+        env.showStatus('retrying');
         schedule();
       }).finally(() => { refreshing = false; });
     }
@@ -126,7 +126,7 @@ function createOfflineController(env) {
     offline = true;
     setReportedActive(true);
     settings.onOffline();
-    env.showStatus('Ngoại tuyến · Đang hiển thị dữ liệu đã lưu trên máy');
+    env.showStatus('offline');
     schedule();
     // Keep the server clock offset, rather than setting the clock back to the
     // time of the previous login. The original object remains untouched on disk.
@@ -154,6 +154,58 @@ function createOfflineController(env) {
 if (typeof module !== 'undefined' && module.exports) module.exports = { createOfflineController };
 if (typeof window !== 'undefined' && window.__zaloOfflineBridge &&
     typeof window.__zaloOfflineBridge.request === 'function') {
+  const localeMessages = window.__zaloLinuxOfflineMessages || {};
+  let currentLocale = null;
+  let currentStatus = null;
+  let statusBadge = null;
+  let unregisterLanguage = null;
+
+  function renderStatus() {
+    if (!currentStatus || !currentLocale) return;
+    const entry = localeMessages['offline.status.' + currentStatus];
+    const message = entry && entry[currentLocale];
+    if (typeof message !== 'string') return;
+    if (!statusBadge) {
+      statusBadge = document.createElement('div');
+      statusBadge.id = 'linux-offline-status';
+      statusBadge.setAttribute('role', 'status');
+      statusBadge.style.cssText = 'position:fixed;bottom:12px;left:80px;z-index:99999;padding:8px 12px;' +
+        'border-radius:6px;background:#263445;color:white;font:13px sans-serif;pointer-events:none';
+      document.body.appendChild(statusBadge);
+    }
+    statusBadge.textContent = message;
+  }
+
+  function onLanguageUpdateRequest(request) {
+    if (!request || request.type !== 'LANGUAGE_UPDATE_REQUEST' ||
+        (request.locale !== 'vi' && request.locale !== 'en')) return;
+    currentLocale = request.locale;
+    renderStatus();
+  }
+
+  function startLanguageSupport() {
+    const api = window.ZaloLanguage;
+    if (!api || typeof api.registerPlugin !== 'function') return false;
+    unregisterLanguage = api.registerPlugin({
+      id: 'offline',
+      onLanguageUpdateRequest
+    });
+    return true;
+  }
+
+  function onLanguageReady() {
+    if (startLanguageSupport()) window.removeEventListener('zalo-language:ready', onLanguageReady);
+  }
+
+  if (!startLanguageSupport()) window.addEventListener('zalo-language:ready', onLanguageReady);
+  window.addEventListener('pagehide', () => {
+    window.removeEventListener('zalo-language:ready', onLanguageReady);
+    if (typeof unregisterLanguage === 'function') {
+      unregisterLanguage();
+      unregisterLanguage = null;
+    }
+  }, { once: true });
+
   const request = window.__zaloOfflineBridge.request;
   const storage = Object.freeze({
     read: () => request('read'),
@@ -174,17 +226,9 @@ if (typeof window !== 'undefined' && window.__zaloOfflineBridge &&
     reload: () => storage.refresh(),
     onOnline: callback => window.addEventListener('online', callback),
     onUnload: callback => window.addEventListener('beforeunload', callback),
-    showStatus(text) {
-      let badge = document.getElementById('linux-offline-status');
-      if (!badge) {
-        badge = document.createElement('div');
-        badge.id = 'linux-offline-status';
-        badge.setAttribute('role', 'status');
-        badge.style.cssText = 'position:fixed;bottom:12px;left:80px;z-index:99999;padding:8px 12px;' +
-          'border-radius:6px;background:#263445;color:white;font:13px sans-serif;pointer-events:none';
-        document.body.appendChild(badge);
-      }
-      badge.textContent = text;
+    showStatus(status) {
+      currentStatus = status;
+      renderStatus();
     }
   });
 }
