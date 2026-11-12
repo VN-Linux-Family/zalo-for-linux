@@ -8,6 +8,7 @@ const { parseAst } = require('../utils/ast-transform');
 
 const MARKER = '/* zalo-linux-offline */';
 const PRELOAD_MARKER = 'zalo-linux-offline-preload';
+const SHARED_PRELOAD_MARKER = 'zalo-linux-offline-shared-preload';
 const HTML_MARKER = 'zalo-linux-offline-renderer';
 
 const PRELOAD_BOOTSTRAP = `
@@ -16,7 +17,29 @@ const PRELOAD_BOOTSTRAP = `
   const { contextBridge, ipcRenderer } = require('electron');
   const api = Object.freeze({
     loadRenderer: () => ipcRenderer.sendSync('linux-offline:renderer') || '',
-    request: (action, payload) => ipcRenderer.invoke('linux-offline:request', action, payload)
+    request: (action, payload) => ipcRenderer.invoke('linux-offline:request', action, payload),
+    reportActive: active => ipcRenderer.send('linux-offline:active', active === true)
+  });
+
+  if (process.contextIsolated) {
+    contextBridge.exposeInMainWorld('__zaloOfflineBridge', api);
+  } else if (typeof window !== 'undefined') {
+    Object.defineProperty(window, '__zaloOfflineBridge', {
+      configurable: false,
+      enumerable: false,
+      writable: false,
+      value: api
+    });
+  }
+})();
+`;
+
+const SHARED_PRELOAD_BOOTSTRAP = `
+;/* ${SHARED_PRELOAD_MARKER} */
+(() => {
+  const { contextBridge, ipcRenderer } = require('electron');
+  const api = Object.freeze({
+    isActive: () => ipcRenderer.sendSync('linux-offline:is-active') === true
   });
 
   if (process.contextIsolated) {
@@ -58,7 +81,8 @@ function patchPreloadContent(source) {
     const required = [
       "'__zaloOfflineBridge'",
       "'linux-offline:renderer'",
-      "'linux-offline:request'"
+      "'linux-offline:request'",
+      "'linux-offline:active'"
     ];
     const missing = required.filter(value => !source.includes(value));
     if (missing.length) {
@@ -68,6 +92,25 @@ function patchPreloadContent(source) {
   }
 
   return { content: source + '\n' + PRELOAD_BOOTSTRAP + '\n', status: 'patched' };
+}
+
+function patchSharedPreloadContent(source) {
+  const count = source.split(SHARED_PRELOAD_MARKER).length - 1;
+  if (count > 1) throw new Error('Duplicate offline shared-worker preload markers');
+  if (count === 1) {
+    const required = [
+      "'__zaloOfflineBridge'",
+      "'linux-offline:is-active'",
+      'isActive: () =>'
+    ];
+    const missing = required.filter(value => !source.includes(value));
+    if (missing.length) {
+      throw new Error(`Offline shared-worker preload marker is incomplete (${missing.join(', ')})`);
+    }
+    return { content: source, status: 'already' };
+  }
+
+  return { content: source + '\n' + SHARED_PRELOAD_BOOTSTRAP + '\n', status: 'patched' };
 }
 
 function patchHtmlContent(source, filename) {
@@ -195,6 +238,15 @@ function parseMethodSnippet(source, name, predicate, label) {
             ? body.findAll({ rule: { kind: 'call_expression' } })
               .filter(call => call.text() === 'this._doRequest()')
               .map(call => start + call.range().start.index - wrapperPrefix)
+            : [],
+          historyCloudGateCalls: name === 'getLastMessagesForConversation'
+            ? body.findAll({ rule: { kind: 'call_expression' } })
+              .filter(call => /\.apiEnable\([^)]*\.OVER_QUEUE\s*,\s*this\.conversationId\)/.test(call.text()))
+              .map(call => ({
+                start: start + call.range().start.index - wrapperPrefix,
+                end: start + call.range().end.index - wrapperPrefix,
+                text: call.text()
+              }))
             : []
         };
         count++;
@@ -274,6 +326,34 @@ function patchAuthMethods(source) {
     edits.push({ start: fetch.start, end: fetch.end, text: wrapper + originalMethod });
   }
 
+  const historyLoader = method('getLastMessagesForConversation', (_node, body) =>
+    body.includes('isConversationOverQueueVerified') &&
+    body.includes('loadLastMessageLocalFrom'), 'initial conversation history loader');
+  const historyOffline = `(${offline})||(globalThis.__zaloOfflineBridge&&globalThis.__zaloOfflineBridge.isActive&&globalThis.__zaloOfflineBridge.isActive())`;
+  const historyCloudGuard = `!(${historyOffline})&&`;
+  if (!historyLoader.bodyText.includes(historyCloudGuard)) {
+    if (historyLoader.historyCloudGateCalls.length !== 1) {
+      throw new Error(`Offline startup: expected one Over-Queue gate in initial conversation history loader, found ${historyLoader.historyCloudGateCalls.length}`);
+    }
+    const call = historyLoader.historyCloudGateCalls[0];
+    edits.push({
+      start: call.start,
+      end: call.end,
+      text: `${historyCloudGuard}${call.text}`
+    });
+  }
+
+  const messageBubble = method('render', (_node, body) =>
+    body.includes('this.props.focusId.indexOf(b.msgId)') &&
+    body.includes('this.props.focusType'), 'message bubble renderer');
+  const focusIdGuard = 'if(globalThis.__zaloOffline&&globalThis.__zaloOffline.active&&!Array.isArray(this.props.focusId))this.props.focusId=[];';
+  if (!messageBubble.bodyText.includes(focusIdGuard)) {
+    if ((messageBubble.bodyText.match(/this\.props\.focusId\.indexOf\(b\.msgId\)/g) || []).length !== 2) {
+      throw new Error('Offline startup: expected two focusId lookups in message bubble renderer');
+    }
+    edits.push({ start: messageBubble.bodyStart, text: focusIdGuard });
+  }
+
   const hooks = [
     ['logout', body => body.includes('_doLogout') && body.includes('this.userId'), true, 'logout'],
     ['logoutFacebook', body => body.includes('_doLogout') && body.includes('this.userId'), true, 'Facebook logout'],
@@ -317,7 +397,9 @@ function patchAuthBundle(source) {
       'this._linuxFetchLoginInfo',
       'globalThis.__zaloOffline.markReady()',
       'globalThis.__zaloOffline.invalidate()',
-      'globalThis.__zaloOffline&&globalThis.__zaloOffline.active'
+      'globalThis.__zaloOffline&&globalThis.__zaloOffline.active',
+      'globalThis.__zaloOfflineBridge.isActive&&globalThis.__zaloOfflineBridge.isActive()',
+      'if(globalThis.__zaloOffline&&globalThis.__zaloOffline.active&&!Array.isArray(this.props.focusId))this.props.focusId=[];'
     ];
     const missing = required.filter(value => !source.includes(value));
     if (missing.length) {
@@ -369,10 +451,11 @@ async function main(appDir = process.env.ZALO_APP_DIR || APP_DIR) {
     const pc = path.join(appDir, 'pc-dist');
     const lazy = path.join(pc, 'lazy');
     const preloadPath = path.join(appDir, 'main-dist', 'preload-render.js');
+    const sharedPreloadPath = path.join(appDir, 'main-dist', 'preload-shared-worker.js');
     const pagePaths = ['index.html', 'login.html'].map(name => path.join(pc, name));
 
     if (!fs.existsSync(lazy)) throw new Error('Offline startup: extracted app is missing');
-    for (const filePath of [preloadPath, ...pagePaths]) {
+    for (const filePath of [preloadPath, sharedPreloadPath, ...pagePaths]) {
       if (!fs.existsSync(filePath)) throw new Error('Offline startup target not found: ' + filePath);
     }
 
@@ -390,6 +473,7 @@ async function main(appDir = process.env.ZALO_APP_DIR || APP_DIR) {
     const patchedBundle = patchAuthBundle(originalBundle);
     const bundleStatus = patchedBundle === originalBundle ? 'already' : 'patched';
     const preload = patchPreloadContent(fs.readFileSync(preloadPath, 'utf8'));
+    const sharedPreload = patchSharedPreloadContent(fs.readFileSync(sharedPreloadPath, 'utf8'));
     const pages = pagePaths.map(filePath => ({
       filePath,
       ...patchHtmlContent(fs.readFileSync(filePath, 'utf8'), path.basename(filePath))
@@ -397,12 +481,14 @@ async function main(appDir = process.env.ZALO_APP_DIR || APP_DIR) {
 
     if (bundleStatus === 'patched') writeAtomic(bundlePath, patchedBundle);
     if (preload.status === 'patched') writeAtomic(preloadPath, preload.content);
+    if (sharedPreload.status === 'patched') writeAtomic(sharedPreloadPath, sharedPreload.content);
     for (const page of pages) {
       if (page.status === 'patched') writeAtomic(page.filePath, page.content);
     }
 
     logPatchResult('Offline authentication hooks', bundles[0], bundleStatus);
     logPatchResult('Offline preload bridge', path.basename(preloadPath), preload.status);
+    logPatchResult('Offline shared-worker state bridge', path.basename(sharedPreloadPath), sharedPreload.status);
     for (const page of pages) {
       logPatchResult('Offline HTML renderer bootstrap', path.basename(page.filePath), page.status);
     }
@@ -411,6 +497,7 @@ async function main(appDir = process.env.ZALO_APP_DIR || APP_DIR) {
     return {
       bundle: bundles[0],
       preload: preload.status,
+      sharedPreload: sharedPreload.status,
       pages: pages.map(page => ({ file: path.basename(page.filePath), status: page.status }))
     };
   } catch (error) {
@@ -430,5 +517,7 @@ module.exports = {
   PRELOAD_MARKER,
   HTML_MARKER,
   patchPreloadContent,
+  patchSharedPreloadContent,
+  SHARED_PRELOAD_MARKER,
   patchHtmlContent
 };

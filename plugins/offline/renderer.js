@@ -4,6 +4,12 @@
 // without starting Electron or accessing a real account.
 function createOfflineController(env) {
   const { storage, setTimeout, clearTimeout } = env;
+  const reportActive = typeof env.reportActive === 'function' ? env.reportActive : () => {};
+  function setReportedActive(active) {
+    try { reportActive(active); } catch (error) {
+      console.warn('[offline] Failed to report Offline state:', error);
+    }
+  }
   let offline = false;
   let stopped = false;
   let ready = false;
@@ -90,12 +96,15 @@ function createOfflineController(env) {
     stopped = true;
     generation++;
     clearTimeout(retryTimer);
+    setReportedActive(false);
     await storage.clear().catch(() => {});
   }
 
   async function fetchLoginInfo(makeRequest, settings) {
     request = makeRequest;
     options = settings;
+    offline = false;
+    setReportedActive(false);
     const current = generation;
     let cached = await storage.read().catch(() => null);
     if (!cached || cached.version !== 1 || cached.clientId !== settings.clientId ||
@@ -115,6 +124,7 @@ function createOfflineController(env) {
       } finally { clearTimeout(timeout); }
     }
     offline = true;
+    setReportedActive(true);
     settings.onOffline();
     env.showStatus('Ngoại tuyến · Đang hiển thị dữ liệu đã lưu trên máy');
     schedule();
@@ -128,7 +138,12 @@ function createOfflineController(env) {
   }
 
   env.onOnline(() => { clearTimeout(retryTimer); retry(); });
-  env.onUnload(() => { stopped = true; generation++; clearTimeout(retryTimer); });
+  env.onUnload(() => {
+    stopped = true;
+    generation++;
+    clearTimeout(retryTimer);
+    setReportedActive(false);
+  });
   return {
     fetchLoginInfo, invalidate,
     get active() { return offline; },
@@ -149,6 +164,11 @@ if (typeof window !== 'undefined' && window.__zaloOfflineBridge &&
 
   window.__zaloOffline = createOfflineController({
     storage,
+    reportActive: active => {
+      if (typeof window.__zaloOfflineBridge.reportActive === 'function') {
+        window.__zaloOfflineBridge.reportActive(active);
+      }
+    },
     setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window),
     now: Date.now, isOnline: () => navigator.onLine,
     reload: () => storage.refresh(),

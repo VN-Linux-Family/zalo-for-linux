@@ -10,10 +10,15 @@ function register({ app, ipcMain, appDir }) {
   const pages = new Set(
     ['index.html', 'login.html'].map(name => path.resolve(appDir, 'pc-dist', name))
   );
+  const statePages = new Set([
+    ...pages,
+    path.resolve(appDir, 'pc-dist', 'shared-worker.html')
+  ]);
   const rendererSource = fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8');
   let generation = 0;
+  let offlineActive = false;
 
-  function assertSender(event) {
+  function assertSender(event, allowedPages = pages) {
     const frame = event && event.senderFrame;
     if (!frame || frame !== event.sender.mainFrame) {
       console.warn('[offline] Rejected IPC request from a non-main frame');
@@ -30,7 +35,7 @@ function register({ app, ipcMain, appDir }) {
       throw new Error('Invalid offline session page');
     }
 
-    if (!pages.has(page)) {
+    if (!allowedPages.has(page)) {
       console.warn('[offline] Rejected IPC request from an untrusted page');
       throw new Error('Invalid offline session page');
     }
@@ -129,6 +134,25 @@ function register({ app, ipcMain, appDir }) {
         throw new Error('Unsupported offline action');
     }
   }
+
+  ipcMain.on('linux-offline:active', (event, active) => {
+    try {
+      assertSender(event);
+      offlineActive = active === true;
+    } catch (error) {
+      console.warn('[offline] Rejected offline-state report:', error.message);
+    }
+  });
+
+  ipcMain.on('linux-offline:is-active', event => {
+    try {
+      assertSender(event, statePages);
+      event.returnValue = offlineActive;
+    } catch (error) {
+      console.warn('[offline] Rejected shared-worker state request:', error.message);
+      event.returnValue = false;
+    }
+  });
 
   ipcMain.on('linux-offline:renderer', event => {
     event.returnValue = getRenderer(event);
