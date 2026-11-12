@@ -117,16 +117,14 @@ const THEME_MAIN_INJECTION = `
         _kdeWatcher.close();
         _kdeWatcher = null;
       }
-      _kdeWatcher = fs.watch(kfile, (evt, _) => {
-        syncTheme()
-        if (evt === "rename") {
-          _kdeWatcher.close();
-          _kdeWatcher = null;
-          // Longer check to check if that appear again
-          _kdeRetryTimer = setTimeout(watchKde, 5000);
-        }
+      _kdeWatcher = fs.watch(kfile);
+      _kdeWatcher.on("change", (evt, _) => {
+        // Wait for KDE update
+        setTimeout(syncTheme, 100);
+        _kdeWatcher.close();
+        _kdeWatcher = null;
+        _kdeRetryTimer = setTimeout(watchKde, 100);
       });
-
       _kdeWatcher.on("error", () => {
         _kdeWatcher.close();
         _kdeWatcher = null;
