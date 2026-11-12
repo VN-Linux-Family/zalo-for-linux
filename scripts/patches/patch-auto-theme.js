@@ -25,10 +25,43 @@ const THEME_MAIN_INJECTION = `
   if (process.platform !== "linux" || global.__zaloThemeSync) return;
   global.__zaloThemeSync = true;
   const { app: _app, ipcMain: _ipc, BrowserWindow: _bw, nativeTheme: _nt } = require("electron");
+  const path = require('path');
+  const fs = require("fs");
+  function isKdeDark() {
+    try {
+      const kfile = path.join(process.env.HOME || "", ".config", "kdeglobals");
+      if (!fs.existsSync(kfile)) return null;
+      const content = fs.readFileSync(kfile, "utf8");
+
+      // 1. Calculate luminance from [Colors:Window] BackgroundNormal
+      const mBg = content.match(/^\\[Colors:Window\\][^\\[]*?^BackgroundNormal\\s*=\\s*\\\\?\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/ms);
+      if (mBg) {
+        const r = parseInt(mBg[1], 10), g = parseInt(mBg[2], 10), b = parseInt(mBg[3], 10);
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        return lum < 128;
+      }
+      // 2. Fallback to theme / look-and-feel package name
+      const mScheme = content.match(/\\b(?:ColorScheme|LookAndFeelPackage)\\s*=\\s*([^\\r\\n]+)/i);
+      if (mScheme) {
+        const val = mScheme[1].toLowerCase();
+        if (val.includes("dark")) return true;
+        if (val.includes("light")) return false;
+      }
+    } catch (_) {}
+    return null;
+  }
 
   function isLinuxDark() {
     try {
       const { execSync: _es } = require("child_process");
+      try {
+        const isKde = /KDE/i.test(process.env.XDG_CURRENT_DESKTOP || "") || process.env.KDE_FULL_SESSION === "true";
+        if (isKde) {
+          const kde = isKdeDark();
+          if (kde !== null) return kde;
+        }
+      } catch (_) {}
+
       // The portal reflects the host; sandbox GSettings can be defaults.
       try {
         const o = _es('dbus-send --session --print-reply=literal --dest=org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop org.freedesktop.portal.Settings.Read string:"org.freedesktop.appearance" string:"color-scheme" 2>/dev/null', { timeout: 1000 }).toString();
@@ -68,6 +101,44 @@ const THEME_MAIN_INJECTION = `
   }
 
   syncTheme();
+
+  const kfile = path.join(process.env.HOME || "", ".config", "kdeglobals");
+  let _kdeWatcher = null;
+  let _kdeRetryTimer = null;
+
+  function watchKde() {
+    try {
+      if (!fs.existsSync(kfile)) {
+        // Longer check to check if that file appear again
+        _kdeRetryTimer = setTimeout(watchKde, 5000);
+        return null;
+      }
+      if (_kdeWatcher) {
+        _kdeWatcher.close();
+        _kdeWatcher = null;
+      }
+      _kdeWatcher = fs.watch(kfile);
+      _kdeWatcher.on("change", (evt, _) => {
+        // Wait for KDE update
+        setTimeout(syncTheme, 100);
+        _kdeWatcher.close();
+        _kdeWatcher = null;
+        _kdeRetryTimer = setTimeout(watchKde, 100);
+      });
+      _kdeWatcher.on("error", () => {
+        _kdeWatcher.close();
+        _kdeWatcher = null;
+        _kdeRetryTimer = setTimeout(watchKde, 1000);
+      });
+    } catch (_) {
+      _kdeWatcher.close();
+      _kdeWatcher = null;
+      _kdeRetryTimer = setTimeout(watchKde, 1000);
+    }
+  }
+  // Only start if on KDE platform
+  if (fs.existsSync(kfile)) watchKde();
+
   // Poll host portal: sandbox GSettings monitors may stay silent.
   // isLinuxDark() blocks the main process, so poll sparingly.
   let _quitting = false;
@@ -99,6 +170,19 @@ const THEME_PRELOAD_INJECTION = `
   const { ipcRenderer } = require("electron");
 
   function applyTheme(isDark) {
+    try {
+      const confStr = localStorage.getItem("za_theme");
+      let conf = confStr ? JSON.parse(confStr) : {};
+      if (!conf.theme) {
+        conf.theme = isDark ? "dark" : "light";
+        conf.theme_setting = 2;
+        localStorage.setItem("za_theme", JSON.stringify(conf));
+      }
+      // Check user setting for dark or light
+      if (conf.theme_setting == 0) isDark = false;
+      if (conf.theme_setting == 1) isDark = true;
+    } catch (_) {}
+
     if (isDark) {
       document.documentElement.classList.add("dark");
       if (document.body) document.body.classList.add("dark");
@@ -106,15 +190,6 @@ const THEME_PRELOAD_INJECTION = `
       document.documentElement.classList.remove("dark");
       if (document.body) document.body.classList.remove("dark");
     }
-    try {
-      const confStr = localStorage.getItem("za_theme");
-      let conf = confStr ? JSON.parse(confStr) : {};
-      if (conf.theme_setting === 2 || !conf.theme) {
-        conf.theme = isDark ? "dark" : "light";
-        conf.theme_setting = 2;
-        localStorage.setItem("za_theme", JSON.stringify(conf));
-      }
-    } catch (_) {}
   }
 
   ipcRenderer.on("zalo-linux-theme-change", (e, mode) => {
