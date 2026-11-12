@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { spawnSync } = require('child_process');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 const { APP_DIR, APP_MAIN_DIST: MAIN_DIR } = require('../utils/paths');
@@ -58,37 +59,49 @@ function patchShellOpenLinux(content) {
   return content.slice(0, shellModuleStart) + patchedShellModule;
 }
 
+
+function patchFile(filePath) {
+  const original = fs.readFileSync(filePath, 'utf8');
+  if (!original.includes('Mz8P:function') || !original.includes('shell.openPath')) return null;
+  const patched = patchShellOpenLinux(original);
+  if (patched !== original) fs.writeFileSync(filePath, patched, 'utf8');
+  return patched !== original;
+}
+
+function patchFileIsolated(filePath) {
+  const runner = 'const changed = require(process.argv[1]).patchFile(process.argv[2]); process.exitCode = changed === null ? 11 : changed ? 10 : 0;';
+  const result = spawnSync(process.execPath, ['-e', runner, __filename, filePath], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && result.status !== 10 && result.status !== 11) throw new Error(`Shell-open patch failed for ${path.basename(filePath)} (exit code ${result.status})`);
+  return result.status === 11 ? null : result.status === 10;
+}
+
 async function main() {
   logger.info('Patching Linux folder opening...');
   if (!fs.existsSync(MAIN_DIR)) {
     throw new Error('Main bundle directory not found.');
   }
 
-  const bundlePaths = fs.readdirSync(MAIN_DIR)
-    .filter((name) => name.endsWith('.js'))
-    .map((name) => path.join(MAIN_DIR, name))
-    .filter((filePath) => {
-      const content = fs.readFileSync(filePath, 'utf8');
-      return content.includes('Mz8P:function') && content.includes('shell.openPath');
-    });
-
-  if (bundlePaths.length === 0) {
-    throw new Error('No shell bundles found.');
-  }
-
+  const bundleNames = fs.readdirSync(MAIN_DIR).filter((name) => name.endsWith('.js'));
+  let checkedCount = 0;
   let updatedCount = 0;
-  for (const filePath of bundlePaths) {
-    const original = fs.readFileSync(filePath, 'utf8');
-    const patched = patchShellOpenLinux(original);
-    if (patched !== original) {
-      fs.writeFileSync(filePath, patched, 'utf8');
+  for (const name of bundleNames) {
+    const filePath = path.join(MAIN_DIR, name);
+    const changed = patchFileIsolated(filePath);
+    if (changed === null) continue;
+    checkedCount += 1;
+    if (changed) {
       updatedCount += 1;
       logger.dim(`Patched Linux folder opening in ${path.relative(APP_DIR, filePath)}`);
     }
   }
 
+  if (!checkedCount) throw new Error('No shell bundles found.');
   logger.success(
-    `Linux folder-opening patch applied (${bundlePaths.length} checked, ${updatedCount} updated)`
+    `Linux folder-opening patch applied (${checkedCount} checked, ${updatedCount} updated)`
   );
 }
 
@@ -101,5 +114,6 @@ if (require.main === module) {
 
 module.exports = {
   main,
-  patchShellOpenLinux
+  patchShellOpenLinux,
+  patchFile
 };

@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { spawnSync } = require('child_process');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 const { APP_DIR } = require('../utils/paths');
@@ -36,25 +37,16 @@ function listJsFiles(dir) {
  return files;
 }
 
-async function main(appDir = APP_DIR) {
- const pcDistDir = path.join(appDir, 'pc-dist');
- if (!fs.existsSync(pcDistDir)) {
-  logger.warn('pc-dist not present, skipping ZaDark keep patch');
-  return;
+function patchFile(file, pcDistDir) {
+ const raw = fs.readFileSync(file);
+ if (!raw.includes(MARKER_BUF)) return 'skipped';
+ const content = raw.toString('utf8');
+ if (content.includes('return;var') || content.includes('return;const') || content.includes('=()=>{return;')) {
+  return 'already';
  }
 
- let patched = 0;
- let unmatched = 0;
- const files = listJsFiles(pcDistDir);
- await Promise.all(files.map(async (file) => {
-  const raw = await fs.promises.readFile(file);
-  if (!raw.includes(MARKER_BUF)) return;
-  const content = raw.toString('utf8');
-  if (content.includes('return;var') || content.includes('return;const') || content.includes('=()=>{return;')) {
-   return;
-  }
-
-  let updated = content;
+ let updated = content.replace(REMOVER_RE, '$1return;$2');
+ if (updated === content) {
   try {
    const root = parseAst(content);
    const zadarkLiteral = root.find('"zadark"');
@@ -71,21 +63,46 @@ async function main(appDir = APP_DIR) {
     }
    }
   } catch (err) {
-   logger.warn(`AST zadark-keep failed on ${path.basename(file)}, falling back:`, err.message);
+   logger.warn(`AST zadark-keep failed on ${path.basename(file)}, fallback unavailable:`, err.message);
   }
+ }
 
-  if (updated === content) {
-   updated = content.replace(REMOVER_RE, '$1return;$2');
-  }
+ if (updated === content) return 'unmatched';
+ fs.writeFileSync(file, updated, 'utf8');
+ logger.dim(`Kept ZaDark in dark theme: ${path.relative(pcDistDir, file)}`);
+ return 'patched';
+}
 
-  if (updated !== content) {
-   await fs.promises.writeFile(file, updated, 'utf8');
-   patched++;
-   logger.dim(`Kept ZaDark in dark theme: ${path.relative(pcDistDir, file)}`);
-  } else {
-   unmatched++;
-  }
- }));
+function hasMarker(file) {
+ return fs.readFileSync(file).includes(MARKER_BUF);
+}
+
+function patchFileIsolated(file, pcDistDir) {
+ const runner = 'const status = require(process.argv[1]).patchFile(process.argv[2], process.argv[3]); process.exitCode = status === "patched" ? 10 : status === "unmatched" ? 11 : 0;';
+ const result = spawnSync(process.execPath, ['-e', runner, __filename, file, pcDistDir], {
+  stdio: 'inherit',
+  env: process.env,
+ });
+ if (result.error) throw result.error;
+ if (result.status !== 0 && result.status !== 10 && result.status !== 11) throw new Error(`ZaDark keep patch failed for ${path.basename(file)} (exit code ${result.status})`);
+ return result.status === 10 ? 'patched' : result.status === 11 ? 'unmatched' : 'skipped';
+}
+
+async function main(appDir = APP_DIR) {
+ const pcDistDir = path.join(appDir, 'pc-dist');
+ if (!fs.existsSync(pcDistDir)) {
+  logger.warn('pc-dist not present, skipping ZaDark keep patch');
+  return;
+ }
+
+ let patched = 0;
+ let unmatched = 0;
+ for (const file of listJsFiles(pcDistDir)) {
+  if (!hasMarker(file)) continue;
+  const status = patchFileIsolated(file, pcDistDir);
+  if (status === 'patched') patched++;
+  else if (status === 'unmatched') unmatched++;
+ }
 
  if (unmatched > 0) {
   logger.warn(`ZaDark remover found in ${unmatched} file(s) but its pattern changed; ZaDark may unload in dark theme`);
@@ -98,4 +115,4 @@ if (require.main === module) {
  main();
 }
 
-module.exports = { main };
+module.exports = { main, patchFile };

@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { spawnSync } = require('child_process');
 const logger = require('../utils/logger');
 const { parseAst } = require('../utils/ast-transform');
 const { APP_MAIN_DIST } = require('../utils/paths');
@@ -64,10 +65,18 @@ async function main(appMainDist = APP_MAIN_DIST) {
     // the Language Manager lives) uses its own compact-app-preload.js.
     // Both renderers need the same narrow locale-only IPC capability.
     const files = ['preload-render.js', 'compact-app-preload.js'];
-    const results = files.map((name) => {
+    const results = [];
+    for (const name of files) {
       const filePath = path.join(appMainDist, name);
-      return { filePath, name, status: patchFile(filePath) };
-    });
+      const runner = 'const status = require(process.argv[1]).patchFile(process.argv[2]); process.exitCode = status === "patched" ? 10 : 0;';
+      const result = spawnSync(process.execPath, ['-e', runner, __filename, filePath], {
+        stdio: 'inherit',
+        env: process.env,
+      });
+      if (result.error) throw result.error;
+      if (result.status !== 0 && result.status !== 10) throw new Error(`Language transport failed for ${name} (exit code ${result.status})`);
+      results.push({ filePath, name, status: result.status === 10 ? 'patched' : 'already' });
+    }
     for (const result of results) {
       if (result.status === 'patched') {
         logger.dim('Patched locale-only IPC transport in ' + result.name);

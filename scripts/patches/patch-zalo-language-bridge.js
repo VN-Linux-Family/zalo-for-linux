@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { spawnSync } = require('child_process');
 const logger = require('../utils/logger');
 const { parseAst } = require('../utils/ast-transform');
 const { APP_PC_DIST } = require('../utils/paths');
@@ -74,7 +75,6 @@ function patchContent(source) {
     changeMethods[0].replace(changeText.slice(0, -1) + EVENT_BRIDGE + '}')
   ]);
 
-  parseAst(updated);
   validateJavaScript(updated);
   const count = updated.split('/* ' + MARKER + ' */').length - 1;
   if (count !== 1 || !updated.includes(VALID_INDEX_GUARD) ||
@@ -89,6 +89,25 @@ function patchFile(filePath) {
   const result = patchContent(fs.readFileSync(filePath, 'utf8'));
   if (result.status === 'patched') fs.writeFileSync(filePath, result.content, 'utf8');
   return result.status;
+}
+
+function patchFileIsolated(filePath) {
+  const runner = `try { process.stdout.write(require(${JSON.stringify(__filename)}).patchFile(${JSON.stringify(filePath)})); } catch (error) { console.error(error); process.exitCode = 1; }`;
+  const result = spawnSync(process.execPath, ['-e', runner], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+    env: process.env,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const reason = result.signal ? `signal ${result.signal}` : `exit code ${result.status}`;
+    throw new Error(`Language bridge patch failed for ${path.basename(filePath)} (${reason})`);
+  }
+  const status = result.stdout.trim();
+  if (status !== 'patched' && status !== 'already') {
+    throw new Error(`Unexpected language bridge patch result for ${path.basename(filePath)}: ${status}`);
+  }
+  return status;
 }
 
 function findTargetBundles(appPcDist) {
@@ -116,7 +135,10 @@ async function main(appPcDist = APP_PC_DIST) {
     // These are the two documented UI bundle targets. No other workers or
     // application render bundles are modified.
     const targets = findTargetBundles(appPcDist);
-    const results = targets.map((filePath) => ({ filePath, status: patchFile(filePath) }));
+    const results = [];
+    for (const filePath of targets) {
+      results.push({ filePath, status: patchFileIsolated(filePath) });
+    }
     for (const result of results) {
       const name = path.relative(appPcDist, result.filePath);
       if (result.status === 'patched') logger.dim(`Patched Zalo locale event in ${name}`);

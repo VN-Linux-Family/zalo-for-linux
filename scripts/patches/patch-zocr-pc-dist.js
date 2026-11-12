@@ -89,43 +89,55 @@ function patch(source) {
 function main() {
   logger.info('Patching OCR UI...');
   const root = APP_PC_DIST;
-  const changes = [];
-  let found = 0;
   const files = [
     ...fs.readdirSync(root)
-      .filter(name => /^(compact-app-pc|search-worker|sync-v2-sub-worker)\.[\da-f]+\.js$/.test(name)),
+      .filter(name => /^(compact-app-pc|search-worker|sync-v2-sub-worker)\.[\da-f]+\.js$/.test(name))
+      .map(name => path.join(root, name)),
     ...fs.readdirSync(path.join(root, 'lazy'))
       .filter(name => /^default-login-main-startup-shared-worker-znotification\.[\da-f]+\.js$/.test(name))
-      .map(name => path.join('lazy', name)),
+      .map(name => path.join(root, 'lazy', name)),
   ];
-  for (const entry of files) {
-    const file = path.join(root, entry);
-    try {
-      const source = fs.readFileSync(file, 'utf8');
-      if (!source.includes('ocr-text-overlay')) {
-        logger.warn(`OCR UI: skipped ${path.relative(APP_DIR, file)}: OCR module not found`);
-        continue;
+  const staged = [];
+  let found = 0;
+
+  try {
+    for (const file of files) {
+      try {
+        const source = fs.readFileSync(file, 'utf8');
+        if (!source.includes('ocr-text-overlay')) {
+          logger.warn(`OCR UI: skipped ${path.relative(APP_DIR, file)}: OCR module not found`);
+          continue;
+        }
+        const updated = patch(source);
+        found++;
+        if (updated !== source) {
+          const temp = path.join(path.dirname(file), `.zalo-ocr-${process.pid}-${path.basename(file)}.tmp`);
+          fs.writeFileSync(temp, updated, { mode: fs.statSync(file).mode & 0o7777 });
+          staged.push([file, temp]);
+        }
+      } catch (error) {
+        logger.warn(`OCR UI: failed to patch ${path.relative(APP_DIR, file)}: ${error.message}`);
+        throw error;
       }
-      const updated = patch(source);
-      found++;
-      if (updated !== source) changes.push([file, updated]);
-    } catch (error) {
-      logger.warn(`OCR UI: failed to patch ${path.relative(APP_DIR, file)}: ${error.message}`);
-      throw error;
+    }
+
+    if (!found) throw new Error('No OCR bundles found in pc-dist');
+
+    for (const [file, temp] of staged) {
+      try {
+        fs.renameSync(temp, file);
+        logger.dim(`  Patched ${path.relative(APP_DIR, file)}`);
+      } catch (error) {
+        logger.warn(`OCR UI: failed to write ${path.relative(APP_DIR, file)}: ${error.message}`);
+        throw error;
+      }
+    }
+    logger.success(`OCR UI: ${staged.length} patched, ${found - staged.length} already patched.`);
+  } finally {
+    for (const [, temp] of staged) {
+      try { fs.removeSync(temp); } catch (_) {}
     }
   }
-  if (!found) throw new Error('No OCR bundles found in pc-dist');
-  // Validate every bundle before writing any changes.
-  for (const [file, updated] of changes) {
-    try {
-      fs.writeFileSync(file, updated);
-      logger.dim(`  Patched ${path.relative(APP_DIR, file)}`);
-    } catch (error) {
-      logger.warn(`OCR UI: failed to write ${path.relative(APP_DIR, file)}: ${error.message}`);
-      throw error;
-    }
-  }
-  logger.success(`OCR UI: ${changes.length} patched, ${found - changes.length} already patched.`);
 }
 
 if (require.main === module) {
