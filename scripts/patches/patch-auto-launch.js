@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
+const { spawnSync } = require('child_process');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 const { APP_DIR, APP_MAIN_DIST: MAIN_DIST_DIR } = require('../utils/paths');
@@ -160,6 +161,24 @@ function patchAutoLaunch(content) {
   return content;
 }
 
+function patchFile(filePath) {
+  const original = fs.readFileSync(filePath, 'utf8');
+  const patched = patchAutoLaunch(original);
+  if (patched !== original) fs.writeFileSync(filePath, patched, 'utf8');
+  return patched !== original;
+}
+
+function patchFileIsolated(filePath) {
+  const runner = 'const changed = require(process.argv[1]).patchFile(process.argv[2]); process.exitCode = changed ? 10 : 0;';
+  const result = spawnSync(process.execPath, ['-e', runner, __filename, filePath], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && result.status !== 10) throw new Error(`Auto-launch patch failed for ${path.basename(filePath)} (exit code ${result.status})`);
+  return result.status === 10;
+}
+
 async function main() {
   logger.info('Patching auto-launch for Linux...');
   let checkedCount = 0;
@@ -172,11 +191,8 @@ async function main() {
       logger.warn(`Skipping ${fileName} (not found)`);
       continue;
     }
-    const original = fs.readFileSync(filePath, 'utf8');
-    const patched = patchAutoLaunch(original);
     checkedCount += 1;
-    if (patched !== original) {
-      fs.writeFileSync(filePath, patched, 'utf8');
+    if (patchFileIsolated(filePath)) {
       updatedCount += 1;
       logger.dim(`Patched auto-launch handlers in ${fileName}`);
     }
@@ -191,4 +207,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, patchAutoLaunch };
+module.exports = { main, patchAutoLaunch, patchFile };

@@ -2,8 +2,64 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const logger = require('./utils/logger');
 const { APP_DIR, APP_MAIN_DIST } = require('./utils/paths');
+
+const PATCHES = [
+  'patch-zalo-language-bridge',
+  'patch-zalo-language-transport',
+  'patch-titlebar',
+  'patch-wayland-titlebar',
+  'patch-pasting-img',
+  'patch-sqlite3',
+  'patch-db-cross-v4',
+  'patch-file-utilities',
+  'patch-file-utils',
+  'patch-disk-space',
+  'patch-mp4thumb',
+  'patch-os-sys-info',
+  'patch-zimage',
+  'patch-zjxl',
+  'patch-zfile',
+  'patch-v8-profiles',
+  'patch-zcall-callgate',
+  'patch-zcall-native',
+  'patch-auto-launch',
+  'patch-quit-no-show',
+  'patch-notification-badge',
+  'patch-xdg-user-dirs',
+  'patch-shell-open-linux',
+  'patch-call-signal-fix',
+  'patch-network-and-sync-fix',
+  'patch-offline-startup',
+  'patch-auto-theme',
+  'patch-zocr-pc-dist',
+  'patch-zocr-runtime',
+  'patch-flatpak-file-transfer',
+  'patch-zwalker',
+  'patch-zlang',
+];
+
+function runPatch(name, args = [], task = false) {
+  const target = path.join(__dirname, task ? `${name}.js` : `patches/${name}.js`);
+  const runner = [
+    'const target = process.argv[1];',
+    'const args = process.argv.slice(2);',
+    'Promise.resolve(require(target).main(...args)).catch((error) => { console.error(error); process.exitCode = 1; });',
+  ].join(' ');
+  const result = spawnSync(process.execPath, ['-e', runner, target, ...args], {
+    stdio: 'inherit',
+    env: process.env,
+    cwd: process.cwd(),
+  });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const reason = result.signal ? `signal ${result.signal}` : `exit code ${result.status}`;
+    throw new Error(`${name} failed (${reason})`);
+  }
+}
 
 async function main() {
   if (!fs.existsSync(APP_DIR)) {
@@ -12,107 +68,13 @@ async function main() {
 
   logger.info(`Applying platform patches to: ${APP_DIR}...`);
 
-  const { main: patchZaloLanguageBridge } = require('./patches/patch-zalo-language-bridge');
-  await patchZaloLanguageBridge();
+  for (const patch of PATCHES) {
+    logger.info(`Running ${patch}...`);
+    runPatch(patch);
+  }
 
-  const { main: patchZaloLanguageTransport } = require('./patches/patch-zalo-language-transport');
-  await patchZaloLanguageTransport();
-
-  const { main: patchTitlebar } = require('./patches/patch-titlebar');
-  await patchTitlebar();
-
-  const { main: patchWaylandTitlebar } = require('./patches/patch-wayland-titlebar');
-  await patchWaylandTitlebar();
-
-  const { main: patchPastingImg } = require('./patches/patch-pasting-img');
-  await patchPastingImg();
-
-  const { main: patchSqlite3 } = require('./patches/patch-sqlite3');
-  await patchSqlite3();
-
-  const { main: patchDbCrossV4 } = require('./patches/patch-db-cross-v4');
-  await patchDbCrossV4();
-
-  const { main: patchFileUtilities } = require('./patches/patch-file-utilities');
-  await patchFileUtilities();
-
-  const { main: patchFileUtils } = require('./patches/patch-file-utils');
-  await patchFileUtils();
-
-  const { main: patchDiskSpace } = require('./patches/patch-disk-space');
-  await patchDiskSpace();
-
-  const { main: patchMp4thumb } = require('./patches/patch-mp4thumb');
-  await patchMp4thumb();
-
-  const { main: patchOsSysInfo } = require('./patches/patch-os-sys-info');
-  await patchOsSysInfo();
-
-  const { main: patchZimage } = require('./patches/patch-zimage');
-  await patchZimage();
-
-  const { main: patchZjxl } = require('./patches/patch-zjxl');
-  await patchZjxl();
-
-  const { main: patchZfile } = require('./patches/patch-zfile');
-  await patchZfile();
-
-  const { main: patchV8Profiles } = require('./patches/patch-v8-profiles');
-  await patchV8Profiles();
-
-  const { main: patchZcallCallgate } = require('./patches/patch-zcall-callgate');
-  await patchZcallCallgate();
-
-  // Calls run on the native engine (zcall/), no Wine.
-  const { main: patchZcallNative } = require('./patches/patch-zcall-native');
-  await patchZcallNative();
-
-  const { main: patchAutoLaunch } = require('./patches/patch-auto-launch');
-  await patchAutoLaunch();
-
-  const { main: patchQuitNoShow } = require('./patches/patch-quit-no-show');
-  await patchQuitNoShow();
-
-  const { main: patchNotificationBadge } = require('./patches/patch-notification-badge');
-  await patchNotificationBadge();
-
-  const { main: patchXdgUserDirs } = require('./patches/patch-xdg-user-dirs');
-  await patchXdgUserDirs();
-
-  const { main: patchShellOpenLinux } = require('./patches/patch-shell-open-linux');
-  await patchShellOpenLinux();
-
-  const { main: patchCallSignalFix } = require('./patches/patch-call-signal-fix');
-  await patchCallSignalFix();
-
-  const { main: patchNetworkAndSyncFix } = require('./patches/patch-network-and-sync-fix');
-  await patchNetworkAndSyncFix();
-
-  await require('./patches/patch-offline-startup').main();
-
-  const { main: patchAutoTheme } = require('./patches/patch-auto-theme');
-  await patchAutoTheme();
-
-  const { main: patchZocrPcDist } = require('./patches/patch-zocr-pc-dist');
-  await patchZocrPcDist();
-
-  const { main: patchZocrRuntime } = require('./patches/patch-zocr-runtime');
-  await patchZocrRuntime();
-
-  const { main: patchflatpakFileTransfer } = require('./patches/patch-flatpak-file-transfer');
-  await patchflatpakFileTransfer();
-
-  const { main: patchZwalker } = require('./patches/patch-zwalker');
-  await patchZwalker();
-
-  const { main: patchZlang } = require('./patches/patch-zlang');
-  await patchZlang();
-
-  // The call window's icons, sounds and fonts, from the macOS app.
-  await require('./extract-zcall-assets').main();
-
-  // The screenshot tool's icon font, from pc-dist.
-  await require('./extract-screenshot-assets').main();
+  runPatch('extract-zcall-assets', [], true);
+  runPatch('extract-screenshot-assets', [], true);
 
   // Without it Zalo would look for ZaloCall.exe / ZaloHelper.app: no calls at all.
   const mainJs = path.join(APP_MAIN_DIST, 'main.js');
@@ -130,4 +92,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main };
+module.exports = { main, PATCHES, runPatch };

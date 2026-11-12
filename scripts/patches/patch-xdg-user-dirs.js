@@ -191,32 +191,30 @@ async function main() {
   const NEEDLE1 = Buffer.from('getDefaultZaloReceivedFiles');
   const NEEDLE2 = Buffer.from('createAppPathManager');
   const candidates = BUNDLE_DIRS.flatMap(findJavaScriptFiles);
-  const bundles = [];
-
-  await Promise.all(candidates.map(async (filePath) => {
-    if (filePath.includes('utility-process-media.js')) return;
-    const buf = await fs.promises.readFile(filePath);
-    if (buf.includes(NEEDLE1) && buf.includes(NEEDLE2)) {
-      bundles.push({ filePath, content: buf.toString('utf8') });
-    }
-  }));
-
-  if (bundles.length === 0) {
-    throw new Error('No Zalo path bundles found.');
-  }
-
+  let checkedCount = 0;
   let updatedCount = 0;
-  for (const { filePath, content } of bundles) {
+
+  for (const filePath of candidates) {
+    if (filePath.includes('utility-process-media.js')) continue;
+    const buf = await fs.promises.readFile(filePath);
+    if (!buf.includes(NEEDLE1) || !buf.includes(NEEDLE2)) continue;
+
+    checkedCount += 1;
+    const content = buf.toString('utf8');
     const patched = patchXdgUserDirs(content);
     if (patched !== content) {
-      fs.writeFileSync(filePath, patched, 'utf8');
+      await fs.promises.writeFile(filePath, patched, 'utf8');
       updatedCount += 1;
       logger.dim(`Patched localized user directories in ${path.relative(APP_DIR, filePath)}`);
     }
   }
 
+  if (checkedCount === 0) {
+    throw new Error('No Zalo path bundles found.');
+  }
+
   logger.success(
-    `XDG user directory patch applied (${bundles.length} checked, ${updatedCount} updated)`
+    `XDG user directory patch applied (${checkedCount} checked, ${updatedCount} updated)`
   );
 }
 

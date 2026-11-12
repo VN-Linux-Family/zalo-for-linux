@@ -35,21 +35,28 @@ function findBundles(directory) {
 
 async function main() {
   logger.info('Patching disk space checks to use the Zalo data directory...');
-  const bundles = findBundles(PC_DIST_DIR)
-    .map((file) => ({ file, original: fs.readFileSync(file, 'utf8') }))
-    .filter(({ original }) => original.includes('analyzeMainDisk(){'));
-  if (!bundles.length) throw new Error('No disk checker bundles found.');
-
-  // Validate every bundle before writing, so upstream changes cannot leave a partial patch.
-  const patches = bundles.map(({ file, original }) => ({ file, original, patched: patchDiskSpace(original) }));
+  const files = findBundles(PC_DIST_DIR);
+  let checked = 0;
   let updated = 0;
-  for (const { file, original, patched } of patches) {
-    if (original === patched) continue;
+
+  for (const file of files) {
+    const original = fs.readFileSync(file, 'utf8');
+    if (!original.includes('analyzeMainDisk(){')) continue;
+    patchDiskSpace(original);
+    checked += 1;
+  }
+  if (!checked) throw new Error('No disk checker bundles found.');
+
+  for (const file of files) {
+    const original = fs.readFileSync(file, 'utf8');
+    if (!original.includes('analyzeMainDisk(){')) continue;
+    const patched = patchDiskSpace(original);
+    if (patched === original) continue;
     fs.writeFileSync(file, patched);
     updated += 1;
     logger.dim(`Patched ${path.relative(PC_DIST_DIR, file)}`);
   }
-  logger.success(`Disk space patch applied (${bundles.length} checked, ${updated} updated)`);
+  logger.success(`Disk space patch applied (${checked} checked, ${updated} updated)`);
 }
 
 if (require.main === module) {

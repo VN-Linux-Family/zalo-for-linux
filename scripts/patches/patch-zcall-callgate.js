@@ -22,6 +22,7 @@
 
 const fs = require('fs-extra');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const logger = require('../utils/logger');
 const { parseAst, applyEdits } = require('../utils/ast-transform');
 
@@ -47,21 +48,38 @@ const DEFAULTS_PATCHED = 'enableCall:!0,enableTag:!0,enableVideoCall:!0';
 async function main() {
  const missing = [];
  let patchedCount = 0;
+ const workerFile = process.env.ZALO_CALLGATE_PATCH_FILE;
 
- for (const pattern of GLOB_TARGETS) {
+ for (const pattern of workerFile ? [workerFile] : GLOB_TARGETS) {
   // resolve the first matching file (hashes change per Zalo version)
   const dir = path.dirname(pattern);
   const base = path.basename(pattern);
   const [prefix, suffix] = base.split('*');
-  const file = fs.existsSync(dir)
-   ? (fs.readdirSync(dir).find(f => f.startsWith(prefix) && f.endsWith(suffix || '')) || null)
-   : null;
+  const file = workerFile
+   ? (fs.existsSync(pattern) ? base : null)
+   : (fs.existsSync(dir)
+    ? (fs.readdirSync(dir).find(f => f.startsWith(prefix) && f.endsWith(suffix || '')) || null)
+    : null);
 
   if (!file) {
    missing.push(path.basename(pattern));
    continue;
   }
   const filePath = path.join(dir, file);
+
+  if (!workerFile) {
+   const result = spawnSync(process.execPath, [__filename], {
+    stdio: 'inherit',
+    env: { ...process.env, ZALO_CALLGATE_PATCH_FILE: filePath },
+   });
+   if (result.error) throw result.error;
+   if (result.status !== 0) {
+    const reason = result.signal ? `signal ${result.signal}` : `exit code ${result.status}`;
+    throw new Error(`callgate patch failed for ${file} (${reason})`);
+   }
+   patchedCount++;
+   continue;
+  }
 
   let content = fs.readFileSync(filePath, 'utf8');
   let changed = false;
@@ -120,7 +138,7 @@ async function main() {
  if (missing.length || patchedCount === 0) {
   throw new Error('callgate patch not applied: ' + (missing.join('; ') || 'no targets'));
  }
- logger.success(`zcall callgate patched (${patchedCount} files)`);
+ if (!workerFile) logger.success(`zcall callgate patched (${patchedCount} files)`);
 }
 
 if (require.main === module) {
