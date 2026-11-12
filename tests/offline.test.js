@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const { pathToFileURL } = require('node:url');
 const offlineStore = require('../plugins/offline/store');
 const vm = require('node:vm');
 const { register } = require('../plugins/offline');
@@ -67,6 +68,53 @@ describe('Offline renderer and language integration', () => {
     assert.match(event.returnValue, /^'use strict';\nwindow\.__zaloLinuxOfflineMessages = /);
     assert.ok(event.returnValue.includes(JSON.stringify(dictionary.messages)));
     assert.doesNotThrow(() => new vm.Script(event.returnValue));
+  });
+
+  it('accepts trusted Offline pages when Flatpak resolves the app symlink', t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zalo-offline-flatpak-'));
+    try {
+      const realAppDir = path.join(root, 'extra', 'app');
+      const appDir = path.join(root, 'lib', 'zalo', 'app');
+      const pcDir = path.join(realAppDir, 'pc-dist');
+      fs.mkdirSync(pcDir, { recursive: true });
+      for (const name of ['index.html', 'login.html', 'shared-worker.html']) {
+        fs.writeFileSync(path.join(pcDir, name), '');
+      }
+      fs.mkdirSync(path.dirname(appDir), { recursive: true });
+      try {
+        fs.symlinkSync(realAppDir, appDir, 'dir');
+      } catch (error) {
+        if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) {
+          t.skip('directory symlinks are unavailable in this environment');
+          return;
+        }
+        throw error;
+      }
+
+      const handlers = new Map();
+      register({
+        app: { getPath: () => path.join(root, 'user-data') },
+        ipcMain: {
+          on(channel, handler) { handlers.set(channel, handler); },
+          handle(channel, handler) { handlers.set(channel, handler); }
+        },
+        appDir
+      });
+
+      const frame = { url: pathToFileURL(path.join(realAppDir, 'pc-dist', 'index.html')).href };
+      const event = { senderFrame: frame, sender: { mainFrame: frame } };
+      handlers.get('linux-offline:renderer')(event);
+
+      assert.match(event.returnValue, /^'use strict';\nwindow\.__zaloLinuxOfflineMessages = /);
+
+      handlers.get('linux-offline:active')(event, true);
+      const workerFrame = { url: pathToFileURL(path.join(realAppDir, 'pc-dist', 'shared-worker.html')).href };
+      const workerEvent = { senderFrame: workerFrame, sender: { mainFrame: workerFrame } };
+      handlers.get('linux-offline:is-active')(workerEvent);
+      assert.equal(workerEvent.returnValue, true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('updates the visible status immediately when Language Core changes locale', async () => {

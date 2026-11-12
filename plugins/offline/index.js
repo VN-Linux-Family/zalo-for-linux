@@ -5,14 +5,23 @@ const path = require('path');
 const { fileURLToPath } = require('url');
 const { createStore, sessionKey } = require('./store');
 
+function resolvePagePath(filePath) {
+  const resolved = path.resolve(filePath);
+  try {
+    return fs.realpathSync(resolved);
+  } catch (_) {
+    return resolved;
+  }
+}
+
 function register({ app, ipcMain, appDir }) {
   const store = createStore(app.getPath('userData'));
   const pages = new Set(
-    ['index.html', 'login.html'].map(name => path.resolve(appDir, 'pc-dist', name))
+    ['index.html', 'login.html'].map(name => resolvePagePath(path.join(appDir, 'pc-dist', name)))
   );
   const statePages = new Set([
     ...pages,
-    path.resolve(appDir, 'pc-dist', 'shared-worker.html')
+    resolvePagePath(path.join(appDir, 'pc-dist', 'shared-worker.html'))
   ]);
   const localeMessages = JSON.stringify(require('./locale.json').messages);
   const rendererSource = "'use strict';\nwindow.__zaloLinuxOfflineMessages = " + localeMessages + ';\n' +
@@ -31,7 +40,7 @@ function register({ app, ipcMain, appDir }) {
     try {
       const url = new URL(frame.url);
       if (url.protocol !== 'file:') throw new Error('Invalid protocol');
-      page = path.resolve(fileURLToPath(url));
+      page = resolvePagePath(fileURLToPath(url));
     } catch (_) {
       console.warn('[offline] Rejected IPC request from an invalid page URL');
       throw new Error('Invalid offline session page');
