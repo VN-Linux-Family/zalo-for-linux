@@ -1,71 +1,149 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { fileURLToPath } = require('url');
 const { createStore, sessionKey } = require('./store');
 
 function register({ app, ipcMain, appDir }) {
   const store = createStore(app.getPath('userData'));
-  const pages = ['index.html', 'login.html'].map(name => path.join(appDir, 'pc-dist', name));
+  const pages = new Set(
+    ['index.html', 'login.html'].map(name => path.resolve(appDir, 'pc-dist', name))
+  );
+  const rendererSource = fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8');
   let generation = 0;
+
   function assertSender(event) {
-    const frame = event.senderFrame;
-    if (!frame || frame !== event.sender.mainFrame) throw new Error('Invalid offline session sender');
-    const url = new URL(frame.url);
-    if (url.protocol !== 'file:' || !pages.includes(fileURLToPath(url))) {
+    const frame = event && event.senderFrame;
+    if (!frame || frame !== event.sender.mainFrame) {
+      console.warn('[offline] Rejected IPC request from a non-main frame');
+      throw new Error('Invalid offline session sender');
+    }
+
+    let page;
+    try {
+      const url = new URL(frame.url);
+      if (url.protocol !== 'file:') throw new Error('Invalid protocol');
+      page = path.resolve(fileURLToPath(url));
+    } catch (_) {
+      console.warn('[offline] Rejected IPC request from an invalid page URL');
+      throw new Error('Invalid offline session page');
+    }
+
+    if (!pages.has(page)) {
+      console.warn('[offline] Rejected IPC request from an untrusted page');
       throw new Error('Invalid offline session page');
     }
   }
-  ipcMain.handle('linux-offline:read', async event => {
-    assertSender(event);
-    const current = generation;
-    const key = sessionKey(await event.sender.session.cookies.get({ name: 'zpw_sek' }));
-    return current === generation ? store.read(key) : null;
-  });
-  ipcMain.handle('linux-offline:write', async (event, record) => {
-    assertSender(event);
-    const current = generation;
-    const key = sessionKey(await event.sender.session.cookies.get({ name: 'zpw_sek' }));
-    return current === generation && store.write(key, record);
-  });
-  ipcMain.handle('linux-offline:clear', event => {
-    assertSender(event);
-    generation++;
-    store.clear();
-  });
-  ipcMain.handle('linux-offline:refresh', async event => {
-    assertSender(event);
-    const contents = event.sender;
-    // Zalo can cancel a normal window.location.reload() while its DB and
-    // renderer are active. Limit the unload override to this recovery reload.
+
+  function getRenderer(event) {
+    try {
+      assertSender(event);
+      return rendererSource;
+    } catch (error) {
+      console.warn('[offline] Renderer source request rejected:', error.message);
+      return '';
+    }
+  }
+
+  async function getSessionKey(contents) {
+    return sessionKey(await contents.session.cookies.get({ name: 'zpw_sek' }));
+  }
+
+  async function refresh(contents) {
     let started = false;
-    const allowUnload = e => e.preventDefault();
+    const allowUnload = event => event.preventDefault();
     contents.on('will-prevent-unload', allowUnload);
     try {
       await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => { cleanup(); reject(new Error('Reload timed out')); }, 20000);
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error('Reload timed out'));
+        }, 20000);
+
         function cleanup() {
           clearTimeout(timer);
           contents.removeListener('did-finish-load', done);
           contents.removeListener('did-fail-load', failed);
           contents.removeListener('did-start-navigation', navigation);
         }
-        function done() { cleanup(); resolve(); }
+
+        function done() {
+          cleanup();
+          resolve();
+        }
+
         function failed(_event, code, message, _url, isMainFrame) {
           if (!isMainFrame) return;
-          cleanup(); reject(new Error(message || `Reload failed: ${code}`));
+          cleanup();
+          reject(new Error(message || 'Reload failed: ' + code));
         }
-        function navigation(_event, _url, _isInPlace, isMainFrame) { if (isMainFrame) started = true; }
+
+        function navigation(_event, _url, _isInPlace, isMainFrame) {
+          if (isMainFrame) started = true;
+        }
+
         contents.once('did-finish-load', done);
         contents.on('did-fail-load', failed);
         contents.on('did-start-navigation', navigation);
-        try { contents.reloadIgnoringCache(); } catch (error) { cleanup(); reject(error); }
+        try {
+          contents.reloadIgnoringCache();
+        } catch (error) {
+          cleanup();
+          reject(error);
+        }
       });
       return started;
     } finally {
       contents.removeListener('will-prevent-unload', allowUnload);
     }
+  }
+
+  async function handleRequest(event, action, payload) {
+    assertSender(event);
+
+    switch (action) {
+      case 'read': {
+        const current = generation;
+        const key = await getSessionKey(event.sender);
+        return current === generation ? store.read(key) : null;
+      }
+
+      case 'write': {
+        const current = generation;
+        const key = await getSessionKey(event.sender);
+        return current === generation && store.write(key, payload);
+      }
+
+      case 'clear':
+        generation++;
+        store.clear();
+        console.info('[offline] Cached session data cleared');
+        return true;
+
+      case 'refresh':
+        return refresh(event.sender);
+
+      default:
+        console.warn('[offline] Rejected unknown IPC action:', action);
+        throw new Error('Unsupported offline action');
+    }
+  }
+
+  ipcMain.on('linux-offline:renderer', event => {
+    event.returnValue = getRenderer(event);
   });
+
+  ipcMain.handle('linux-offline:request', async (event, action, payload) => {
+    try {
+      return await handleRequest(event, action, payload);
+    } catch (error) {
+      console.error('[offline] ' + String(action) + ' request failed:', error);
+      throw error;
+    }
+  });
+
+  console.info('[offline] Plugin registered; IPC bridge is ready');
 }
 
 module.exports = { register };

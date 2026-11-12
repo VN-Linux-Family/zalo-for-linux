@@ -137,12 +137,21 @@ function createOfflineController(env) {
 }
 
 if (typeof module !== 'undefined' && module.exports) module.exports = { createOfflineController };
-if (typeof window !== 'undefined' && window.__zaloOfflineStorage) {
+if (typeof window !== 'undefined' && window.__zaloOfflineBridge &&
+    typeof window.__zaloOfflineBridge.request === 'function') {
+  const request = window.__zaloOfflineBridge.request;
+  const storage = Object.freeze({
+    read: () => request('read'),
+    write: record => request('write', record),
+    clear: () => request('clear'),
+    refresh: () => request('refresh')
+  });
+
   window.__zaloOffline = createOfflineController({
-    storage: window.__zaloOfflineStorage,
+    storage,
     setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window),
     now: Date.now, isOnline: () => navigator.onLine,
-    reload: () => window.__zaloOfflineStorage.refresh(),
+    reload: () => storage.refresh(),
     onOnline: callback => window.addEventListener('online', callback),
     onUnload: callback => window.addEventListener('beforeunload', callback),
     showStatus(text) {
