@@ -11,7 +11,7 @@ This document highlights features added to **Zalo for Linux** that are not prese
 Read locally cached chats, contacts, and groups when working without an internet connection.
 
 - **How it works**: Open Zalo online once with "Remember Login" checked. If internet is disconnected later, Zalo boots into offline mode with a visual indicator.
-- **Auto-reconnect**: Zalo retries authentication in the background and seamlessly reloads once network access returns.
+- **Auto-reconnect**: Zalo retries authentication in the background and reloads once network access returns.
 - **Notes**: Uncached attachments or messages sent during downtime remain unavailable until reconnection. Logging out clears the offline session cache.
 
 ---

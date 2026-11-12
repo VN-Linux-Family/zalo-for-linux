@@ -1,52 +1,69 @@
-# Offline startup
+# Offline Mode
 
-`patch-offline-startup.js` wraps the extracted app's `fetchLoginInfo` boundary.
-Successful responses are cached; offline startup reuses the same UID and UIN so
-Zalo's own bootstrap opens the existing per-user SQLite/IndexedDB databases and
-loads the profile, contacts, groups and conversations. No second message store
-or HTML snapshot is created. Session renewal and optional server refreshes are
-skipped during offline startup. The network patch exposes the real network state.
+**English** | [Tiếng Việt](./README.vi.md)
 
-The cache is AES-256-GCM encrypted using a key derived from the existing secure,
-HttpOnly `zpw_sek` cookies. It is written atomically with mode 0600 in userData.
-Missing/changed cookies, corrupt data, another client ID or another UID prevent
-restoration. IPC accepts only the main frame of the local login/index pages.
-Logout, account replacement and rejected sessions invalidate the cache; pending
-writes cannot recreate it after invalidation.
+Offline Mode lets Zalo reuse the current account's locally cached session and the message databases already maintained by Zalo. It does not create a second contact or message store.
 
-Cached startup waits at most eight seconds for an online login request. Offline
-startup retries every ten seconds and on the browser's online event, with only
-one active attempt and a fifteen-second timeout. It probes even if Chromium's
-`navigator.onLine` remains false after suspend. An accepted login response is
-cached and the page reloads once after local UI initialization, allowing Zalo's
-normal bootstrap to apply the fresh config and synchronize messages.
+## Architecture
 
-The build applies the patch after `patch-network-and-sync-fix.js`. For an already
-extracted development app, run both scripts and restart `npm start`. Open online
-once to seed the cache. The patch checks its upstream anchors and fails the build
-if they change instead of silently leaving startup broken.
+The feature is split across the Offline plugin and its startup patch:
 
-Validation:
+- `index.js` owns the encrypted session cache, validates IPC senders, and serves the renderer source and storage requests.
+- `store.js` reads and writes the encrypted session record.
+- `renderer.js` owns the startup/reconnect state machine and the small status badge. It is kept independent of Zalo's Webpack module names so its state machine can be tested without Electron.
+- `patch-offline-startup.js` adapts Zalo's extracted startup code. It connects the cached login response to the normal Zalo bootstrap and skips network-only work while Offline is active.
+
+The patch runs after `patch-network-and-sync-fix.js`. It validates upstream anchors and fails rather than silently applying a partial patch when Zalo changes.
+
+During Offline startup, Zalo still opens its own per-account SQLite/IndexedDB databases. The patch bypasses the Over-Queue cloud verification branch in the initial conversation-history loader, while leaving the local database read and dispatch intact. It also guards the message renderer against an absent `focusId` in Offline mode. The online path retains Zalo's original behavior.
+
+## Session cache
+
+A successful online login response is cached only when the account has a valid `zpw_sek` cookie. The cache is:
+
+- Encrypted with AES-256-GCM.
+- Keyed from the existing secure, HttpOnly `zpw_sek` cookies; no separate plaintext session key is stored.
+- Written atomically with file mode `0600` under Electron's `userData` directory.
+- Bound to the client ID and account UID. Missing or changed cookies, corrupt data, a different client ID, or a different UID prevent restoration.
+
+Logout, account replacement, and rejected sessions invalidate the cache. Generation checks prevent an outstanding write from recreating a cache after invalidation.
+
+## Startup and reconnection
+
+- A cached online login attempt is bounded by an eight-second timeout. Only network failures allow the cached response to be used.
+- Offline startup reports its state to the main process and retries authentication every ten seconds, as well as on the browser's `online` event.
+- Only one reconnect attempt runs at a time; each attempt has a fifteen-second timeout.
+- Once authentication succeeds and local UI initialization is ready, the page reloads once so Zalo can apply the fresh server response and synchronize normally.
+- Session rejection clears the cache and returns to Zalo's normal login flow.
+
+The Shared Worker asks the main process for the current Offline state through a separate, validated IPC request. The main process accepts state reports only from the trusted main frame of the local login/index pages; the Shared Worker may read the state but cannot publish it.
+
+## Development and validation
+
+After extracting an app, apply the network/sync patch and Offline startup patch, then restart the development app:
 
 ```sh
-node tests/offline.test.js
+node scripts/patches/patch-network-and-sync-fix.js
+node scripts/patches/patch-offline-startup.js
+npm start
 ```
 
-The tests cover cache persistence/encryption, account isolation, startup timeout,
-reconnect, rejection, logout races, IPC validation and generated-bundle syntax.
-With an extracted app present, they also check patch idempotency.
+Open Zalo online once with **Remember Login** enabled to seed the cache. The Offline feature tests cover session storage, startup/recovery behavior, and IPC renderer delivery:
 
-Manual acceptance with a real account (not covered by the mocked tests):
+```sh
+node --test tests/offline.test.js
+```
 
-1. Open online with remembered login, open several chats, then quit normally.
-2. Disconnect internet and restart. Verify the account, contact/group names and
-   previously downloaded messages. Open another cached chat and check app lock.
-3. Reconnect. Verify a single automatic reload, incoming messages and updated UI.
-4. Repeat with Wi-Fi connected but its internet uplink unavailable, and after
-   suspend/resume. Verify a slow login cannot leave the loading screen stuck.
-5. Log out, quit, then start offline: the old session must not be restored.
-   Repeat after switching accounts and with a server-revoked session.
+Run the full suite with `npm test`.
 
-Only the existing local history is available offline. First login and content
-that was never downloaded still require internet. Cookie expiry also requires
-online authentication; this plugin does not extend or recreate session cookies.
+Manual acceptance with a real account:
+
+1. Open Zalo online with Remember Login enabled. Open several chats, then quit normally.
+2. Disconnect the network and restart. Verify the account, contacts, groups, and previously downloaded messages. Open multiple cached chats and check app lock.
+3. Reconnect. Verify one automatic reload, incoming messages, and updated UI.
+4. Repeat with Wi-Fi connected but no internet uplink, and after suspend/resume.
+5. Log out, quit, and start Offline. The previous session must not be restored. Repeat after switching accounts and with a server-revoked session.
+
+## Limitations
+
+Only data already downloaded by Zalo is available Offline. First login, uncached messages, attachments that are not locally available, and messages sent while disconnected require a network connection. Cookie expiry also requires online authentication; Offline Mode does not extend or recreate session cookies.

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "plugin": "offline",
+  "messages": {
+    "offline.status.offline": {
+      "vi": "Ngoại tuyến · Đang hiển thị dữ liệu đã lưu trên máy",
+      "en": "Offline · Showing locally saved data"
+    },
+    "offline.status.reconnecting": {
+      "vi": "Đã kết nối. Đang cập nhật Zalo…",
+      "en": "Connected. Updating Zalo…"
+    },
+    "offline.status.retrying": {
+      "vi": "Chưa thể cập nhật. Zalo sẽ thử lại…",
+      "en": "Could not update. Zalo will retry…"
+    }
+  }
+}

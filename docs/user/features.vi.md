@@ -11,7 +11,7 @@ Tài liệu này tổng hợp các tính năng nổi bật được bổ sung tr
 Đọc danh bạ, danh sách nhóm và tin nhắn đã được lưu cục bộ trên máy khi mất kết nối mạng.
 
 - **Cách hoạt động**: Mở Zalo online một lần và bật tùy chọn "Ghi nhớ đăng nhập". Khi mất mạng, Zalo tự động khởi động ở chế độ ngoại tuyến có biểu tượng chỉ báo.
-- **Tự động kết nối lại**: Zalo tự động xác thực ở chế độ nền và tải lại đầy đủ khi mạng được khôi phục.
+- **Tự động kết nối lại**: Zalo tự động xác thực ở chế độ nền và tải lại khi mạng được khôi phục.
 - **Lưu ý**: Các tệp đính kèm hoặc tin nhắn gửi trong lúc mất mạng sẽ chỉ tải được khi có mạng trở lại. Đăng xuất tài khoản sẽ xóa bộ nhớ đệm offline.
 
 ---

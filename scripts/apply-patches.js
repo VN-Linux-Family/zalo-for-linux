@@ -38,6 +38,7 @@ const PATCHES = [
   'patch-zocr-runtime',
   'patch-flatpak-file-transfer',
   'patch-zwalker',
+  'patch-linux-guards',
   'patch-zlang',
 ];
 
