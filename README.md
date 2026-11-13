@@ -6,6 +6,7 @@
   </a>
 
 <h2 align="center">Zalo for Linux 🐧</h2>
+</div>
 
 
 [![Build Status](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml/badge.svg)](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml)
