@@ -79,8 +79,8 @@ try {
       process.env.GTK_DESKTOP_FILE,
       process.env.XDG_CURRENT_DESKTOP_FILE,
       getAppImageDesktopFile(),
-      appInstance && appInstance.isPackaged ? 'com.zalo.linux.desktop' : 'electron.desktop',
-      'com.zalo.linux.desktop',
+      appInstance && appInstance.isPackaged ? 'net.vietnamlinuxfamily.zalo_for_linux.desktop' : 'electron.desktop',
+      'net.vietnamlinuxfamily.zalo_for_linux.desktop',
       'zalo-for-linux.desktop',
       'Zalo.desktop',
       'zalo.desktop'

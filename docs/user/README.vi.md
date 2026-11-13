@@ -1,6 +1,11 @@
-# Zalo for Linux 🐧
-
 [English](../../README.md) | **Tiếng Việt**
+
+<div align="center">
+  <a href="https://github.com/VN-Linux-Family/zalo-for-linux">
+    <img src="../../assets/icon.svg" alt="Logo" width="80" height="80">
+  </a>
+
+<h2 align="center">Zalo for Linux 🐧</h2>
 
 [![Build Status](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml/badge.svg)](https://github.com/VN-Linux-Family/zalo-for-linux/actions/workflows/build.yml)
 
@@ -25,7 +30,7 @@ am -u
 ```
 
 <p align="center">
-  <img width="600" alt="installer" src="../../sample/am-guide.png" />
+  <img width="600" alt="installer" src="../../assets/am-guide.png" />
 </p>
 
 ---

@@ -99,7 +99,7 @@ function getDesktopFiles(app) {
     process.env.XDG_CURRENT_DESKTOP_FILE,
     getAppImageDesktopFile(),
     app && app.isPackaged ? 'zalo.desktop' : 'electron.desktop',
-    'com.zalo.linux.desktop',
+    'net.vietnamlinuxfamily.zalo_for_linux.desktop',
     'zalo-for-linux.desktop',
     'Zalo.desktop',
     'zalo.desktop'

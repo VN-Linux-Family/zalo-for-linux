@@ -52,7 +52,7 @@
     "sqlite3": "^6.0.1"
   },
   "build": {
-    "appId": "com.zalo.linux",
+    "appId": "net.vietnamlinuxfamily.zalo_for_linux",
     "productName": "Zalo",
     "directories": {
       "output": "dist"
