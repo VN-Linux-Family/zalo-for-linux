@@ -3,21 +3,24 @@
 //! Replaces python3 audio-io.py + parec + pacat subprocess pipeline with a single,
 //! real-time native binary using PulseAudio Simple API and libopus directly.
 
+mod apm;
 mod audio_backend;
 mod jitter_buffer;
 mod level;
+mod leveler;
 mod opus_codec;
 mod protocol;
 
 use std::env;
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use audio_backend::{PulsePlayer, PulseRecorder};
 use jitter_buffer::JitterBuffer;
 use level::compute_rfc6464_level;
+use leveler::MicLeveler;
 use opus_codec::OpusEncoder;
 use protocol::*;
 
@@ -27,6 +30,10 @@ struct Config {
     is_group: bool,
     bitrate_bps: i32,
     test_tone: bool,
+    no_aec: bool,
+    no_ns: bool,
+    no_high_pass: bool,
+    min_delay_ms: Option<i32>,
 }
 
 fn parse_args() -> Config {
@@ -35,7 +42,10 @@ fn parse_args() -> Config {
     let mut is_group = false;
     let mut bitrate_bps = 32000;
     let mut test_tone = false;
-
+    let mut no_aec = false;
+    let mut no_ns = false;
+    let mut no_high_pass = false;
+    let mut min_delay_ms = None;
     let args: Vec<String> = env::args().collect();
     let mut i = 1;
     while i < args.len() {
@@ -67,7 +77,24 @@ fn parse_args() -> Config {
             "--tone" => {
                 test_tone = true;
             }
-            "--min-delay" | "--max-delay" => {
+            "--no-aec" => {
+                no_aec = true;
+            }
+            "--no-ns" => {
+                no_ns = true;
+            }
+            "--no-high-pass" => {
+                no_high_pass = true;
+            }
+            "--min-delay" => {
+                if i + 1 < args.len() {
+                    if let Ok(d) = args[i + 1].parse::<i32>() {
+                        min_delay_ms = Some(d);
+                    }
+                    i += 1;
+                }
+            }
+            "--max-delay" => {
                 if i + 1 < args.len() && !args[i + 1].starts_with("--") {
                     i += 1;
                 }
@@ -83,6 +110,10 @@ fn parse_args() -> Config {
         is_group,
         bitrate_bps,
         test_tone,
+        no_aec,
+        no_ns,
+        no_high_pass,
+        min_delay_ms,
     }
 }
 fn get_mic_volume(source: Option<&str>) -> u8 {
@@ -116,6 +147,73 @@ fn set_mic_volume(source: Option<&str>, pct: u8) {
         .spawn();
 }
 
+/// Apply smooth polynomial soft-saturation to prevent audio clipping.
+/// For samples within [-20000, 20000], signal is untouched (strictly linear).
+/// For samples exceeding 20000, a smooth C1 cubic curve compresses peaks asymptotically
+/// towards 32000, completely eliminating harsh square-wave clipping.
+pub fn apply_soft_limiter(samples: &mut [i16]) {
+    const THRESHOLD: f32 = 20000.0;
+    const HEADROOM: f32 = 18000.0; // 20000 + 18000 * (1 - 1/3) = 32000
+
+    for s in samples.iter_mut() {
+        let val = *s as f32;
+        let abs_val = val.abs();
+        if abs_val > THRESHOLD {
+            let sign = if val > 0.0 { 1.0 } else { -1.0 };
+            let u = ((abs_val - THRESHOLD) / HEADROOM).min(1.0);
+            let compressed = THRESHOLD + HEADROOM * (u - (u * u * u) / 3.0);
+            *s = (sign * compressed).clamp(-32767.0, 32767.0) as i16;
+        }
+    }
+}
+
+/// ClipGuard monitors input PCM samples for near-clipping (>= 30000).
+/// When excessive clipping occurs in a 200ms window (>= 3 out of 10 frames),
+/// it automatically steps down pactl hardware source volume by 5% (floor 50%).
+pub struct ClipGuard {
+    device: Option<String>,
+    current_vol: Arc<AtomicU8>,
+    clipped_frames_in_window: u8,
+    window_frame_count: u8,
+    last_step: std::time::Instant,
+}
+
+impl ClipGuard {
+    pub fn new(device: Option<String>, current_vol: Arc<AtomicU8>) -> Self {
+        Self {
+            device,
+            current_vol,
+            clipped_frames_in_window: 0,
+            window_frame_count: 0,
+            last_step: std::time::Instant::now(),
+        }
+    }
+
+    pub fn feed(&mut self, raw_samples: &[i16]) {
+        let has_clip = raw_samples.iter().any(|&s| s.abs() >= 30000);
+        if has_clip {
+            self.clipped_frames_in_window += 1;
+        }
+        self.window_frame_count += 1;
+
+        if self.window_frame_count >= 10 {
+            if self.clipped_frames_in_window >= 3
+                && self.last_step.elapsed() >= std::time::Duration::from_millis(400)
+            {
+                let cur = self.current_vol.load(Ordering::Relaxed);
+                if cur > 35 {
+                    let new_vol = cur.saturating_sub(10).max(35);
+                    self.current_vol.store(new_vol, Ordering::Relaxed);
+                    set_mic_volume(self.device.as_deref(), new_vol);
+                    eprintln!("[audio-io] mic volume: {}%", new_vol);
+                    self.last_step = std::time::Instant::now();
+                }
+            }
+            self.clipped_frames_in_window = 0;
+            self.window_frame_count = 0;
+        }
+    }
+}
 
 fn main() {
     let config = parse_args();
@@ -126,19 +224,60 @@ fn main() {
 
     let is_muted = Arc::new(AtomicBool::new(false));
     let speaker_off = Arc::new(AtomicBool::new(false));
+    let far_active = Arc::new(AtomicBool::new(false));
     let initial_mic_vol = get_mic_volume(config.mic_device.as_deref());
-    let mic_volume = Arc::new(AtomicU8::new(initial_mic_vol));
-    eprintln!("[audio-io] mic volume: {}%", initial_mic_vol);
+    // If initial volume is overly boosted (e.g. 100%), initialize to standard 40%
+    // to provide analog headroom as Zalo's startMicLevel (75/255 ~ 29-40%) recommends.
+    let mic_volume_val = if initial_mic_vol > 50 {
+        set_mic_volume(config.mic_device.as_deref(), 40);
+        40
+    } else {
+        initial_mic_vol
+    };
+    let mic_volume = Arc::new(AtomicU8::new(mic_volume_val));
+    eprintln!("[audio-io] mic volume: {}%", mic_volume_val);
     let running = Arc::new(AtomicBool::new(true));
+
+    // Initialize Embedded WebRTC AudioProcessing Module (AEC, Noise Suppression, High Pass Filter)
+    let aec_on = !config.no_aec;
+    let ns_on = !config.no_ns;
+    let hpf_on = !config.no_high_pass;
+    let apm_instance = match apm::Apm::new(
+        SAMPLE_RATE as i32,
+        CHANNELS as i32,
+        aec_on,
+        ns_on,
+        hpf_on,
+    ) {
+        Ok(a) => {
+            eprintln!(
+                "[audio-io] Embedded WebRTC AudioProcessing enabled (AEC: {}, NS: {}, HPF: {})",
+                aec_on, ns_on, hpf_on
+            );
+            Some(Arc::new(a))
+        }
+        Err(e) => {
+            eprintln!(
+                "[audio-io] warning: WebRTC APM unavailable ({}); continuing without embedded AEC",
+                e
+            );
+            None
+        }
+    };
+
+    if let (Some(a), Some(d)) = (&apm_instance, config.min_delay_ms) {
+        a.set_delay_ms(d);
+    }
 
     // 1. Microphone capture thread
     let mic_running = Arc::clone(&running);
     let mic_muted = Arc::clone(&is_muted);
     let mic_vol = Arc::clone(&mic_volume);
+    let mic_far_active = Arc::clone(&far_active);
+    let mic_apm = apm_instance.as_ref().map(Arc::clone);
     let mic_dev = config.mic_device.clone();
     let bitrate = config.bitrate_bps;
     let tone_mode = config.test_tone;
-
     let mic_handle = thread::spawn(move || {
         let mut recorder = match PulseRecorder::new(mic_dev.as_deref()) {
             Ok(r) => r,
@@ -163,6 +302,8 @@ fn main() {
         let mut tone_phase: f32 = 0.0;
         let tone_step = 2.0 * std::f32::consts::PI * 440.0 / SAMPLE_RATE as f32;
 
+        let mut guard = ClipGuard::new(mic_dev.clone(), Arc::clone(&mic_vol));
+        let mut leveler = MicLeveler::new(Some(mic_far_active));
         while mic_running.load(Ordering::Relaxed) {
             if tone_mode {
                 // Generate 440 Hz test tone
@@ -190,13 +331,14 @@ fn main() {
                     *s = 0;
                 }
             } else {
-                let vol = mic_vol.load(Ordering::Relaxed);
-                if vol < 100 {
-                    let scale = vol as f32 / 100.0;
-                    for s in samples.iter_mut() {
-                        *s = (*s as f32 * scale) as i16;
+                if !tone_mode {
+                    if let Some(apm) = &mic_apm {
+                        apm.process_capture(samples);
                     }
+                    guard.feed(samples);
+                    leveler.process(samples);
                 }
+                apply_soft_limiter(samples);
             }
 
             let level = compute_rfc6464_level(samples);
@@ -210,7 +352,10 @@ fn main() {
                     hdr[3] = (len & 0xff) as u8;
 
                     let mut out = io::BufWriter::new(&mut stdout);
-                    if out.write_all(&hdr).is_err() || out.write_all(&opus_buf[..len]).is_err() || out.flush().is_err() {
+                    if out.write_all(&hdr).is_err()
+                        || out.write_all(&opus_buf[..len]).is_err()
+                        || out.flush().is_err()
+                    {
                         break;
                     }
                 }
@@ -221,26 +366,93 @@ fn main() {
         }
     });
 
-    // 2. Playback & Inbound IPC loop (Main thread)
-    let mut player = match PulsePlayer::new(config.speaker_device.as_deref()) {
-        Ok(p) => Some(p),
-        Err(e) => {
-            eprintln!("[audio-io] fault: speaker: {}", e);
-            None
-        }
-    };
+    // 2. Playback thread (Decoupled with 20 ms steady clock)
+    let playout_running = Arc::clone(&running);
+    let playout_speaker_off = Arc::clone(&speaker_off);
+    let playout_far_active = Arc::clone(&far_active);
+    let playout_apm = apm_instance.as_ref().map(Arc::clone);
+    let playout_jb = Arc::new(Mutex::new(
+        match JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10) {
+            Ok(jb) => jb,
+            Err(e) => {
+                eprintln!(
+                    "[audio-io] fault: speaker: jitter buffer init failed: {}",
+                    e
+                );
+                return;
+            }
+        },
+    ));
+    let playout_jb_thread = Arc::clone(&playout_jb);
+    let speaker_dev = config.speaker_device.clone();
 
-    let mut jitter_buffer = match JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10) {
-        Ok(jb) => Some(jb),
-        Err(e) => {
-            eprintln!("[audio-io] fault: speaker: jitter buffer init failed: {}", e);
-            None
-        }
-    };
+    let playout_handle = thread::spawn(move || {
+        let mut player = match PulsePlayer::new(speaker_dev.as_deref()) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("[audio-io] fault: speaker: {}", e);
+                None
+            }
+        };
 
+        let mut pcm_out = vec![0i16; FRAME_SAMPLES];
+        let silence = vec![0u8; FRAME_BYTES];
+        let tick = std::time::Duration::from_millis(20);
+        let mut next_tick = std::time::Instant::now();
+        let mut last_far_speech = std::time::Instant::now() - std::time::Duration::from_secs(1);
+
+        while playout_running.load(Ordering::Relaxed) {
+            let off = playout_speaker_off.load(Ordering::Relaxed);
+
+            if let Some(ply) = &mut player {
+                if off {
+                    let _ = ply.write(&silence);
+                } else {
+                    let has_frame = {
+                        if let Ok(mut jb) = playout_jb_thread.lock() {
+                            jb.pop_frame(&mut pcm_out)
+                        } else {
+                            false
+                        }
+                    };
+                    if has_frame {
+                        if let Some(apm) = &playout_apm {
+                            apm.process_render(&pcm_out);
+                        }
+
+                        let sum_sq: i64 = pcm_out.iter().map(|&v| (v as i64) * (v as i64)).sum();
+                        let mean_sq = sum_sq / FRAME_SAMPLES as i64;
+                        if mean_sq > 100_000 {
+                            last_far_speech = std::time::Instant::now();
+                            playout_far_active.store(true, Ordering::Relaxed);
+                        }
+                        let bytes_len = FRAME_SAMPLES * 2;
+                        let pcm_bytes = unsafe {
+                            std::slice::from_raw_parts(pcm_out.as_ptr() as *const u8, bytes_len)
+                        };
+                        let _ = ply.write(pcm_bytes);
+                    } else {
+                        let _ = ply.write(&silence);
+                    }
+
+                    if last_far_speech.elapsed() >= std::time::Duration::from_millis(300) {
+                        playout_far_active.store(false, Ordering::Relaxed);
+                    }
+                }
+            }
+
+            next_tick += tick;
+            let now = std::time::Instant::now();
+            if next_tick > now {
+                thread::sleep(next_tick - now);
+            } else {
+                next_tick = now;
+            }
+        }
+    });
+
+    // 3. Inbound IPC loop (Main thread)
     let mut stdin = io::stdin();
-    let mut pcm_out = vec![0i16; FRAME_SAMPLES];
-    let silence = vec![0u8; FRAME_BYTES];
 
     loop {
         let mut cmd_buf = [0u8; 1];
@@ -262,23 +474,8 @@ fn main() {
                     break;
                 }
 
-                let off = speaker_off.load(Ordering::Relaxed);
-                if let (Some(jb), Some(ply)) = (&mut jitter_buffer, &mut player) {
-                    if off {
-                        let _ = ply.write(&silence);
-                    } else {
-                        jb.push(idx, opus_data);
-                        while jb.pop_frame(&mut pcm_out) {
-                            let bytes_len = FRAME_SAMPLES * 2;
-                            let pcm_bytes = unsafe {
-                                std::slice::from_raw_parts(pcm_out.as_ptr() as *const u8, bytes_len)
-                            };
-                            let _ = ply.write(pcm_bytes);
-                            if !jb.is_ready() {
-                                break;
-                            }
-                        }
-                    }
+                if let Ok(mut jb) = playout_jb.lock() {
+                    jb.push(idx, opus_data);
                 }
             }
             CMD_IN_MUTE => {
@@ -316,10 +513,21 @@ fn main() {
                     break;
                 }
                 let name = String::from_utf8_lossy(&dev_name);
-                let kind_str = if hdr[0] == b'i' { "microphone" } else { "speaker" };
-                eprintln!("[audio-io] Requested {} device change to: {}", kind_str, name);
+                let kind_str = if hdr[0] == b'i' {
+                    "microphone"
+                } else {
+                    "speaker"
+                };
+                eprintln!(
+                    "[audio-io] Requested {} device change to: {}",
+                    kind_str, name
+                );
                 if hdr[0] == b'i' {
-                    let dev_str = if name.is_empty() { None } else { Some(name.as_ref()) };
+                    let dev_str = if name.is_empty() {
+                        None
+                    } else {
+                        Some(name.as_ref())
+                    };
                     let new_vol = get_mic_volume(dev_str);
                     mic_volume.store(new_vol, Ordering::Relaxed);
                     eprintln!("[audio-io] mic volume: {}%", new_vol);
@@ -333,5 +541,72 @@ fn main() {
 
     running.store(false, Ordering::Relaxed);
     let _ = mic_handle.join();
+    let _ = playout_handle.join();
     eprintln!("[audio-io] zcall-audio shutdown complete.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_soft_limiter_linear_region() {
+        let mut samples = vec![0i16, 1000, -1000, 15000, -20000, 20000];
+        let original = samples.clone();
+        apply_soft_limiter(&mut samples);
+        assert_eq!(samples, original);
+    }
+
+    #[test]
+    fn test_soft_limiter_compression_bounds() {
+        let mut samples = vec![25000, 30000, 32767, -25000, -30000, -32768];
+        apply_soft_limiter(&mut samples);
+        for &s in &samples {
+            assert!(
+                s.abs() <= 32000,
+                "Compressed sample must not exceed 32000, got {}",
+                s
+            );
+            assert!(
+                s.abs() > 20000,
+                "Compressed sample must exceed threshold 20000"
+            );
+        }
+        // Positive full scale should be ~30626
+        assert_eq!(samples[2], 30626);
+        // Negative full scale should be ~-30626
+        assert_eq!(samples[5], -30626);
+    }
+
+    #[test]
+    fn test_clip_guard_stepping() {
+        let vol = Arc::new(AtomicU8::new(100));
+        let mut guard = ClipGuard::new(None, Arc::clone(&vol));
+        // Artificially reset last_step to 1 second ago so it can step
+        guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(1000);
+
+        // Feed 10 frames with clipping (30000)
+        let clipped_frame = vec![30500i16; 320];
+        for _ in 0..10 {
+            guard.feed(&clipped_frame);
+        }
+
+        // Must have stepped down by 10%
+        assert_eq!(vol.load(Ordering::Relaxed), 90);
+
+        // Test floor limit at 35%
+        vol.store(42, Ordering::Relaxed);
+        guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(1000);
+        for _ in 0..10 {
+            guard.feed(&clipped_frame);
+        }
+        assert_eq!(vol.load(Ordering::Relaxed), 35);
+
+        // Feed again, must not go below 35
+        guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(1000);
+        for _ in 0..10 {
+            guard.feed(&clipped_frame);
+        }
+        assert_eq!(vol.load(Ordering::Relaxed), 35);
+    }
 }
