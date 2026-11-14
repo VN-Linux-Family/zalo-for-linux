@@ -1,13 +1,14 @@
 //! Audio Jitter Buffer and Packet Loss Concealment (PLC).
 
-use std::collections::BTreeMap;
 use crate::opus_codec::OpusDecoder;
+use std::collections::BTreeMap;
 
 pub struct JitterBuffer {
     decoder: OpusDecoder,
     queue: BTreeMap<u32, Vec<u8>>,
     next_idx: Option<u32>,
     max_depth: usize,
+    consecutive_plc: usize,
 }
 
 impl JitterBuffer {
@@ -18,6 +19,7 @@ impl JitterBuffer {
             queue: BTreeMap::new(),
             next_idx: None,
             max_depth: depth_frames.max(5),
+            consecutive_plc: 0,
         })
     }
 
@@ -40,11 +42,19 @@ impl JitterBuffer {
     /// Decode next frame into out_pcm (320 samples).
     /// Returns true if valid frame or PLC generated.
     pub fn pop_frame(&mut self, out_pcm: &mut [i16]) -> bool {
-        if self.next_idx.is_none() {
-            if let Some(&first) = self.queue.keys().next() {
+        if self.queue.is_empty() && (self.next_idx.is_none() || self.consecutive_plc >= 5) {
+            return false;
+        }
+
+        if let Some(&first) = self.queue.keys().next() {
+            if self.next_idx.is_none() || self.consecutive_plc >= 5 {
                 self.next_idx = Some(first);
-            } else {
-                return false;
+                self.consecutive_plc = 0;
+            } else if let Some(cur) = self.next_idx {
+                if first > cur && (first - cur) > 20 {
+                    self.next_idx = Some(first);
+                    self.consecutive_plc = 0;
+                }
             }
         }
 
@@ -52,15 +62,22 @@ impl JitterBuffer {
         self.next_idx = Some(cur_idx.wrapping_add(1));
 
         if let Some(payload) = self.queue.remove(&cur_idx) {
+            self.consecutive_plc = 0;
             let _ = self.decoder.decode(&payload, out_pcm, false);
             true
         } else {
-            // Missing frame: run Opus Packet Loss Concealment (PLC)
-            let _ = self.decoder.decode(&[], out_pcm, false);
-            true
+            // Missing frame: run Opus Packet Loss Concealment (PLC) up to 5 consecutive frames
+            if self.consecutive_plc < 5 {
+                self.consecutive_plc += 1;
+                let _ = self.decoder.decode(&[], out_pcm, false);
+                true
+            } else {
+                false
+            }
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_ready(&self) -> bool {
         self.queue.len() >= 2
     }
@@ -141,6 +158,34 @@ mod tests {
         // Frame 2 is missing -> triggers Packet Loss Concealment (PLC), must still succeed
         assert!(jb.pop_frame(&mut out));
         // Should pop frame 3
+        assert!(jb.pop_frame(&mut out));
+    }
+
+    #[test]
+    fn test_jitter_buffer_plc_limit_and_resync() {
+        let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+        let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+
+        let mut phase = 0.0;
+        let mut opus_buf = vec![0u8; 1024];
+
+        let pcm = generate_sine_frame(440.0, &mut phase);
+        let len = enc.encode(&pcm, &mut opus_buf).unwrap();
+        jb.push(0, opus_buf[..len].to_vec());
+
+        let mut out = vec![0i16; FRAME_SAMPLES];
+        // Frame 0 pop -> true
+        assert!(jb.pop_frame(&mut out));
+        // Next 5 missing frames -> PLC 1..5 -> true
+        for _ in 0..5 {
+            assert!(jb.pop_frame(&mut out));
+        }
+        // 6th missing frame -> exceeds PLC limit -> false
+        assert!(!jb.pop_frame(&mut out));
+
+        // New burst of packet arrives after gap (packet 50)
+        jb.push(50, opus_buf[..len].to_vec());
+        // Should resync to 50 and succeed
         assert!(jb.pop_frame(&mut out));
     }
 }
