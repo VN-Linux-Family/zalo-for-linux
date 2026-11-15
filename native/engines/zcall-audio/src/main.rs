@@ -215,12 +215,55 @@ impl ClipGuard {
     }
 }
 
+fn probe_hardware(speaker: Option<&str>, mic: Option<&str>) {
+    let sink_name = speaker.unwrap_or("@DEFAULT_SINK@");
+    let source_name = mic.unwrap_or("@DEFAULT_SOURCE@");
+    eprintln!(
+        "[audio-io] hw: audio backend=PulseAudio/PipeWire, stream_rate={}Hz, channels={}",
+        SAMPLE_RATE, CHANNELS
+    );
+    eprintln!(
+        "[audio-io] hw: target speaker='{}', mic='{}'",
+        sink_name, source_name
+    );
+
+    // Detect Bluetooth sinks/sources
+    if let Ok(out) = std::process::Command::new("pactl")
+        .args(&["list", "sinks", "short"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            if line.contains("bluez") {
+                eprintln!("[audio-io] hw: detected bluetooth sink: {}", line);
+            }
+        }
+    }
+    if let Ok(out) = std::process::Command::new("pactl")
+        .args(&["list", "sources", "short"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            if line.contains("bluez") {
+                eprintln!("[audio-io] hw: detected bluetooth source: {}", line);
+                if line.contains("8000Hz") || line.contains("16000Hz") {
+                    eprintln!(
+                        "[audio-io] hw: note: bluetooth headset using HFP profile (narrowband/wideband speech)"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let config = parse_args();
     eprintln!(
         "[audio-io] Starting native zcall-audio engine (bitrate: {} bps, group: {})",
         config.bitrate_bps, config.is_group
     );
+    probe_hardware(config.speaker_device.as_deref(), config.mic_device.as_deref());
 
     let is_muted = Arc::new(AtomicBool::new(false));
     let speaker_off = Arc::new(AtomicBool::new(false));
@@ -366,14 +409,21 @@ fn main() {
         }
     });
 
-    // 2. Playback thread (Decoupled with 20 ms steady clock)
+    // 2. Playback thread (Decoupled with 20 ms steady clock & buffer monitoring)
     let playout_running = Arc::clone(&running);
     let playout_speaker_off = Arc::clone(&speaker_off);
     let playout_far_active = Arc::clone(&far_active);
     let playout_apm = apm_instance.as_ref().map(Arc::clone);
+    let target_frames = config
+        .min_delay_ms
+        .map(|d| (d / 20).max(2) as usize)
+        .unwrap_or(4);
     let playout_jb = Arc::new(Mutex::new(
         match JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10) {
-            Ok(jb) => jb,
+            Ok(mut jb) => {
+                jb.set_min_target(target_frames);
+                jb
+            }
             Err(e) => {
                 eprintln!(
                     "[audio-io] fault: speaker: jitter buffer init failed: {}",
@@ -384,6 +434,7 @@ fn main() {
         },
     ));
     let playout_jb_thread = Arc::clone(&playout_jb);
+    let playout_mic_vol = Arc::clone(&mic_volume);
     let speaker_dev = config.speaker_device.clone();
 
     let playout_handle = thread::spawn(move || {
@@ -398,15 +449,26 @@ fn main() {
         let mut pcm_out = vec![0i16; FRAME_SAMPLES];
         let silence = vec![0u8; FRAME_BYTES];
         let tick = std::time::Duration::from_millis(20);
-        let mut next_tick = std::time::Instant::now();
         let mut last_far_speech = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let mut last_diag = std::time::Instant::now();
+        let mut write_block_accum_ms = 0u64;
+        let mut write_block_count = 0u32;
+        let mut max_write_block_ms = 0u64;
 
         while playout_running.load(Ordering::Relaxed) {
+            let loop_start = std::time::Instant::now();
             let off = playout_speaker_off.load(Ordering::Relaxed);
 
             if let Some(ply) = &mut player {
                 if off {
+                    let t0 = std::time::Instant::now();
                     let _ = ply.write(&silence);
+                    let write_elapsed = t0.elapsed().as_millis() as u64;
+                    write_block_accum_ms += write_elapsed;
+                    write_block_count += 1;
+                    if write_elapsed > max_write_block_ms {
+                        max_write_block_ms = write_elapsed;
+                    }
                 } else {
                     let has_frame = {
                         if let Ok(mut jb) = playout_jb_thread.lock() {
@@ -430,9 +492,23 @@ fn main() {
                         let pcm_bytes = unsafe {
                             std::slice::from_raw_parts(pcm_out.as_ptr() as *const u8, bytes_len)
                         };
+                        let t0 = std::time::Instant::now();
                         let _ = ply.write(pcm_bytes);
+                        let write_elapsed = t0.elapsed().as_millis() as u64;
+                        write_block_accum_ms += write_elapsed;
+                        write_block_count += 1;
+                        if write_elapsed > max_write_block_ms {
+                            max_write_block_ms = write_elapsed;
+                        }
                     } else {
+                        let t0 = std::time::Instant::now();
                         let _ = ply.write(&silence);
+                        let write_elapsed = t0.elapsed().as_millis() as u64;
+                        write_block_accum_ms += write_elapsed;
+                        write_block_count += 1;
+                        if write_elapsed > max_write_block_ms {
+                            max_write_block_ms = write_elapsed;
+                        }
                     }
 
                     if last_far_speech.elapsed() >= std::time::Duration::from_millis(300) {
@@ -441,12 +517,39 @@ fn main() {
                 }
             }
 
-            next_tick += tick;
-            let now = std::time::Instant::now();
-            if next_tick > now {
-                thread::sleep(next_tick - now);
-            } else {
-                next_tick = now;
+            // Periodic diagnostic telemetry every 5 seconds
+            if last_diag.elapsed() >= std::time::Duration::from_secs(5) {
+                if let Ok(jb) = playout_jb_thread.lock() {
+                    let stats = jb.stats();
+                    let q_len = jb.queue_len();
+                    let target = jb.min_target();
+                    let avg_write = if write_block_count > 0 {
+                        write_block_accum_ms / (write_block_count as u64)
+                    } else {
+                        0
+                    };
+                    let cur_mic_vol = playout_mic_vol.load(Ordering::Relaxed);
+                    eprintln!(
+                        "[audio-io] diag: playout [rx={} play={} q={}/{} plc={} late_drop={} under={} write_block={}ms] mic [vol={}%]",
+                        stats.rx_packets, stats.played_frames, q_len, target,
+                        stats.plc_frames, stats.late_dropped, stats.underrun_count,
+                        avg_write, cur_mic_vol
+                    );
+                }
+                last_diag = std::time::Instant::now();
+                write_block_accum_ms = 0;
+                write_block_count = 0;
+                max_write_block_ms = 0;
+            }
+
+            // Soundcard clock alignment: if pa_simple_write blocked for >= 15ms,
+            // the hardware audio clock is already self-pacing the stream.
+            let elapsed = loop_start.elapsed();
+            if elapsed < tick {
+                let remaining = tick - elapsed;
+                if elapsed < std::time::Duration::from_millis(15) {
+                    thread::sleep(remaining);
+                }
             }
         }
     });

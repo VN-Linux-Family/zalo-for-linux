@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <vector>
 
 #ifdef HAS_WEBRTC_APM
 #include <modules/audio_processing/include/audio_processing.h>
@@ -42,8 +43,9 @@ int zcall_apm_process_render(void* handle, const int16_t* pcm, int num_samples) 
     }
     ZcallApm* ctx = static_cast<ZcallApm*>(handle);
     int chunk_size = ctx->sample_rate / 100; // 160 for 16kHz (10 ms)
+    std::vector<int16_t> scratch_dest(chunk_size, 0);
     for (int offset = 0; offset + chunk_size <= num_samples; offset += chunk_size) {
-        ctx->apm->ProcessReverseStream(pcm + offset, ctx->config, ctx->config, const_cast<int16_t*>(pcm + offset));
+        ctx->apm->ProcessReverseStream(pcm + offset, ctx->config, ctx->config, scratch_dest.data());
     }
     return 0;
 }

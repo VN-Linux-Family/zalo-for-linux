@@ -182,7 +182,7 @@ impl PulsePlayer {
 
         let attr = PaBufferAttr {
             maxlength: u32::MAX,
-            tlength: 2560, // ~80 ms buffer latency (gives extra headroom against underruns on laptops)
+            tlength: 3840, // ~120 ms buffer latency (provides robust headroom against underruns on Bluetooth/PipeWire)
             prebuf: u32::MAX,
             minreq: 640,  // 20 ms frame
             fragsize: u32::MAX,

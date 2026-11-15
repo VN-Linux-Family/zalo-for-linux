@@ -51,8 +51,9 @@ test('Native zcall-audio engine full IPC protocol and state transitions', async 
   assert.equal(typeof initialFrame.level, 'number', 'Audio level must be a number');
   assert.ok(initialFrame.level < 100, `Tone frame level (${initialFrame.level} dBov) must reflect audible signal (<100)`);
   assert.ok(initialFrame.len > 0, 'Opus payload must not be empty');
-  // Verify that zcall-audio announced initial mic volume at startup (required for call UI slider)
+  // Verify that zcall-audio announced initial mic volume and probed hardware at startup
   assert.match(stderrLogs, /\[audio-io\] mic volume: \d+%/, 'Engine must announce initial mic volume at startup');
+  assert.match(stderrLogs, /\[audio-io\] hw: audio backend=PulseAudio\/PipeWire/, 'Engine must probe audio backend');
 
 
   // 2. Test Volume adjustment 'V' (percent: 75)
@@ -73,14 +74,17 @@ test('Native zcall-audio engine full IPC protocol and state transitions', async 
   const unmutedFrame = await readNextFrame();
   assert.ok(unmutedFrame.level < 100, `Unmuted audio frame level (${unmutedFrame.level}) must return to audible`);
 
-  // 5. Test Inbound frame playback 'F' using the captured valid Opus packet
-  // Header: 'F' (0x46), u32 idx (0x01), u32 ssrc (0x1234), u16 len, payload
-  const inboundHdr = Buffer.alloc(11);
-  inboundHdr[0] = 0x46; // 'F'
-  inboundHdr.writeUInt32BE(1, 1); // idx 1
-  inboundHdr.writeUInt32BE(0x1234, 5); // ssrc
-  inboundHdr.writeUInt16BE(unmutedFrame.payload.length, 9);
-  proc.stdin.write(Buffer.concat([inboundHdr, unmutedFrame.payload]));
+  // 5. Test Inbound frame playback 'F' using the captured valid Opus packet stream (prime buffer)
+  for (let seq = 1; seq <= 4; seq++) {
+    const inboundHdr = Buffer.alloc(11);
+    inboundHdr[0] = 0x46; // 'F'
+    inboundHdr.writeUInt32BE(seq, 1);
+    inboundHdr.writeUInt32BE(0x1234, 5); // ssrc
+    inboundHdr.writeUInt16BE(unmutedFrame.payload.length, 9);
+    proc.stdin.write(Buffer.concat([inboundHdr, unmutedFrame.payload]));
+  }
+  await new Promise((r) => setTimeout(r, 80));
+  assert.match(stderrLogs, /\[audio-io\] info: jitter buffer primed/, 'JitterBuffer must prime after buffering target');
 
   // 6. Test Speaker off command 'S' (off: 1)
   proc.stdin.write(Buffer.from([0x53, 1]));
