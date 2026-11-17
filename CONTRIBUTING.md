@@ -97,7 +97,7 @@ Pull requests target **`main`**.
 - If you add/update a new Native addon, please update [architecture.md](./docs/dev/architecture.md) and [native/addons/README.md](./native/addons/README.md), so that newcomers can understand what your addon will do.
 - Commit subject: follow the convention — see [this link](https://www.conventionalcommits.org/en/v1.0.0/).
 - Pull request description: what changed and why, `Closes #N` when it fixes an issue, the platform you tested (x86_64 or aarch64, X11 or Wayland), and screenshots for UI changes.
-- No reverse-engineered codes or native addons may violate our guidelines; please refer to [the guidelines below](#re-and-rea-guidelines-for-nativeaddons) for more information.
+- No reverse-engineered codes or native addons may violate our guidelines; please refer to [the guidelines below](#re-and-rea-guidelines-for-native-addons) for more information.
 
 Checklist before opening:
 
@@ -129,7 +129,7 @@ We welcome the responsible use of AI tools (such as Codex, Claude Code, etc.) to
 - **Disclose significant use:** If a pull request or a major part of a patch/documentation is heavily generated or assisted by AI, please briefly mention it in the pull request description for transparency.
 - **No unverified code:** Do not blindly copy-paste AI-generated code, especially for native addons (`native/addons/`, `native/engines/zocr/`) or security-sensitive components, as they may introduce memory safety issues or regressions.
 
-## RE and REA guidelines for `native/addons/`
+## RE and REA guidelines for native addons
 
 This project welcome reverse engineering (RE) and Reverse Engineer Anything (REA) efforts to help add back native addons or fix issues. However, to protect the project from proprietary contamination and legal risks, strict protocols must be followed:
 

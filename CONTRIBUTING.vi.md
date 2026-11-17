@@ -96,7 +96,7 @@ Pull request gửi vào nhánh **`main`**.
 - Nếu phát triển tính năng mới, hãy kiểm thử trước và chụp ảnh màn hình (nhớ làm mờ thông tin cá nhân).
 - Tiêu đề commit: tuân thủ Conventional Commits (ví dụ: `feat(call): ...`, `fix(ui): ...`).
 - Mô tả PR: nêu rõ lý do thay đổi, `Closes #N` nếu sửa issue, nền tảng đã thử (x86_64 hay aarch64, X11 hay Wayland).
-- Không được có code hay native addon đã dịch ngược nào vi phạm hướng dẫn của chúng mình; vui lòng xem [hướng dẫn dưới đây](#hướng-dẫn-re-và-rea-cho-nativeaddons) để biết thêm
+- Không được có code hay native addon đã dịch ngược nào vi phạm hướng dẫn của chúng mình; vui lòng xem [hướng dẫn dưới đây](#hướng-dẫn-re-và-rea-cho-native-addons) để biết thêm
 
 Checklist trước khi mở PR:
 
@@ -127,7 +127,7 @@ Chúng mình hoan nghênh việc sử dụng các công cụ AI một cách có 
 - **Khai báo nếu sử dụng nhiều:** Nếu pull request hoặc một phần lớn của patch/tài liệu được tạo ra chủ yếu bởi AI, vui lòng đề cập ngắn gọn trong phần mô tả của pull request.
 - **Không gửi code chưa qua kiểm chứng:** Không sao chép mù quáng code do AI tạo ra, đặc biệt là đối với các addon native (`native/addons/`, `native/engines/zocr/`) để tránh lỗi an toàn bộ nhớ.
 
-## Hướng dẫn RE và REA cho `native/addons/`
+## Hướng dẫn RE và REA cho native addons
 
 Dự án này hoan nghênh các nỗ lực dịch ngược (RE) và Reverse Engineer Anything (REA) để giúp tích hợp lại các native addon hoặc khắc phục issue. Tuy nhiên, để bảo vệ dự án khỏi việc nhiễm mã độc quyền và các rủi ro pháp lý, các nguyên tắc nghiêm ngặt sau đây phải được tuân thủ:
 
