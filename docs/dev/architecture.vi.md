@@ -19,22 +19,20 @@ Dự án này không viết lại Zalo từ đầu. Thay vào đó, dự án:
 ```text
 zalo-for-linux/
 ├── .github/          # GitHub workflows, issue templates và hướng dẫn
-├── CONTRIBUTING.md   # Hướng dẫn đóng góp
-├── CONTRIBUTING.vi.md# Bản tiếng Việt của hướng dẫn đóng góp
+├── CONTRIBUTING.md   # Hướng dẫn đóng góp (Tiếng Anh)
+├── CONTRIBUTING.vi.md     # Bản tiếng Việt của hướng dẫn đóng góp
 ├── docs/             # Thư mục tài liệu tập trung (SSOT)
 │   ├── dev/          # Tài liệu kỹ thuật & phát triển (Kiến trúc, Viết patch, CI)
 │   └── user/         # Hướng dẫn người dùng (Tính năng, Bảng tra cứu lỗi, README tiếng Việt)
 ├── LICENSE           # Giấy phép phần mềm (BSD 3-Clause)
 ├── main.js           # Điểm khởi chạy của Electron
 ├── README.md         # Trang chủ dự án
-├── CONTRIBUTING.md   # Hướng dẫn đóng góp (Tiếng Anh)
-├── CONTRIBUTING.vi.md# Hướng dẫn đóng góp (Tiếng Việt)
 ├── native            # Các thành phần native của Zalo được viết lại cho Linux
 │   ├── builder.js    # Công cụ hỗ trợ build hợp nhất qua dòng lệnh
 │   ├── README.vi.md  # Tài liệu tổng quan về native
 │   ├── addons/       # Các native addon N-API thuần Rust (Pure Rust NAPI-RS)
 │   │   ├── db-cross-v4   # Addon giải mã bản sao lưu và đồng bộ tin nhắn E2EE
-│   │   ├── file-utilities# Addon quét hệ thống file bất đồng bộ
+│   │   ├── file-utilities    # Addon quét hệ thống file bất đồng bộ
 │   │   ├── file-utils    # Tiện ích truy cập và quản lý file
 │   │   ├── mp4thumb      # Trích xuất ảnh thu nhỏ từ video MP4
 │   │   ├── os-sys-info   # Bộ đọc thông tin hệ điều hành và ID tiến trình
@@ -44,29 +42,37 @@ zalo-for-linux/
 │   │   ├── zlang         # Nhận diện ngôn ngữ tự nhiên (whatlang)
 │   │   └── zwalker       # Bộ dọn rác bộ nhớ đệm media
 │   └── engines/      # Các hệ thống con độc lập
-│       ├── zcall     # Engine gọi điện native (tín hiệu, ZRTP/SRTP & Rust audio)
-│       └── zocr      # Daemon nhận diện chữ OCR & ONNX runtime
+│       ├── zcall         # Engine gọi điện native (tín hiệu, ZRTP/SRTP & Rust audio)
+│       └── zocr          # Daemon nhận diện chữ OCR & ONNX runtime (Rust)
 ├── package.json      # Metadata dự án + cấu hình electron-builder
 ├── plugins           # Các plugin/extension của Zalo for Linux
-│   ├── launcher-badge# Hiển thị số tin nhắn chưa đọc trên dock
+│   ├── launcher-badge     # Hiển thị số tin nhắn chưa đọc trên dock
+│   ├── screenshot        # Gọi native module để chụp màn hình
 │   ├── start-hidden  # Khởi động ẩn trong khay hệ thống
 │   ├── tray-badge    # Vẽ số tin nhắn chưa đọc lên icon khay hệ thống
+│   ├── tray-host     # Kiểm tra xem host có khay hệ thống không; nếu không thì thoát
 │   ├── userscripts   # Trình quản lý userscript Tampermonkey
 │   ├── advanced-settings # Cửa sổ cài đặt Linux, âm thanh cuộc gọi và điều hướng
 │   ├── dev-mode          # Chế độ nhà phát triển và điều khiển DevTools
 │   ├── language-core     # Locale bridge dùng chung và API plugin renderer
 │   ├── recalled-messages # Giao diện và lưu trữ tin nhắn đã thu hồi
 │   ├── tray-menu         # Menu khay hệ thống có bản địa hóa
+│   ├── window-state      # Theo dõi trạng thái cửa sổ để tránh mất cửa sổ
 │   ├── zadark        # Tiện ích giao diện tối và quyền riêng tư
 │   └── zcall         # Cửa sổ gọi điện và thông báo cuộc gọi đến
+├── sample                 # Hình ảnh hướng dẫn
 ├── scripts
-│   ├── build.js      # Script đóng gói AppImage
-│   ├── check-versions.js # Kiểm tra phiên bản Zalo mới từ VNG
-│   ├── download.js   # Tải file DMG macOS và EXE Windows
-│   ├── main.js       # Script điều phối (setup + build)
-│   ├── patches/      # Các script vá JavaScript riêng lẻ
-│   ├── prepare-app.js# Giải nén app.asar và áp dụng các patch
-│   └── update-nix-sources.sh # Cập nhật mã băm vào nix/sources.json
+│   ├── build.js           # Script đóng gói AppImage
+│   ├── build-stage2.sh    # Giai đoạn 2 đóng gói AppDir
+│   ├── check-versions.js  # Kiểm tra phiên bản Zalo mới từ VNG
+│   ├── download-dmg.js    # Tải file DMG macOS
+│   ├── download.js        # Tải file DMG macOS và EXE Windows
+│   ├── main.js            # Script điều phối (setup + build)
+│   ├── patches/           # Các script vá JavaScript riêng lẻ
+│   ├── prepare-app.js     # Giải nén app.asar và áp dụng các patch
+│   ├── prepare-zadark.js  # Build tài nguyên ZaDark
+│   └── utils              # Utilities
+│       └── logger.js      # Logger file
 ```
 
 ## Build Pipeline
@@ -83,7 +89,7 @@ zalo-for-linux/
 
 Sau khi giải nén `app.asar` của macOS, cần chỉnh sửa mã nguồn JavaScript để tương thích với Linux. Các bản vá này được áp dụng tuần tự trong `scripts/prepare-app.js`. Để xem hướng dẫn chi tiết về cách viết và kiểm thử patch, đọc [patch-guide.vi.md](./patch-guide.vi.md).
 
-Để tìm hiểu thêm về các native addon, xem [nativelibs/README.vi.md](../../nativelibs/README.vi.md).
+Để tìm hiểu thêm về các native addon, xem [native/addons/README.vi.md](../../native/addons/README.vi.md).
 
 ## Vì sao cần Electron Shell?
 
@@ -103,6 +109,6 @@ Mọi thứ trong `app/` đều do build pipeline **tự động tạo lại** v
 - `main-dist/preload-*.js`: Các preload script tạo context bridge.
 - `main-dist/compact-app.js`: Utility process chạy tác vụ ngầm.
 - `pc-dist/`: Các bundle giao diện frontend (React).
-- `native/nativelibs/`: Các native addon (được thay thế bằng các bản viết lại cho Linux).
+- `native/addons/`: Các native addon (được thay thế bằng các bản viết lại cho Linux).
 
 Mã nguồn đã giải nén thuộc sở hữu của VNG/Zalo. Dự án không chỉnh sửa trực tiếp mã này trong git mà áp dụng các bản vá tự động mỗi lần build qua `prepare-app.js`.
