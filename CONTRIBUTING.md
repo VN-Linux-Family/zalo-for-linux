@@ -97,7 +97,7 @@ Pull requests target **`main`**.
 - If you add/update a new Native addon, please update [architecture.md](./docs/dev/architecture.md) and [native/addons/README.md](./native/addons/README.md), so that newcomers can understand what your addon will do.
 - Commit subject: follow the convention — see [this link](https://www.conventionalcommits.org/en/v1.0.0/).
 - Pull request description: what changed and why, `Closes #N` when it fixes an issue, the platform you tested (x86_64 or aarch64, X11 or Wayland), and screenshots for UI changes.
-- No reverse-engineered codes or native addons may violate our guidelines; please refer to [the guidelines below](#re-and-rea-guidelines-for-native-addons) for more information.
+- No reverse-engineered codes or native addons may violate our guidelines; please refer to [the guidelines below](#re-and-rea-guidelines-for-nativeaddons) for more information.
 
 Checklist before opening:
 

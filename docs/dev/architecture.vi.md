@@ -109,6 +109,6 @@ Mọi thứ trong `app/` đều do build pipeline **tự động tạo lại** v
 - `main-dist/preload-*.js`: Các preload script tạo context bridge.
 - `main-dist/compact-app.js`: Utility process chạy tác vụ ngầm.
 - `pc-dist/`: Các bundle giao diện frontend (React).
-- `native/addons/`: Các native addon (được thay thế bằng các bản viết lại cho Linux).
+- `native/nativelibs/`: Các native addon (được thay thế bằng các bản viết lại cho Linux).
 
 Mã nguồn đã giải nén thuộc sở hữu của VNG/Zalo. Dự án không chỉnh sửa trực tiếp mã này trong git mà áp dụng các bản vá tự động mỗi lần build qua `prepare-app.js`.

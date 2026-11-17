@@ -112,7 +112,7 @@ gitignored. It contains:
 - `main-dist/preload-*.js` — Preload scripts
 - `main-dist/compact-app.js` — Utility process
 - `pc-dist/` — Renderer/UI bundles
-- `native/addons/` — Native addons (some replaced with Linux versions)
+- `native/nativelibs/` — Native addons (some replaced with Linux versions)
 
 The extracted code is proprietary to VNG/Zalo. We don't modify it directly
 in version control — patches are applied each build via `prepare-app.js`.
