@@ -60,12 +60,10 @@ zalo-for-linux/
 │   ├── window-state       # Check the window state for avoid disappearing window
 │   ├── zadark             # Dark mode, privacy features, and additional functionality extension
 │   └── zcall              # Engine launcher, call window (window.js + ui/call.*) and incoming notice (incoming.js + ui/incoming.*), laid out as Zalo for macOS
-├── sample                 # Pictures for guide
 ├── scripts
 │   ├── build.js 
 │   ├── build-stage2.sh
 │   ├── check-versions.js  # Check for newer Zalo versions
-│   ├── download-dmg.js    # Download macOS DMG
 │   ├── main.js            # Orchestrator (runs setup + build)
 │   ├── patches            # Individual patch scripts
 │   ├── prepare-app.js     # Extract app.asar + apply patches

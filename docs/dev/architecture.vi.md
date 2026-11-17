@@ -60,12 +60,10 @@ zalo-for-linux/
 │   ├── window-state      # Theo dõi trạng thái cửa sổ để tránh mất cửa sổ
 │   ├── zadark        # Tiện ích giao diện tối và quyền riêng tư
 │   └── zcall         # Cửa sổ gọi điện và thông báo cuộc gọi đến
-├── sample            # Hình ảnh hướng dẫn
 ├── scripts
 │   ├── build.js      # Script đóng gói AppImage
 │   ├── build-stage2.sh   # Giai đoạn 2 đóng gói AppDir
 │   ├── check-versions.js # Kiểm tra phiên bản Zalo mới từ VNG
-│   ├── download-dmg.js   # Tải file DMG macOS
 │   ├── download.js   # Tải file DMG macOS và EXE Windows
 │   ├── main.js       # Script điều phối (setup + build)
 │   ├── patches/      # Các script vá JavaScript riêng lẻ
