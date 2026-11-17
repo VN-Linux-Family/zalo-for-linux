@@ -19,12 +19,12 @@ proprietary binaries are committed to this repository.
 
 ```
 native/addons/
-├── README.md                       # This file
-└── <addon-name>/                   # One folder per addon
-    ├── .gitignore                  # ignore node_modules/, build/
-    ├── README.md                   # addon-specific docs
-    ├── binding.gyp / Cargo.toml    # build manifest
-    └── src/                        # source code
+├── README.md      # This file
+└── <addon-name>/  # One folder per addon
+    ├── .gitignore                # ignore node_modules/, build/
+    ├── README.md                 # addon-specific docs
+    ├── binding.gyp / Cargo.toml  # build manifest
+    └── src/                      # source code
 ```
 
 `native/builder.js` at the parent level is the unified build helper used by all

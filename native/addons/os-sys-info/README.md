@@ -13,12 +13,12 @@ The analyzed native packages target macOS x64, macOS ARM64, Windows x64, and Win
 ```text
 os-sys-info/
 ├── src/
-│   └── lib.rs                 # Native Rust implementation and Node.js bindings
+│   └── lib.rs    # Native Rust implementation and Node.js bindings
 ├── target/
-│   └── release/               # Generated release build output
-├── Cargo.toml                 # Rust package and dependency configuration
-├── README.vi.md               # Vietnamese version of this guide
-└── README.md                  # This guide
+│   └── release/  # Generated release build output
+├── Cargo.toml    # Rust package and dependency configuration
+├── README.vi.md  # Vietnamese version of this guide
+└── README.md     # This guide
 ```
 
 - `src/` contains the Rust library source.

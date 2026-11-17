@@ -13,12 +13,12 @@ Các gói native được phân tích hướng đến macOS x64, macOS ARM64, Wi
 ```text
 os-sys-info/
 ├── src/
-│   └── lib.rs                 # Mã nguồn Rust native và các binding Node.js
+│   └── lib.rs    # Mã nguồn Rust native và các binding Node.js
 ├── target/
-│   └── release/               # Tệp build release được tạo ra
-├── Cargo.toml                 # Cấu hình package Rust và các dependency
-├── README.vi.md               # Tài liệu hướng dẫn tiếng Việt
-└── README.md                  # Tài liệu hướng dẫn tiếng Anh
+│   └── release/  # Tệp build release được tạo ra
+├── Cargo.toml    # Cấu hình package Rust và các dependency
+├── README.vi.md  # Tài liệu hướng dẫn tiếng Việt
+└── README.md     # Tài liệu hướng dẫn tiếng Anh
 ```
 
 - `src/` chứa mã nguồn thư viện Rust.
