@@ -96,7 +96,7 @@ Pull request gửi vào nhánh **`main`**.
 - Nếu phát triển tính năng mới, hãy kiểm thử trước và chụp ảnh màn hình (nhớ làm mờ thông tin cá nhân).
 - Tiêu đề commit: tuân thủ Conventional Commits (ví dụ: `feat(call): ...`, `fix(ui): ...`).
 - Mô tả PR: nêu rõ lý do thay đổi, `Closes #N` nếu sửa issue, nền tảng đã thử (x86_64 hay aarch64, X11 hay Wayland).
-- Không được có code hay native addon đã dịch ngược nào vi phạm hướng dẫn của chúng mình; vui lòng xem [hướng dẫn dưới đây](#hướng-dẫn-re-và-rea-cho-nativeaddons) để biết thêm
+- Không được có code hay native addon đã dịch ngược nào vi phạm hướng dẫn của chúng mình; vui lòng xem [hướng dẫn dưới đây](#hướng-dẫn-re-và-rea-cho-native-addons) để biết thêm
 
 Checklist trước khi mở PR:
 
