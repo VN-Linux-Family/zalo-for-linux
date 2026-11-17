@@ -158,9 +158,9 @@ This project is not a from-scratch rewrite of Zalo. It works by:
 
 For a deeper dive into the build pipeline and patching strategy, see [`ARCHITECTURE.md`](./docs/dev/architecture.md).
 
-For native addons (db-cross-v4, etc.), see [`nativelibs/README.md`](./nativelibs/README.md).
+For native addons (db-cross-v4, etc.), see [`native/addons/README.md`](./native/addons/README.md).
 
-For the native call engine, see [`zcall-native/README.md`](./zcall-native/README.md)
+For the native call engine, see [`native/engines/zcall/README.md`](./native/engines/zcall/README.md)
 
 ## 🐛 Troubleshooting & Debugging
 

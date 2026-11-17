@@ -155,9 +155,9 @@ Dự án này không viết lại Zalo từ đầu. Cách làm như sau:
 
 Tìm hiểu sâu hơn về build pipeline và cách patch trong [`architecture.vi.md`](../dev/architecture.vi.md).
 
-Về các native addon (db-cross-v4, v.v.), xem [`nativelibs/README.vi.md`](../../nativelibs/README.vi.md).
+Về các native addon (db-cross-v4, v.v.), xem [`native/addons/README.vi.md`](../../native/addons/README.vi.md).
 
-Về engine gọi điện native, xem [`zcall-native/README.md`](../../zcall-native/README.md).
+Về engine gọi điện native, xem [`native/engines/zcall/README.md`](../../native/engines/zcall/README.md).
 
 ## 🐛 Xử lý sự cố và gỡ lỗi
 

@@ -14,7 +14,7 @@ All patch scripts live in `scripts/patches/` with the naming convention `patch-<
 Patches address several classes of issues:
 - **Platform compatibility**: Adapting macOS-specific paths, sandbox flags, and shell commands to Linux (`patch-xdg-user-dirs.js`, `patch-shell-open-linux.js`).
 - **Window management**: Native titlebars on X11 vs frameless Wayland titlebar fallback (`patch-titlebar.js`, `patch-wayland-titlebar.js`).
-- **Native addons**: Redirecting closed-source macOS `.node` bindings to Linux clean-room replacements in `nativelibs/` (`patch-sqlite3.js`, `patch-db-cross-v4.js`, `patch-zfile.js`).
+- **Native addons**: Redirecting closed-source macOS `.node` bindings to Linux clean-room replacements in `native/addons/` (`patch-sqlite3.js`, `patch-db-cross-v4.js`, `patch-zfile.js`).
 - **Media and features**: Integrating the native call engine (`patch-zcall-native.js`), ZaDark themes (`patch-auto-theme.js`), and offline mode (`patch-offline-startup.js`).
 
 ---

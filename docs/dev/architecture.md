@@ -92,7 +92,7 @@ zalo-for-linux/
 
 When the macOS `app.asar` is extracted, certain modifications are needed for Linux compatibility. These are applied in `scripts/prepare-app.js`. For detailed instructions on writing and maintaining patches, see [patch-guide.md](./patch-guide.md).
 
-For more details on the native addons, see [nativelibs/README.md](../../nativelibs/README.md).
+For more details on the native addons, see [native/addons/README.md](../../native/addons/README.md).
 ## Why an Electron shell?
 
 The extracted Zalo app is an Electron app designed for macOS. We:
@@ -112,7 +112,7 @@ gitignored. It contains:
 - `main-dist/preload-*.js` — Preload scripts
 - `main-dist/compact-app.js` — Utility process
 - `pc-dist/` — Renderer/UI bundles
-- `native/nativelibs/` — Native addons (some replaced with Linux versions)
+- `native/addons/` — Native addons (some replaced with Linux versions)
 
 The extracted code is proprietary to VNG/Zalo. We don't modify it directly
 in version control — patches are applied each build via `prepare-app.js`.
