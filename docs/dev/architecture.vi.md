@@ -20,7 +20,7 @@ Dự án này không viết lại Zalo từ đầu. Thay vào đó, dự án:
 zalo-for-linux/
 ├── .github/          # GitHub workflows, issue templates và hướng dẫn
 ├── CONTRIBUTING.md   # Hướng dẫn đóng góp (Tiếng Anh)
-├── CONTRIBUTING.vi.md     # Bản tiếng Việt của hướng dẫn đóng góp
+├── CONTRIBUTING.vi.md# Bản tiếng Việt của hướng dẫn đóng góp
 ├── docs/             # Thư mục tài liệu tập trung (SSOT)
 │   ├── dev/          # Tài liệu kỹ thuật & phát triển (Kiến trúc, Viết patch, CI)
 │   └── user/         # Hướng dẫn người dùng (Tính năng, Bảng tra cứu lỗi, README tiếng Việt)
@@ -32,7 +32,7 @@ zalo-for-linux/
 │   ├── README.vi.md  # Tài liệu tổng quan về native
 │   ├── addons/       # Các native addon N-API thuần Rust (Pure Rust NAPI-RS)
 │   │   ├── db-cross-v4   # Addon giải mã bản sao lưu và đồng bộ tin nhắn E2EE
-│   │   ├── file-utilities    # Addon quét hệ thống file bất đồng bộ
+│   │   ├── file-utilities# Addon quét hệ thống file bất đồng bộ
 │   │   ├── file-utils    # Tiện ích truy cập và quản lý file
 │   │   ├── mp4thumb      # Trích xuất ảnh thu nhỏ từ video MP4
 │   │   ├── os-sys-info   # Bộ đọc thông tin hệ điều hành và ID tiến trình
@@ -42,11 +42,11 @@ zalo-for-linux/
 │   │   ├── zlang         # Nhận diện ngôn ngữ tự nhiên (whatlang)
 │   │   └── zwalker       # Bộ dọn rác bộ nhớ đệm media
 │   └── engines/      # Các hệ thống con độc lập
-│       ├── zcall         # Engine gọi điện native (tín hiệu, ZRTP/SRTP & Rust audio)
-│       └── zocr          # Daemon nhận diện chữ OCR & ONNX runtime (Rust)
+│       ├── zcall     # Engine gọi điện native (tín hiệu, ZRTP/SRTP & Rust audio)
+│       └── zocr      # Daemon nhận diện chữ OCR & ONNX runtime (Rust)
 ├── package.json      # Metadata dự án + cấu hình electron-builder
 ├── plugins           # Các plugin/extension của Zalo for Linux
-│   ├── launcher-badge     # Hiển thị số tin nhắn chưa đọc trên dock
+│   ├── launcher-badge# Hiển thị số tin nhắn chưa đọc trên dock
 │   ├── screenshot        # Gọi native module để chụp màn hình
 │   ├── start-hidden  # Khởi động ẩn trong khay hệ thống
 │   ├── tray-badge    # Vẽ số tin nhắn chưa đọc lên icon khay hệ thống
@@ -62,14 +62,14 @@ zalo-for-linux/
 │   └── zcall         # Cửa sổ gọi điện và thông báo cuộc gọi đến
 ├── sample                 # Hình ảnh hướng dẫn
 ├── scripts
-│   ├── build.js           # Script đóng gói AppImage
+│   ├── build.js      # Script đóng gói AppImage
 │   ├── build-stage2.sh    # Giai đoạn 2 đóng gói AppDir
-│   ├── check-versions.js  # Kiểm tra phiên bản Zalo mới từ VNG
+│   ├── check-versions.js # Kiểm tra phiên bản Zalo mới từ VNG
 │   ├── download-dmg.js    # Tải file DMG macOS
-│   ├── download.js        # Tải file DMG macOS và EXE Windows
-│   ├── main.js            # Script điều phối (setup + build)
-│   ├── patches/           # Các script vá JavaScript riêng lẻ
-│   ├── prepare-app.js     # Giải nén app.asar và áp dụng các patch
+│   ├── download.js   # Tải file DMG macOS và EXE Windows
+│   ├── main.js       # Script điều phối (setup + build)
+│   ├── patches/      # Các script vá JavaScript riêng lẻ
+│   ├── prepare-app.js# Giải nén app.asar và áp dụng các patch
 │   ├── prepare-zadark.js  # Build tài nguyên ZaDark
 │   └── utils              # Utilities
 │       └── logger.js      # Logger file
