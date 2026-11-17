@@ -26,23 +26,23 @@ zalo-for-linux/
 ├── LICENSE                # License file, with disclaimer
 ├── main.js                # Electron entrypoint
 ├── README.md              # Project homepage
-├── native                    # Linux reimplementations of Zalo native components
-│   ├── builder.js            # Unified CLI build helper
-│   ├── README.md             # Native layout overview
-│   ├── addons/               # Pure Rust N-API cdylib addons
-│   │   ├── db-cross-v4       # Backup decryption & E2EE message synchronization addon
-│   │   ├── file-utilities    # Asynchronous filesystem scanning & pattern matching addon
-│   │   ├── file-utils        # Filesystem access and file management utilities
-│   │   ├── mp4thumb          # Video thumbnail extractor from MP4 files
-│   │   ├── os-sys-info       # Operating system and process information reader
-│   │   ├── zfile             # Disk/volume info (free space, mount points) addon
-│   │   ├── zimage            # Image processor, resizer, and format conversions
-│   │   ├── zjxl              # JPEG XL (JXL) image decoder and encoder
-│   │   ├── zlang             # Natural language identification (whatlang)
-│   │   └── zwalker           # Media-cache garbage collector
-│   └── engines/              # Standalone native subsystems
-│       ├── zcall             # Native call engine (signalling, ZRTP/SRTP media & Rust audio)
-│       └── zocr              # OCR engine host daemon & ONNX runtime integration
+├── native                 # Linux reimplementations of Zalo native components
+│   ├── builder.js         # Unified CLI build helper
+│   ├── README.md          # Native layout overview
+│   ├── addons/            # Pure Rust N-API cdylib addons
+│   │   ├── db-cross-v4    # Backup decryption & E2EE message synchronization addon
+│   │   ├── file-utilities # Asynchronous filesystem scanning & pattern matching addon
+│   │   ├── file-utils     # Filesystem access and file management utilities
+│   │   ├── mp4thumb       # Video thumbnail extractor from MP4 files
+│   │   ├── os-sys-info    # Operating system and process information reader
+│   │   ├── zfile          # Disk/volume info (free space, mount points) addon
+│   │   ├── zimage         # Image processor, resizer, and format conversions
+│   │   ├── zjxl           # JPEG XL (JXL) image decoder and encoder
+│   │   ├── zlang          # Natural language identification (whatlang)
+│   │   └── zwalker        # Media-cache garbage collector
+│   └── engines/           # Standalone native subsystems
+│       ├── zcall          # Native call engine (signalling, ZRTP/SRTP media & Rust audio)
+│       └── zocr           # OCR engine host daemon & ONNX runtime integration
 ├── package.json           # Project metadata + build config
 ├── package-lock.json      # Project lock files
 ├── plugins                # Zalo submodules/plugins
