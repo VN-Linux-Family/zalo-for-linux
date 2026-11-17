@@ -4,21 +4,21 @@ This directory consolidates all Linux native implementations replacing proprieta
 
 ```text
 native/
-├── builder.js  # Unified CLI builder helper (Rust Cargo/NAPI)
-├── addons/     # N-API cdylib addons loaded dynamically via require()
-│   ├── db-cross-v4/     # Backup decryption & E2EE message synchronization (Rust)
-│   ├── file-utilities/  # Asynchronous filesystem scanning & pattern matching (Rust)
-│   ├── file-utils/      # Filesystem access and file management utilities (Rust)
-│   ├── mp4thumb/        # MP4 video thumbnail extractor (Rust)
-│   ├── os-sys-info/     # Operating system metadata & PID inspector (Rust)
-│   ├── zfile/           # Disk space, mount point & file copying utilities (Rust)
-│   ├── zimage/          # Image compression & conversion addon (Rust)
-│   ├── zjxl/            # JPEG XL decoder & encoder (Rust)
-│   ├── zlang/           # Language detection engine (Rust)
-│   └── zwalker/         # Media directory garbage collector (Rust)
-└── engines/    # Standalone native subsystems
-    ├── zcall/           # VoIP calling engine (signaling, ZRTP/SRTP & Rust audio)
-    └── zocr/            # OCR engine host daemon & ONNX runtime integration (Rust)
+├── builder.js                # Unified CLI builder helper (Rust Cargo/NAPI)
+├── addons/                   # N-API cdylib addons loaded dynamically via require()
+│   ├── db-cross-v4/          # Backup decryption & E2EE message synchronization (Rust)
+│   ├── file-utilities/       # Asynchronous filesystem scanning & pattern matching (Rust)
+│   ├── file-utils/           # Filesystem access and file management utilities (Rust)
+│   ├── mp4thumb/             # MP4 video thumbnail extractor (Rust)
+│   ├── os-sys-info/          # Operating system metadata & PID inspector (Rust)
+│   ├── zfile/                # Disk space, mount point & file copying utilities (Rust)
+│   ├── zimage/               # Image compression & conversion addon (Rust)
+│   ├── zjxl/                 # JPEG XL decoder & encoder (Rust)
+│   ├── zlang/                # Language detection engine (Rust)
+│   └── zwalker/              # Media directory garbage collector (Rust)
+└── engines/                  # Standalone native subsystems
+    ├── zcall/                # VoIP calling engine (signaling, ZRTP/SRTP & Rust audio)
+    └── zocr/                 # OCR engine host daemon & ONNX runtime integration (Rust)
 ```
 
 ## Building Native Addons

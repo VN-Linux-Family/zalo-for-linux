@@ -21,13 +21,13 @@ này.
 
 ```text
 native/addons/
-├── README.md      # Tài liệu tiếng Anh
-├── README.vi.md   # Tài liệu tiếng Việt
-└── <addon-name>/  # Mỗi addon một thư mục
-    ├── .gitignore                # bỏ qua node_modules/, build/, target/
-    ├── README.md                 # tài liệu riêng của addon
-    ├── binding.gyp / Cargo.toml  # cấu hình build
-    └── src/                      # mã nguồn C++ hoặc Rust
+├── README.md                       # Tài liệu tiếng Anh
+├── README.vi.md                    # Tài liệu tiếng Việt
+└── <addon-name>/                   # Mỗi addon một thư mục
+    ├── .gitignore                  # bỏ qua node_modules/, build/, target/
+    ├── README.md                   # tài liệu riêng của addon
+    ├── binding.gyp / Cargo.toml    # cấu hình build
+    └── src/                        # mã nguồn C++ hoặc Rust
 ```
 
 `native/builder.js` ở thư mục cha là công cụ build hợp nhất dùng chung cho tất cả các addon.
