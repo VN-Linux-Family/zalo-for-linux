@@ -16,7 +16,7 @@ Quick diagnostic lookup table for common runtime and configuration issues on Lin
 
 ## ⚠️ Active Limitations
 
-- **Calls on ARM64 (`aarch64`)**: The call engine runs on a native Node.js + Python stack (`zcall-native/`, eliminating x86-only Wine dependencies) and has been tested and verified working on ARM64 by community tester @lolmc0587 ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
+- **Calls on ARM64 (`aarch64`)**: The call engine runs on a native Node.js + Python stack (`native/engines/zcall/`, eliminating x86-only Wine dependencies) and has been tested and verified working on ARM64 by community tester @lolmc0587 ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
 - **Ubuntu 23.10+ Sandbox Restrictions**: AppArmor blocks unprivileged user namespaces used by Electron's `chrome-sandbox`. Run with `--no-sandbox` or follow [AM Ubuntu Troubleshooting](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) ([Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72), [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143)).
 
 ---
@@ -28,7 +28,7 @@ Quick diagnostic lookup table for common runtime and configuration issues on Lin
 
 - **Calls (Voice, Video, Screen Sharing, Group Calls):**
   - **Issue:** Calls could not be made or received on Linux.
-  - **Solution:** Calls run on a native Linux call engine ([`zcall-native/`](../../zcall-native/README.md), from [zalo-linux-native](https://github.com/nct88/zalo-linux-native)). No Wine, no `ZaloCall.exe`, no 32-bit libraries.
+  - **Solution:** Calls run on a native Linux call engine ([`native/engines/zcall/`](../../native/engines/zcall/README.md), from [zalo-linux-native](https://github.com/nct88/zalo-linux-native)). No Wine, no `ZaloCall.exe`, no 32-bit libraries.
   - **Credits:** [@nct88](https://github.com/nct88), [@collyn](https://github.com/collyn). See [PR #62](https://github.com/VN-Linux-Family/zalo-for-linux/pull/62), [PR #128](https://github.com/VN-Linux-Family/zalo-for-linux/pull/128), [PR #129](https://github.com/VN-Linux-Family/zalo-for-linux/pull/129), [PR #135](https://github.com/VN-Linux-Family/zalo-for-linux/pull/135), [PR #136](https://github.com/VN-Linux-Family/zalo-for-linux/pull/136), [PR #137](https://github.com/VN-Linux-Family/zalo-for-linux/pull/137).
 
 - **System / Auto Theme Synchronization:**

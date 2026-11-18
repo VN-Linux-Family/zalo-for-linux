@@ -17,13 +17,13 @@ Cảm ơn bạn đã dành thời gian đóng góp. Zalo for Linux là bản por
 
 Sau đó tìm trong [issue](https://github.com/VN-Linux-Family/zalo-for-linux/issues) và pull request hiện có trước khi bắt tay: có thể đã có người làm cùng việc.
 
-Bản thân Zalo là phần mềm độc quyền. Không bao giờ commit binary của Zalo, nội dung `app.asar` đã giải nén, hay file `.node` dựng sẵn — các native addon luôn được build lại từ source và không có mã độc quyền nào trong repo ([nativelibs/README.vi.md](./nativelibs/README.vi.md)).
+Bản thân Zalo là phần mềm độc quyền. Không bao giờ commit binary của Zalo, nội dung `app.asar` đã giải nén, hay file `.node` dựng sẵn — các native addon luôn được build lại từ source và không có mã độc quyền nào trong repo ([native/addons/README.vi.md](./native/addons/README.vi.md)).
 
 ## Các cách đóng góp
 
 - **Báo lỗi** — xem [Báo cáo lỗi](#báo-cáo-lỗi).
 - **Đề xuất tính năng** — xem [Đề xuất tính năng](#đề-xuất-tính-năng).
-- **Code** — patch JavaScript trong `scripts/patches/`, addon Rust trong `nativelibs/` và `zocr/`, Node.js và Python trong `zcall-native/`.
+- **Code** — patch JavaScript trong `scripts/patches/`, addon Rust trong `native/addons/` và `native/engines/zocr/`, Node.js và Python trong `native/engines/zcall/`.
 - **Tài liệu** — hỗ trợ song ngữ (tiếng Anh và tiếng Việt) cho toàn bộ tài liệu (xem [Tài liệu](#tài-liệu)).
 - **Kiểm thử** — nhất là trên aarch64
 - **Đóng gói** — AppImage là bản build chính thức; repo cũng có Nix flake (xem mục NixOS trong [README.vi.md](./docs/user/README.vi.md)).
@@ -73,8 +73,8 @@ Thêm test trong `tests/<area>-<topic>.test.js`.
 Kiểm thử các crate Rust:
 
 ```bash
-cargo test --manifest-path zocr/Cargo.toml --locked
-for c in nativelibs/*/Cargo.toml; do cargo test --manifest-path "$c" --locked; done
+cargo test --manifest-path native/engines/zocr/Cargo.toml --locked
+for c in native/addons/*/Cargo.toml; do cargo test --manifest-path "$c" --locked; done
 ```
 
 ## Tài liệu
@@ -83,7 +83,7 @@ Tài liệu được tổ chức tập trung với hỗ trợ song ngữ đầy 
 
 - **Tài liệu kỹ thuật / Lập trình viên** (`docs/dev/`): Kiến trúc, phát triển, viết patch, CI workflow (`<tên>.md` và `<tên>.vi.md`).
 - **Tài liệu người dùng** (`docs/user/` và `README` ở root): Hướng dẫn cài đặt, lỗi đã biết, tính năng (`<tên>.md` và `<tên>.vi.md`).
-- **Tài liệu thành phần**: Các native addon trong `nativelibs/` có tài liệu riêng (`nativelibs/README.md` và `nativelibs/README.vi.md`).
+- **Tài liệu thành phần**: Các native addon trong `native/addons/` có tài liệu riêng (`native/addons/README.md` và `native/addons/README.vi.md`).
 
 ## Pull Request và Commit
 
@@ -96,7 +96,7 @@ Pull request gửi vào nhánh **`main`**.
 - Nếu phát triển tính năng mới, hãy kiểm thử trước và chụp ảnh màn hình (nhớ làm mờ thông tin cá nhân).
 - Tiêu đề commit: tuân thủ Conventional Commits (ví dụ: `feat(call): ...`, `fix(ui): ...`).
 - Mô tả PR: nêu rõ lý do thay đổi, `Closes #N` nếu sửa issue, nền tảng đã thử (x86_64 hay aarch64, X11 hay Wayland).
-- Không được có code hay nativelib đã dịch ngược nào vi phạm hướng dẫn của chúng mình; vui lòng xem [hướng dẫn dưới đây](#hướng-dẫn-re-và-rea-cho-nativelibs) để biết thêm
+- Không được có code hay native addon đã dịch ngược nào vi phạm hướng dẫn của chúng mình; vui lòng xem [hướng dẫn dưới đây](#hướng-dẫn-re-và-rea-cho-native-addons) để biết thêm
 
 Checklist trước khi mở PR:
 
@@ -125,9 +125,9 @@ Chúng mình hoan nghênh việc sử dụng các công cụ AI một cách có 
 
 - **Rà soát lại mọi thứ:** Bạn chịu trách nhiệm hoàn toàn cho tất cả code và nội dung do mình gửi lên. Đảm bảo đã kiểm tra kỹ, kiểm thử và hiểu rõ bất kỳ kết quả nào do AI tạo ra.
 - **Khai báo nếu sử dụng nhiều:** Nếu pull request hoặc một phần lớn của patch/tài liệu được tạo ra chủ yếu bởi AI, vui lòng đề cập ngắn gọn trong phần mô tả của pull request.
-- **Không gửi code chưa qua kiểm chứng:** Không sao chép mù quáng code do AI tạo ra, đặc biệt là đối với các addon native (`nativelibs/`, `zocr/`) để tránh lỗi an toàn bộ nhớ.
+- **Không gửi code chưa qua kiểm chứng:** Không sao chép mù quáng code do AI tạo ra, đặc biệt là đối với các addon native (`native/addons/`, `native/engines/zocr/`) để tránh lỗi an toàn bộ nhớ.
 
-## Hướng dẫn RE và REA cho `nativelibs`
+## Hướng dẫn RE và REA cho native addons
 
 Dự án này hoan nghênh các nỗ lực dịch ngược (RE) và Reverse Engineer Anything (REA) để giúp tích hợp lại các native addon hoặc khắc phục issue. Tuy nhiên, để bảo vệ dự án khỏi việc nhiễm mã độc quyền và các rủi ro pháp lý, các nguyên tắc nghiêm ngặt sau đây phải được tuân thủ:
 

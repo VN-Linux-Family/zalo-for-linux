@@ -158,9 +158,9 @@ This project is not a from-scratch rewrite of Zalo. It works by:
 
 For a deeper dive into the build pipeline and patching strategy, see [`ARCHITECTURE.md`](./docs/dev/architecture.md).
 
-For native addons (db-cross-v4, etc.), see [`nativelibs/README.md`](./nativelibs/README.md).
+For native addons (db-cross-v4, etc.), see [`native/addons/README.md`](./native/addons/README.md).
 
-For the native call engine, see [`zcall-native/README.md`](./zcall-native/README.md)
+For the native call engine, see [`native/engines/zcall/README.md`](./native/engines/zcall/README.md)
 
 ## 🐛 Troubleshooting & Debugging
 
@@ -203,6 +203,7 @@ Thanks goes to these wonderful people
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/lolmc0587"><img src="https://avatars.githubusercontent.com/u/59377673?v=4&size=100" width="100px" height="100px" alt="Tom"/><br /><sub><b>Tom</b></sub></a><br /><a href="https://github.com/VN-Linux-Family/zalo-for-linux/commits?author=lolmc0587" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/mrd9999"><img src="https://avatars.githubusercontent.com/u/224975069?v=4&size=100" width="100px" height="100px" alt="MrD"/><br /><sub><b>MrD</b></sub></a><br /><a href="#promotion-mrd9999" title="Promotion">📣</a> <a href="#maintenance-mrd9999" title="Maintenance">🚧</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/nguyenphivn"><img src="https://avatars.githubusercontent.com/u/19565657?v=4&size=100" width="100px" height="100px" alt="nguyenphivn"/><br /><sub><b>nguyenphivn</b></sub></a><br /><a href="https://github.com/VN-Linux-Family/zalo-for-linux/commits?author=nguyenphivn" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/TraiNguyenVan"><img src="https://avatars.githubusercontent.com/u/136947709?v=4&size=100" width="100px" height="100px" alt="Nguyễn Văn Trãi"/><br /><sub><b>Nguyễn Văn Trãi</b></sub></a><br /><a href="https://github.com/VN-Linux-Family/zalo-for-linux/commits?author=TraiNguyenVan" title="Documentation">📖</a></td>
     </tr>
   </tbody>
 </table>
