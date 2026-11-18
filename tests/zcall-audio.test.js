@@ -105,3 +105,89 @@ test('Native zcall-audio engine full IPC protocol and state transitions', async 
 
   assert.equal(exitCode, 0, 'zcall-audio process must exit cleanly with code 0 on EOF');
 });
+
+test('ZrtcMediaBackend network handover, P2P fallback to relay, and SRTP ROC recovery', () => {
+  const { ZrtcMediaBackend } = require('../native/engines/zcall/native-engine/backends/zrtc-media');
+  const {
+    COMMANDS,
+    P2P,
+    buildChangeAddressPacket,
+    buildP2pSignal,
+    unwrapPacket,
+  } = require('../native/engines/zcall/native-engine/zrtp-packet');
+  const { buildAudioRtpHeader } = require('../native/engines/zcall/native-engine/rtp');
+  const { protectRtp } = require('../native/engines/zcall/native-engine/srtp-aes');
+
+  // 1. Verify ChangeAddress (cmd 14) and P2P Signal (kind 5) wire packets
+  const changeAddrPkt = buildChangeAddressPacket({ uid: 123456, token: 0xdeadbeef, seq: 1, sessId: 'sess-xyz' });
+  const parsedChange = unwrapPacket(changeAddrPkt);
+  assert.equal(parsedChange.cmd, COMMANDS.CHANGE_ADDRESS);
+  assert.equal(parsedChange.subCmd, 1);
+  assert.equal(parsedChange.uid, 123456);
+  assert.equal(parsedChange.token, 0xdeadbeef);
+
+  const p2pStopPkt = buildP2pSignal({ role: 'caller', callId: 999, subCmd: 2, seq: 0 });
+  assert.equal(p2pStopPkt.length, 14);
+  assert.equal(p2pStopPkt[7], P2P.SIGNAL);
+  assert.equal(p2pStopPkt[9], 2);
+
+  // 2. Verify ZrtcMediaBackend SRTP sequence reset recovery & P2P-to-relay fallback
+  const receivedFrames = [];
+  const sentPackets = [];
+  const media = new ZrtcMediaBackend({
+    sendUdp: false,
+    audio: false,
+    onAudioPacket: (opus) => receivedFrames.push(opus),
+  });
+
+  media.onNegotiated({
+    sessId: '0123456789abcdef0123456789abcdef',
+    callId: 42,
+    role: 'caller',
+    localUid: 1001,
+    peerUid: 2002,
+    servers: [{ rtpaddr: '1.2.3.4:4200', rtcpaddr: '1.2.3.4:4200' }],
+    config: {},
+  });
+  media.active = true;
+  media.startedAt = Date.now() - 5000;
+  media.activeServer = { host: '1.2.3.4', port: 4200 };
+  media.serverToken = 0x11223344;
+  media._send = (pkt, dst, what) => sentPackets.push({ pkt, dst, what });
+
+  const makeSrtpAudio = (seq, roc = 0) => {
+    const hdr = buildAudioRtpHeader({ seq, ts: seq * 320, ssrc: 2002, twSeq: seq, level: 50 });
+    return protectRtp(hdr, Buffer.from([0xf8, 0xff, 0xfe]), media.srtpContext, seq, 2002, roc);
+  };
+
+  // Establish P2P path and receive packet at seq = 50000
+  media._p2pUp({ host: '192.168.1.50', port: 55000 });
+  assert.ok(media.p2pPath, 'P2P path must be active');
+  media._onAudio(makeSrtpAudio(50000, 0), true);
+  assert.equal(receivedFrames.length, 1);
+
+  // Twin duplicate packet arriving via relay must be deduplicated
+  media._onAudio(makeSrtpAudio(50000, 0), false);
+  assert.equal(receivedFrames.length, 1, 'Duplicate relay+P2P packet must be ignored');
+
+  // Simulate network change: local IP changes -> must stop P2P, notify peer via ReqForward subCmd 2, and send ChangeAddress
+  media.localIpSig = '192.168.1.10';
+  media._getLocalIpSig = () => '10.0.0.25';
+  media._checkNetworkAndAudio();
+  assert.equal(media.p2pPath, null, 'P2P path must be cleared on local network change');
+  assert.ok(
+    sentPackets.some((s) => s.what === 'ReqForward stopP2P'),
+    'Must send ReqForward subCmd 2 to instruct peer to switch audio to relay'
+  );
+  assert.ok(
+    sentPackets.some((s) => s.what.startsWith('ChangeAddress')),
+    'Must send ChangeAddress (cmd 14) to relay server'
+  );
+
+  // Simulate peer audio sequence reset backward from 50000 to 1000 (with roc = 0) after network switch
+  // Naive RocTracker.guess(1000) would guess roc = 1 (since 50000 - 1000 > 0x8000), which must recover to roc = 0!
+  media._onAudio(makeSrtpAudio(1000, 0), false);
+  media._onAudio(makeSrtpAudio(1001, 0), false);
+  assert.equal(receivedFrames.length, 3, 'Audio packets after backward sequence reset must decrypt and play');
+  assert.equal(media.counters.rxBad, 0, 'Must have zero SRTP auth failures after ROC fallback recovery');
+});

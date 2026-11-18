@@ -80,6 +80,8 @@ extern "C" {
         error: *mut c_int,
     ) -> c_int;
 
+    fn pa_simple_get_latency(s: *mut c_void, error: *mut c_int) -> u64;
+
     fn pa_strerror(error: c_int) -> *const c_char;
 }
 
@@ -182,9 +184,9 @@ impl PulsePlayer {
 
         let attr = PaBufferAttr {
             maxlength: u32::MAX,
-            tlength: 3840, // ~120 ms buffer latency (provides robust headroom against underruns on Bluetooth/PipeWire)
+            tlength: 1920, // 60 ms buffer latency (matches audio-io.py LATENCY_MS = 60 for tight A/V sync)
             prebuf: u32::MAX,
-            minreq: 640,  // 20 ms frame
+            minreq: u32::MAX,
             fragsize: u32::MAX,
         };
 
@@ -227,6 +229,19 @@ impl PulsePlayer {
             Err(format!("pa_simple_write failed: {}", msg))
         } else {
             Ok(())
+        }
+    }
+
+    pub fn latency_ms(&self) -> Option<u64> {
+        if self.handle.is_null() {
+            return None;
+        }
+        let mut error = 0;
+        let us = unsafe { pa_simple_get_latency(self.handle, &mut error) };
+        if error != 0 {
+            None
+        } else {
+            Some(us / 1000)
         }
     }
 }

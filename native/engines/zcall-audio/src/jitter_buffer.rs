@@ -1,7 +1,9 @@
 //! Audio Jitter Buffer and Packet Loss Concealment (PLC).
 
 use crate::opus_codec::OpusDecoder;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
+
+const MAX_OPUS_FRAME_SAMPLES: usize = 1920; // 120 ms at 16 kHz (maximum Opus packet duration)
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JitterState {
@@ -21,7 +23,10 @@ pub struct JitterStats {
 pub struct JitterBuffer {
     decoder: OpusDecoder,
     queue: BTreeMap<u32, Vec<u8>>,
+    decode_scratch: Vec<i16>,
+    carry_pcm: VecDeque<i16>,
     next_idx: Option<u32>,
+    current_ssrc: Option<u32>,
     min_target: usize,
     max_depth: usize,
     state: JitterState,
@@ -32,12 +37,15 @@ pub struct JitterBuffer {
 impl JitterBuffer {
     pub fn new(sample_rate: i32, channels: i32, depth_frames: usize) -> Result<Self, String> {
         let decoder = OpusDecoder::new(sample_rate, channels)?;
-        let min_target = 4.min(depth_frames).max(2);
+        let min_target = 3.min(depth_frames).max(2);
         let max_depth = depth_frames.max(min_target + 4);
         Ok(Self {
             decoder,
             queue: BTreeMap::new(),
+            decode_scratch: vec![0i16; MAX_OPUS_FRAME_SAMPLES],
+            carry_pcm: VecDeque::with_capacity(MAX_OPUS_FRAME_SAMPLES),
             next_idx: None,
+            current_ssrc: None,
             min_target,
             max_depth,
             state: JitterState::Buffering,
@@ -67,27 +75,86 @@ impl JitterBuffer {
         self.stats.clone()
     }
 
+    pub fn push_with_ssrc(&mut self, idx: u32, ssrc: u32, opus_data: Vec<u8>) {
+        if ssrc != 0 {
+            if let Some(cur_ssrc) = self.current_ssrc {
+                if cur_ssrc != ssrc {
+                    eprintln!(
+                        "[audio-io] info: stream ssrc changed ({} -> {}), resetting jitter buffer",
+                        cur_ssrc, ssrc
+                    );
+                    self.queue.clear();
+                    self.carry_pcm.clear();
+                    self.next_idx = None;
+                    self.state = JitterState::Buffering;
+                    self.consecutive_plc = 0;
+                    self.current_ssrc = Some(ssrc);
+                }
+            } else {
+                self.current_ssrc = Some(ssrc);
+            }
+        }
+        self.push(idx, opus_data);
+    }
+
     pub fn push(&mut self, idx: u32, opus_data: Vec<u8>) {
         self.stats.rx_packets += 1;
 
+        if self.queue.contains_key(&idx) {
+            return;
+        }
+
         if let Some(next) = self.next_idx {
-            // Drop late packets only when in Playing state and older than current playout pointer
-            if self.state == JitterState::Playing && idx < next && (next - idx) < 1000 {
-                self.stats.late_dropped += 1;
+            if idx < next {
+                let diff = next - idx;
+                if diff > 500 {
+                    // Peer RTP sequence reset backward (e.g. after network handover)
+                    eprintln!(
+                        "[audio-io] info: sequence reset detected (prev={}, new={}), flushing jitter buffer",
+                        next, idx
+                    );
+                    self.queue.clear();
+                    self.carry_pcm.clear();
+                    self.next_idx = None;
+                    self.state = JitterState::Buffering;
+                    self.consecutive_plc = 0;
+                } else if self.consecutive_plc > 0 && diff <= (self.consecutive_plc as u32) {
+                    // Packet arrived slightly delayed while we were concealing with PLC: accept & rewind
+                    self.next_idx = Some(idx);
+                } else if self.state == JitterState::Playing {
+                    self.stats.late_dropped += 1;
+                    return;
+                }
+            } else if (idx - next) > 500 {
+                // Large forward sequence jump across network switch
                 eprintln!(
-                    "[audio-io] warn: dropped late packet idx={} (current playout={})",
-                    idx, next
+                    "[audio-io] info: forward sequence jump detected (prev={}, new={}), flushing jitter buffer",
+                    next, idx
                 );
-                return;
+                self.queue.clear();
+                self.carry_pcm.clear();
+                self.next_idx = None;
+                self.state = JitterState::Buffering;
+                self.consecutive_plc = 0;
+            }
+        } else if let Some(&first) = self.queue.keys().next() {
+            if idx.abs_diff(first) > 500 {
+                self.queue.clear();
             }
         }
 
         self.queue.insert(idx, opus_data);
 
-        // Prune queue if deeper than max_depth to prevent latency drift
+        // Prune queue if deeper than max_depth to prevent latency drift,
+        // advancing next_idx so it never points to a pruned packet.
         while self.queue.len() > self.max_depth {
             let oldest_key = *self.queue.keys().next().unwrap();
             self.queue.remove(&oldest_key);
+            if let Some(next) = self.next_idx {
+                if next <= oldest_key {
+                    self.next_idx = self.queue.keys().next().copied();
+                }
+            }
         }
 
         // If currently buffering and target depth is reached, transition to Playing
@@ -103,9 +170,18 @@ impl JitterBuffer {
         }
     }
 
-    /// Decode next frame into out_pcm (320 samples).
-    /// Returns true if valid frame or PLC generated.
+    /// Decode next frame into out_pcm (320 samples = 20 ms).
+    /// Returns true if valid frame, carry frame, FEC frame, or PLC generated.
     pub fn pop_frame(&mut self, out_pcm: &mut [i16]) -> bool {
+        // 1. Drain leftover samples from multi-frame (40ms/60ms) Opus packets first
+        if self.carry_pcm.len() >= out_pcm.len() {
+            for s in out_pcm.iter_mut() {
+                *s = self.carry_pcm.pop_front().unwrap();
+            }
+            self.stats.played_frames += 1;
+            return true;
+        }
+
         match self.state {
             JitterState::Buffering => {
                 if self.queue.len() >= self.min_target {
@@ -132,16 +208,31 @@ impl JitterBuffer {
             }
         }
 
-        // Check if stream sequence jumped ahead by more than 20 frames (400ms)
+        // Prevent latency buildup on burst arrivals: if queue exceeds min_target + 4 (e.g. >140ms),
+        // trim oldest frames down to min_target + 1 and advance next_idx.
+        if self.queue.len() > self.min_target + 4 {
+            while self.queue.len() > self.min_target + 1 {
+                let oldest = *self.queue.keys().next().unwrap();
+                self.queue.remove(&oldest);
+            }
+            self.next_idx = self.queue.keys().next().copied();
+        }
+
+        // Resync if sequence jumped or if a multi-packet hole occurred and min_target newer frames are ready
         if let Some(&first) = self.queue.keys().next() {
             if let Some(cur) = self.next_idx {
-                if first > cur && (first - cur) > 20 {
-                    eprintln!(
-                        "[audio-io] warn: sequence jump detected (expected {}, got {}), resyncing",
-                        cur, first
-                    );
+                if first < cur {
                     self.next_idx = Some(first);
-                    self.consecutive_plc = 0;
+                } else if first > cur {
+                    let gap = first - cur;
+                    if gap > 10 || (gap > 1 && self.queue.len() >= self.min_target) {
+                        eprintln!(
+                            "[audio-io] warn: sequence gap detected (expected {}, got {}), resyncing",
+                            cur, first
+                        );
+                        self.next_idx = Some(first);
+                        self.consecutive_plc = 0;
+                    }
                 }
             }
         }
@@ -152,9 +243,28 @@ impl JitterBuffer {
         if let Some(payload) = self.queue.remove(&cur_idx) {
             self.consecutive_plc = 0;
             self.stats.played_frames += 1;
-            let _ = self.decoder.decode(&payload, out_pcm, false);
+            match self.decoder.decode(&payload, &mut self.decode_scratch, false) {
+                Ok(n) if n >= out_pcm.len() => {
+                    out_pcm.copy_from_slice(&self.decode_scratch[..out_pcm.len()]);
+                    if n > out_pcm.len() {
+                        self.carry_pcm.extend(&self.decode_scratch[out_pcm.len()..n]);
+                    }
+                }
+                _ => {
+                    let _ = self.decoder.decode(&[], out_pcm, false);
+                }
+            }
             true
         } else {
+            // Single missing packet with next packet already present: recover using Opus in-band FEC
+            let next_key = cur_idx.wrapping_add(1);
+            if let Some(next_payload) = self.queue.get(&next_key) {
+                self.consecutive_plc = 0;
+                self.stats.plc_frames += 1;
+                let _ = self.decoder.decode(next_payload, out_pcm, true);
+                return true;
+            }
+
             // Missing frame: run Opus Packet Loss Concealment (PLC) up to 5 consecutive frames
             if self.consecutive_plc < 5 {
                 self.consecutive_plc += 1;
@@ -312,5 +422,83 @@ mod tests {
         assert_eq!(jb.state(), JitterState::Playing);
         assert!(jb.pop_frame(&mut out));
         assert!(jb.pop_frame(&mut out));
+    }
+
+    #[test]
+    fn test_jitter_buffer_overflow_pruning_advances_next_idx() {
+        let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+        jb.set_min_target(3);
+        let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+
+        let mut phase = 0.0;
+        let mut opus_buf = vec![0u8; 1024];
+        let mut out = vec![0i16; FRAME_SAMPLES];
+
+        // Push 15 packets in a burst (exceeding max_depth = 10)
+        for seq in 100..115 {
+            let pcm = generate_sine_frame(440.0, &mut phase);
+            let len = enc.encode(&pcm, &mut opus_buf).unwrap();
+            jb.push(seq, opus_buf[..len].to_vec());
+        }
+
+        // Popping must decode real frames immediately with zero PLC frames!
+        assert!(jb.pop_frame(&mut out));
+        assert_eq!(jb.stats().plc_frames, 0);
+        assert_eq!(jb.stats().played_frames, 1);
+    }
+
+    #[test]
+    fn test_jitter_buffer_backward_sequence_reset_and_ssrc_change() {
+        let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+        jb.set_min_target(2);
+        let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+
+        let mut phase = 0.0;
+        let mut opus_buf = vec![0u8; 1024];
+        let mut out = vec![0i16; FRAME_SAMPLES];
+
+        let pcm = generate_sine_frame(440.0, &mut phase);
+        let len = enc.encode(&pcm, &mut opus_buf).unwrap();
+        let pkt = opus_buf[..len].to_vec();
+
+        jb.push_with_ssrc(5000, 111, pkt.clone());
+        jb.push_with_ssrc(5001, 111, pkt.clone());
+        assert!(jb.pop_frame(&mut out));
+
+        // Simulate network handover where sequence resets backward to 10
+        jb.push_with_ssrc(10, 111, pkt.clone());
+        jb.push_with_ssrc(11, 111, pkt.clone());
+        assert_eq!(jb.state(), JitterState::Playing);
+        assert!(jb.pop_frame(&mut out));
+        assert!(jb.pop_frame(&mut out));
+        assert_eq!(jb.stats().late_dropped, 0);
+    }
+
+    #[test]
+    fn test_jitter_buffer_multiframe_40ms_opus() {
+        let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+        jb.set_min_target(2);
+        let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+
+        let mut phase = 0.0;
+        let mut opus_buf = vec![0u8; 1024];
+        let mut out = vec![0i16; FRAME_SAMPLES];
+
+        // Encode 40ms (640 samples) Opus packets
+        let mut pcm40 = generate_sine_frame(440.0, &mut phase);
+        pcm40.extend(generate_sine_frame(440.0, &mut phase));
+        let len = enc.encode(&pcm40, &mut opus_buf).unwrap();
+        let pkt40 = opus_buf[..len].to_vec();
+
+        jb.push(1, pkt40.clone());
+        jb.push(2, pkt40);
+
+        // Two 40ms packets must yield four 20ms pop_frame calls with zero PLC!
+        assert!(jb.pop_frame(&mut out));
+        assert!(jb.pop_frame(&mut out));
+        assert!(jb.pop_frame(&mut out));
+        assert!(jb.pop_frame(&mut out));
+        assert_eq!(jb.stats().plc_frames, 0);
+        assert_eq!(jb.stats().played_frames, 4);
     }
 }

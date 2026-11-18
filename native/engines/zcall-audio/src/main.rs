@@ -416,8 +416,8 @@ fn main() {
     let playout_apm = apm_instance.as_ref().map(Arc::clone);
     let target_frames = config
         .min_delay_ms
-        .map(|d| (d / 20).max(2) as usize)
-        .unwrap_or(4);
+        .map(|d| (d / 20).clamp(2, 4) as usize)
+        .unwrap_or(3);
     let playout_jb = Arc::new(Mutex::new(
         match JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10) {
             Ok(mut jb) => {
@@ -435,7 +435,9 @@ fn main() {
     ));
     let playout_jb_thread = Arc::clone(&playout_jb);
     let playout_mic_vol = Arc::clone(&mic_volume);
-    let speaker_dev = config.speaker_device.clone();
+    let speaker_switch: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
+    let playout_speaker_switch = Arc::clone(&speaker_switch);
+    let mut speaker_dev = config.speaker_device.clone();
 
     let playout_handle = thread::spawn(move || {
         let mut player = match PulsePlayer::new(speaker_dev.as_deref()) {
@@ -451,24 +453,44 @@ fn main() {
         let tick = std::time::Duration::from_millis(20);
         let mut last_far_speech = std::time::Instant::now() - std::time::Duration::from_secs(1);
         let mut last_diag = std::time::Instant::now();
+        let mut last_reopen_attempt = std::time::Instant::now();
         let mut write_block_accum_ms = 0u64;
         let mut write_block_count = 0u32;
         let mut max_write_block_ms = 0u64;
+        let mut non_blocking_streak = 0u32;
 
         while playout_running.load(Ordering::Relaxed) {
             let loop_start = std::time::Instant::now();
             let off = playout_speaker_off.load(Ordering::Relaxed);
 
-            if let Some(ply) = &mut player {
-                if off {
-                    let t0 = std::time::Instant::now();
-                    let _ = ply.write(&silence);
-                    let write_elapsed = t0.elapsed().as_millis() as u64;
-                    write_block_accum_ms += write_elapsed;
-                    write_block_count += 1;
-                    if write_elapsed > max_write_block_ms {
-                        max_write_block_ms = write_elapsed;
+            if let Ok(mut req) = playout_speaker_switch.lock() {
+                if let Some(new_dev) = req.take() {
+                    speaker_dev = new_dev;
+                    if let Ok(p) = PulsePlayer::new(speaker_dev.as_deref()) {
+                        player = Some(p);
+                        non_blocking_streak = 0;
                     }
+                }
+            }
+
+            if player.is_none() && last_reopen_attempt.elapsed() >= std::time::Duration::from_millis(500) {
+                last_reopen_attempt = std::time::Instant::now();
+                if let Ok(p) = PulsePlayer::new(speaker_dev.as_deref()) {
+                    eprintln!("[audio-io] info: speaker stream recovered");
+                    player = Some(p);
+                    non_blocking_streak = 0;
+                }
+            }
+
+            let mut write_ok = false;
+
+            if let Some(ply) = &mut player {
+                let write_elapsed: u64;
+                let res = if off {
+                    let t0 = std::time::Instant::now();
+                    let r = ply.write(&silence);
+                    write_elapsed = t0.elapsed().as_millis() as u64;
+                    r
                 } else {
                     let has_frame = {
                         if let Ok(mut jb) = playout_jb_thread.lock() {
@@ -493,27 +515,45 @@ fn main() {
                             std::slice::from_raw_parts(pcm_out.as_ptr() as *const u8, bytes_len)
                         };
                         let t0 = std::time::Instant::now();
-                        let _ = ply.write(pcm_bytes);
-                        let write_elapsed = t0.elapsed().as_millis() as u64;
-                        write_block_accum_ms += write_elapsed;
-                        write_block_count += 1;
-                        if write_elapsed > max_write_block_ms {
-                            max_write_block_ms = write_elapsed;
-                        }
+                        let r = ply.write(pcm_bytes);
+                        write_elapsed = t0.elapsed().as_millis() as u64;
+                        r
                     } else {
                         let t0 = std::time::Instant::now();
-                        let _ = ply.write(&silence);
-                        let write_elapsed = t0.elapsed().as_millis() as u64;
+                        let r = ply.write(&silence);
+                        write_elapsed = t0.elapsed().as_millis() as u64;
+                        r
+                    }
+                };
+
+                if !off && last_far_speech.elapsed() >= std::time::Duration::from_millis(300) {
+                    playout_far_active.store(false, Ordering::Relaxed);
+                }
+
+                match res {
+                    Ok(()) => {
+                        write_ok = true;
                         write_block_accum_ms += write_elapsed;
                         write_block_count += 1;
                         if write_elapsed > max_write_block_ms {
                             max_write_block_ms = write_elapsed;
                         }
+                        if write_elapsed == 0 {
+                            non_blocking_streak = non_blocking_streak.saturating_add(1);
+                        } else {
+                            non_blocking_streak = 0;
+                        }
                     }
-
-                    if last_far_speech.elapsed() >= std::time::Duration::from_millis(300) {
-                        playout_far_active.store(false, Ordering::Relaxed);
+                    Err(e) => {
+                        eprintln!("[audio-io] warn: speaker write failed ({}), re-opening stream", e);
+                        player = None;
+                        last_reopen_attempt = std::time::Instant::now();
                     }
+                }
+            } else {
+                // Drain jitter buffer while speaker device is unavailable so frames do not pile up
+                if let Ok(mut jb) = playout_jb_thread.lock() {
+                    let _ = jb.pop_frame(&mut pcm_out);
                 }
             }
 
@@ -528,12 +568,13 @@ fn main() {
                     } else {
                         0
                     };
+                    let pa_lat = player.as_ref().and_then(|p| p.latency_ms()).unwrap_or(0);
                     let cur_mic_vol = playout_mic_vol.load(Ordering::Relaxed);
                     eprintln!(
-                        "[audio-io] diag: playout [rx={} play={} q={}/{} plc={} late_drop={} under={} write_block={}ms] mic [vol={}%]",
+                        "[audio-io] diag: playout [rx={} play={} q={}/{} plc={} late_drop={} under={} write_block={}ms pa_lat={}ms] mic [vol={}%]",
                         stats.rx_packets, stats.played_frames, q_len, target,
                         stats.plc_frames, stats.late_dropped, stats.underrun_count,
-                        avg_write, cur_mic_vol
+                        avg_write, pa_lat, cur_mic_vol
                     );
                 }
                 last_diag = std::time::Instant::now();
@@ -542,13 +583,14 @@ fn main() {
                 max_write_block_ms = 0;
             }
 
-            // Soundcard clock alignment: if pa_simple_write blocked for >= 15ms,
-            // the hardware audio clock is already self-pacing the stream.
-            let elapsed = loop_start.elapsed();
-            if elapsed < tick {
-                let remaining = tick - elapsed;
-                if elapsed < std::time::Duration::from_millis(15) {
-                    thread::sleep(remaining);
+            // Soundcard hardware clock pacing (matches audio-io.py PulseOut):
+            // pa_simple_write blocks until the soundcard consumes 20ms of audio after the
+            // initial 60ms (3-frame) buffer fills. Only sleep if player is unavailable
+            // or if a virtual/dummy sink is non-blocking for > 6 consecutive frames.
+            if !write_ok || non_blocking_streak > 6 {
+                let elapsed = loop_start.elapsed();
+                if elapsed < tick {
+                    thread::sleep(tick - elapsed);
                 }
             }
         }
@@ -571,6 +613,7 @@ fn main() {
                     break;
                 }
                 let idx = u32::from_be_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]);
+                let ssrc = u32::from_be_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
                 let len = ((hdr[8] as usize) << 8) | (hdr[9] as usize);
                 let mut opus_data = vec![0u8; len];
                 if stdin.read_exact(&mut opus_data).is_err() {
@@ -578,7 +621,7 @@ fn main() {
                 }
 
                 if let Ok(mut jb) = playout_jb.lock() {
-                    jb.push(idx, opus_data);
+                    jb.push_with_ssrc(idx, ssrc, opus_data);
                 }
             }
             CMD_IN_MUTE => {
@@ -634,6 +677,15 @@ fn main() {
                     let new_vol = get_mic_volume(dev_str);
                     mic_volume.store(new_vol, Ordering::Relaxed);
                     eprintln!("[audio-io] mic volume: {}%", new_vol);
+                } else if hdr[0] == b'o' {
+                    let new_dev = if name.is_empty() {
+                        None
+                    } else {
+                        Some(name.into_owned())
+                    };
+                    if let Ok(mut req) = speaker_switch.lock() {
+                        *req = Some(new_dev);
+                    }
                 }
             }
             _ => {
