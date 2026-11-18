@@ -9,7 +9,8 @@ const vm = require('vm');
 const { spawn } = require('child_process');
 
 const patchZcallNative = require(path.join(__dirname, '..', 'scripts', 'patches', 'patch-zcall-native'));
-const { loadKey, encrypt, decrypt } = require(path.join(__dirname, '..', 'zcall-native', 'tools', 'lib', 'callv2-crypto'));
+const ZCALL_DIR = path.join(__dirname, '..', 'native', 'engines', 'zcall');
+const { loadKey, encrypt, decrypt } = require(path.join(ZCALL_DIR, 'tools', 'lib', 'callv2-crypto'));
 
 describe('ZCall Unix Socket IPC & Native Patch', () => {
   const cleanMainPath = path.join(__dirname, '..', 'temp', 'clean-26.11.10', 'main-dist', 'main.js');
@@ -85,7 +86,7 @@ describe('ZCall Unix Socket IPC & Native Patch', () => {
     await new Promise((resolve) => recvServer.listen(recvPath, resolve));
     await new Promise((resolve) => sendServer.listen(sendPath, resolve));
 
-    const engineJs = path.join(__dirname, '..', 'zcall-native', 'native-engine', 'zcall-native.js');
+    const engineJs = path.join(ZCALL_DIR, 'native-engine', 'zcall-native.js');
     const proc = spawn(process.execPath, [
       engineJs,
       recvPath,
@@ -122,7 +123,7 @@ describe('ZCall Unix Socket IPC & Native Patch', () => {
     const customTmp = path.join(parentDir, 'nested');
     assert.strictEqual(fs.existsSync(customTmp), false);
 
-    const engineJs = path.join(__dirname, '..', 'zcall-native', 'native-engine', 'zcall-native.js');
+    const engineJs = path.join(ZCALL_DIR, 'native-engine', 'zcall-native.js');
     const proc = spawn(process.execPath, [
       engineJs,
       path.join(customTmp, 'socketzalorecv2021'),

@@ -7,8 +7,8 @@
  * ZaloHelper.app on macOS) and talks to it over two local channels carrying
  * AES-encrypted JSON: named pipes on Windows, unix sockets on macOS. On Linux
  * this patch makes it
- *   - spawn zcall-native/native-engine/zcall-native.js (path in
- *     ZCALL_ENGINE_JS, set by plugins/zcall) on Zalo's own Electron
+ *   - spawn native/engines/zcall/native-engine/zcall-native.js (resolved
+ *     by plugins/zcall into ZCALL_ENGINE_JS) on Zalo's own Electron
  *     (ELECTRON_RUN_AS_NODE) using the unix sockets;
  *   - await plugins/zcall's global.__zcallPrepare() first (system packages).
  * Transport crypto, message handling and renderer IPC are untouched; Windows
