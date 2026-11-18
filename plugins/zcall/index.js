@@ -150,18 +150,21 @@ function configure(app) {
 
 /** At 'ready', before Zalo can start a call. */
 function start({ userDataDir }) {
- // Left over from an unclean exit (another running Zalo keeps its own).
- for (const p of engineProcesses()) if (isOrphan(p.ppid)) kill(p.pid, 'SIGKILL');
- callWindow.start();
- Object.assign(process.env, {
-  ZCALL_ENGINE_JS: enginePath('native-engine', 'zcall-native.js'),
-  ZCALL_MEDIA: 'zrtc',
-  ZCALL_SEND_UDP: '1',
-  ZCALL_LOG_DIR: userDataDir // the AppImage is read-only
- });
- const mainJs = process.env.ZALO_MAIN_JS || zaloMainJs();
- if (mainJs) process.env.ZALO_MAIN_JS = mainJs;
- global.__zcallPrepare = prepare;
+  if (process.env.TMPDIR) {
+    try { fs.mkdirSync(process.env.TMPDIR, { recursive: true }); } catch (_) {}
+  }
+  // Left over from an unclean exit (another running Zalo keeps its own).
+  for (const p of engineProcesses()) if (isOrphan(p.ppid)) kill(p.pid, 'SIGKILL');
+  callWindow.start();
+  Object.assign(process.env, {
+    ZCALL_ENGINE_JS: enginePath('native-engine', 'zcall-native.js'),
+    ZCALL_MEDIA: 'zrtc',
+    ZCALL_SEND_UDP: '1',
+    ZCALL_LOG_DIR: userDataDir // the AppImage is read-only
+  });
+  const mainJs = process.env.ZALO_MAIN_JS || zaloMainJs();
+  if (mainJs) process.env.ZALO_MAIN_JS = mainJs;
+  global.__zcallPrepare = prepare;
 }
 
 /**

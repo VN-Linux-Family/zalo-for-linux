@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 'use strict';
 // Native call engine, in place of Zalo's ZaloCall helper. Connects to Zalo's
-// two call-v2 TCP sockets, sends the token line, runs EngineCore with a media
-// backend and a call window.
+// two call-v2 unix sockets, runs EngineCore with a media backend and a call
+// window.
 //
-//   node native-engine/zcall-native.js --token <TK> [--recv 29631] [--send 29632]
-//        [--media stub|zrtc] [--send-udp] [--no-window]
+//   node native-engine/zcall-native.js [recvSocket] [sendSocket]
+//        [--recv <path>] [--send <path>] [--media stub|zrtc] [--send-udp]
+//        [--no-window]
 //
 //   --media stub   signalling only, no media (default; ZCALL_MEDIA)
 //   --media zrtc   Zalo relay media; packets leave the machine only with
@@ -15,10 +16,9 @@
 //                  (ZCALL_GROUP_CAMERA=0 keeps it local) and screen share.
 //
 // Zalo-Linux's patched main process spawns it on its own Electron
-// (ELECTRON_RUN_AS_NODE) with the ports and a fresh token. It writes
-// engine->zalo frames on the recv socket (29631) and reads zalo->engine
-// frames on the send socket (29632). With ZCALL_LOG_DIR the log goes to
-// <dir>/native-engine-YYYYMMDD.log, else to stderr.
+// (ELECTRON_RUN_AS_NODE) with the unix socket paths. It writes engine->zalo
+// frames on the recv socket and reads zalo->engine frames on the send socket.
+// With ZCALL_LOG_DIR the log goes to <dir>/native-engine-YYYYMMDD.log, else to stderr.
 
 const fs = require('fs');
 const net = require('net');
@@ -32,16 +32,19 @@ const { createCallUi } = require('./ui-client');
 
 const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf('--' + n); return i >= 0 ? args[i + 1] : d; };
-const token = opt('token', process.env.ZCALL_TOKEN);
-const recvPort = Number(opt('recv', 29631)); // engine -> zalo
-const sendPort = Number(opt('send', 29632)); // zalo -> engine
+const positional = args.filter((a, idx) => !a.startsWith('--') && (idx === 0 || !args[idx - 1].startsWith('--')));
+if (process.env.TMPDIR) {
+  try { fs.mkdirSync(process.env.TMPDIR, { recursive: true }); } catch (_) {}
+}
+const defaultDir = (process.env.TMPDIR || '/tmp').replace(/\/+$/, '');
+const recvTarget = opt('recv', positional[0] || `${defaultDir}/socketzalorecv2021`); // engine -> zalo
+const sendTarget = opt('send', positional[1] || `${defaultDir}/socketzalosend2021`); // zalo -> engine
 const mediaMode = opt('media', process.env.ZCALL_MEDIA || 'stub');
 const sendUdp = args.includes('--send-udp') || process.env.ZCALL_SEND_UDP === '1';
 const verbose = args.includes('--verbose') || !!process.env.ZCALL_VERBOSE;
 // Group calls are on unless ZCALL_GROUP=0 (live with a phone and the macOS client,
 // 2026-10-08: audio, camera and screen share both ways).
 const group = args.includes('--group') || process.env.ZCALL_GROUP !== '0';
-if (!token) { console.error('need --token <TK> (the value Zalo passes on the command line)'); process.exit(2); }
 
 const key = loadKey();
 const stamp = () => new Date().toISOString().slice(11, 23);
@@ -53,12 +56,12 @@ const log = (...a) => {
   if (logFile) logFile.write(line + '\n'); else console.error(line);
 };
 process.on('uncaughtException', (e) => { log('uncaught', e.stack || e); process.exit(1); });
-log(`start: media=${mediaMode} sendUdp=${sendUdp} group=${group} ports ${recvPort}/${sendPort}`);
+log(`start: media=${mediaMode} sendUdp=${sendUdp} group=${group} sockets ${recvTarget}/${sendTarget}`);
 
 // recv socket: we write engine->zalo frames here.
-const recv = net.connect({ host: '127.0.0.1', port: recvPort }, () => recv.write(token + '\n'));
+const recv = net.connect(recvTarget);
 // send socket: we read zalo->engine frames here.
-const send = net.connect({ host: '127.0.0.1', port: sendPort }, () => send.write(token + '\n'));
+const send = net.connect(sendTarget);
 
 const brief = (f) => `${f.type} ${f.command || (f.data && f.data.act) || ''}`;
 const emit = (frame) => {
