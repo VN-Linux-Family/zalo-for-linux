@@ -45,7 +45,7 @@ Job `build` biên dịch và đóng gói AppImage trên 2 kiến trúc phần c�
 - **`aarch64`**: Chạy trên `ubuntu-24.04-arm` bên trong container `ubuntu:22.04`.
 
 Các bước thực hiện:
-1. Biên dịch các native addon trong `nativelibs/` cho kiến trúc tương ứng.
+1. Biên dịch các native addon trong `native/addons/` cho kiến trúc tương ứng.
 2. Tải và giải nén file DMG chính thức.
 3. Áp dụng các bản vá JavaScript từ `scripts/patches/`.
 4. Biên dịch tài nguyên giao diện ZaDark từ submodule.

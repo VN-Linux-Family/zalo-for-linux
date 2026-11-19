@@ -4,9 +4,11 @@
 //
 //   prepare()        InitZRTP to every server in recvSignal 401; each answers
 //                    (MsgType 2) with a token; the fastest is proposed in 416.
+//                    While the phone rings, Ping every 6 s to every server
+//                    that gave a token (ring ping, below).
 //   start(rtpSerIp)  peer answered: keep that server, EndCall the others,
-//                    start audio (type 3 out, type 4 in), Ping every 6 s,
-//                    ReqForward status every 1 s.
+//                    Ping it at once, start audio (type 3 out, type 4 in),
+//                    Ping every 6 s, ReqForward status every 1 s.
 //   stop()           EndCall, stop audio.
 //
 // Group calls (params.group, docs/GROUP-CALL.md): the servers of
@@ -66,7 +68,9 @@ const { SendRate } = require('../send-rate');
 const INIT_WAIT_MS = 600;        // all servers answered InitZRTP within ~35 ms
 const INIT_RETRY_MS = 1000;
 const INIT_TRIES = 3;
-const PING_INTERVAL_MS = 6000;   // Ping to the kept server
+// Ping to the kept server, and while ringing to every server that answered
+// InitZRTP (ZCALL_PING_MS: shorter for the tests).
+const PING_INTERVAL_MS = Number(process.env.ZCALL_PING_MS) || 6000;
 const TWCC_INTERVAL_MS = 50; // ZaloCall's cadence (captures 2026-09-29)
 const RTCP_REPORT_INTERVAL_MS = 1000;
 const PLI_MIN_GAP_MS = 1000; // one key frame request per second at most
@@ -194,6 +198,7 @@ class ZrtcMediaBackend extends EventEmitter {
     this.p2pSeq = 0;
     this.lastRxAt = 0;
     this.startedAt = 0;
+    this.ringPing = null; // { timer, since, sent, replies } between InitZRTP and start()
   }
 
   _timer(fn, ms, repeat) {
@@ -351,6 +356,7 @@ class ZrtcMediaBackend extends EventEmitter {
         // Group: every cmd 32 / 33 header carries this token. 0 here means the SFU's
         // answer did not hold one where the 1-1 answer has it: the raw reply shows.
         if (this.group) this.log(`media: group InitZRTP reply, token ${best.token >>> 0}: ${best.hex}`);
+        else this._startRingPing();
         resolve(best);
       };
       let waiting = null;
@@ -369,9 +375,44 @@ class ZrtcMediaBackend extends EventEmitter {
     });
   }
 
+  // Ring ping. macOS CallController::_handleInitZRTPSuccessful starts a 6 s job,
+  // _sendRequestZRTPPing, as soon as InitZRTP has answers: before the call is
+  // connected it pings every server that gave a token, after that only the one in
+  // use. Without it the relay heard nothing from us while the phone rang; after a
+  // 13 s ring it answered nothing once the call started (tx 845, rx 0, only the 7
+  // InitZRTP replies; 2026-11-18), while a call answered after 2.8 s was fine.
+  _startRingPing() {
+    this._stopRingPing(false);
+    if (!this.replies.length) return;
+    this.ringPing = { timer: null, since: Date.now(), sent: 0, replies: 0 };
+    this.ringPing.timer = this._timer(() => this._sendRingPing(), PING_INTERVAL_MS, true);
+    this.log(`media: ping before answer: ${this.replies.length} server(s) every ${PING_INTERVAL_MS / 1000} s`);
+  }
+
+  _sendRingPing() {
+    if (!this.ringPing) return;
+    for (const r of this.replies) {
+      if (this.ended.has(`${r.server.host}:${r.server.port}`)) continue;
+      this._send(buildPingPacket({ uid: this.params.localUid || 0, token: r.token, sessId: this.params.sessId || '' }), r.server, 'Ping');
+      this.ringPing.sent++;
+    }
+  }
+
+  // log: the line the field test looks at (replies = MsgType 2 other than the
+  // InitZRTP answers, i.e. what the relays said to our pings while ringing).
+  _stopRingPing(log) {
+    const rp = this.ringPing;
+    if (!rp) return;
+    this.ringPing = null;
+    clearInterval(rp.timer);
+    this.timers.delete(rp.timer);
+    if (log) this.log(`media: ping before answer: ${rp.sent} sent, ${rp.replies} replies (MsgType 2) in ${((Date.now() - rp.since) / 1000).toFixed(1)} s of ringing`);
+  }
+
   // Peer answered: keep its server (rtpSerIp) and start media.
   start(role = 'caller', rtpSerIp = null) {
     this.active = true;
+    this._stopRingPing(true);
     if (!this.sendUdp) { this.log(`media: start role=${role} (observe-only)`); return; }
     const want = parseHostPort(rtpSerIp);
     const match = want && this.replies.find((r) => r.server.host === want.host && r.server.port === want.port);
@@ -384,6 +425,7 @@ class ZrtcMediaBackend extends EventEmitter {
     if (!this.activeServer) { this.log('media: no server'); this.emit('failed', 'no-server'); return; }
     for (const r of this.replies) if (r.server !== this.activeServer) this._sendEndCall(r.server, r.token);
     this.log('media: started');
+    if (!this.group) this._sendPing(); // the kept server, at once (then every 6 s)
     this.startedAt = Date.now();
     this.lastRxAt = Date.now();
     if (this.group) {
@@ -532,6 +574,7 @@ class ZrtcMediaBackend extends EventEmitter {
     this.startedAt = 0;
     this.active = false;
     this._onInitReply = null;
+    this._stopRingPing(false);
     this._clearTimers();
     if (this.audio) {
       try { this.audio.stdin.end(); } catch (_) { }
@@ -1167,7 +1210,9 @@ class ZrtcMediaBackend extends EventEmitter {
     }
     const p = unwrapPacket(msg);
     if (!p) return;
-    if (p.msgType === MSG_TYPES.SERVER_REPLY && (p.cmd === COMMANDS.INIT_CALL_CALLER || p.cmd === COMMANDS.INIT_CALL_CALLEE)) {
+    const initReply = p.msgType === MSG_TYPES.SERVER_REPLY && (p.cmd === COMMANDS.INIT_CALL_CALLER || p.cmd === COMMANDS.INIT_CALL_CALLEE);
+    if (this.ringPing && p.msgType === MSG_TYPES.SERVER_REPLY && !initReply) this.ringPing.replies++;
+    if (initReply) {
       const server = this.servers.find((s) => s.host === rinfo.address && s.port === rinfo.port);
       if (!server || this.replies.some((r) => r.server === server)) return;
       if (p.res !== 0) {

@@ -15,7 +15,7 @@ Toàn bộ các file patch nằm trong thư mục `scripts/patches/` với quy t
 Các loại bản vá chính trong dự án:
 - **Tương thích nền tảng**: Xử lý đường dẫn XDG trên Linux, cờ sandbox và lệnh hệ thống (`patch-xdg-user-dirs.js`, `patch-shell-open-linux.js`).
 - **Quản lý cửa sổ**: Bật thanh tiêu đề native trên X11 hoặc vẽ thanh tiêu đề riêng trên Wayland (`patch-titlebar.js`, `patch-wayland-titlebar.js`).
-- **Native addons**: Điều hướng các file `.node` macOS sang các module viết lại cho Linux trong `nativelibs/` (`patch-sqlite3.js`, `patch-db-cross-v4.js`, `patch-zfile.js`).
+- **Native addons**: Điều hướng các file `.node` macOS sang các module viết lại cho Linux trong `native/addons/` (`patch-sqlite3.js`, `patch-db-cross-v4.js`, `patch-zfile.js`).
 - **Tính năng mở rộng**: Tích hợp engine gọi điện native (`patch-zcall-native.js`), tự động đổi theme ZaDark (`patch-auto-theme.js`), và chế độ offline (`patch-offline-startup.js`).
 
 ---

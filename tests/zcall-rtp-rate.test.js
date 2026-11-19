@@ -42,6 +42,20 @@ describe('RTP & SendRate Adaptation', () => {
     assert.strictEqual(rate.ladder.length, 6);
   });
 
+  it('falls back to the default ladder when no server rung fits', () => {
+    // Every bwProfile is under MIN_KBPS (or too big for maxWidth): the
+    // constructor used to throw on an empty ladder.
+    for (const config of [
+      { bwProfiles: [{ id: 1, res: 240, fps: 8, bitrate: 30 }] },
+      { bwProfiles: [{ id: 7, res: 720, fps: 24, bitrate: 1100 }], maxWidth: 640 },
+    ]) {
+      const rate = new SendRate(config, { log: () => {} });
+      const kbps = rate.ladder.map((p) => p.kbps);
+      assert.deepStrictEqual(kbps, DEFAULT_LADDER.filter((p) => p.bitrate >= 100).map((p) => p.bitrate));
+      assert.strictEqual(rate.profile().bitrate, 300000);
+    }
+  });
+
   it('steps down on packet loss and respects backoff', () => {
     let changed = false;
     const rate = new SendRate({}, {
