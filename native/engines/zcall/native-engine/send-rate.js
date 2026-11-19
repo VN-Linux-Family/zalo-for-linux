@@ -86,7 +86,9 @@ class SendRate {
         .map((p) => ({ id: p.id, res: Number(p.res), fps: Math.min(num(p.fps, 15), maxFps), kbps: Number(p.bitrate) }))
         .filter((p) => SIZES[p.res] && p.kbps >= MIN_KBPS && p.kbps <= maxKbps && SIZES[p.res][0] <= maxW && SIZES[p.res][1] <= maxH)
         .sort((a, b) => a.kbps - b.kbps);
-      if (!this.ladder.length) this.ladder = DEFAULT_LADDER.filter((p) => p.kbps >= MIN_KBPS).map((p) => ({ ...p, kbps: p.bitrate }));
+      // DEFAULT_LADDER rows carry `bitrate`, not `kbps` (filtering on kbps left the
+      // ladder empty and the constructor threw when no server rung fit).
+      if (!this.ladder.length) this.ladder = DEFAULT_LADDER.filter((p) => p.bitrate >= MIN_KBPS).map((p) => ({ ...p, kbps: p.bitrate }));
       const startKbps = num(c.startupBitrate, START_KBPS);
       let start = 0;
       this.ladder.forEach((p, i) => { if (p.kbps <= startKbps) start = i; });
