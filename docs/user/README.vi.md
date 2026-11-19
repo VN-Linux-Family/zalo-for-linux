@@ -202,6 +202,9 @@ Cảm ơn những con người tuyệt vời
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/nguyenphivn"><img src="https://avatars.githubusercontent.com/u/19565657?v=4&size=100" width="100px" height="100px" alt="nguyenphivn"/><br /><sub><b>nguyenphivn</b></sub></a><br /><a href="https://github.com/VN-Linux-Family/zalo-for-linux/commits?author=nguyenphivn" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/TraiNguyenVan"><img src="https://avatars.githubusercontent.com/u/136947709?v=4&size=100" width="100px" height="100px" alt="Nguyễn Văn Trãi"/><br /><sub><b>Nguyễn Văn Trãi</b></sub></a><br /><a href="https://github.com/VN-Linux-Family/zalo-for-linux/commits?author=TraiNguyenVan" title="Documentation">📖</a></td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/vupn0712"><img src="https://avatars.githubusercontent.com/u/126212736?v=4&size=100" width="100px" height="100px" alt="vupn0712"/><br /><sub><b>vupn0712</b></sub></a><br /><a href="https://github.com/VN-Linux-Family/zalo-for-linux/commits?author=vupn0712" title="Code">💻</a></td>
+    </tr>
   </tbody>
 </table>
 
