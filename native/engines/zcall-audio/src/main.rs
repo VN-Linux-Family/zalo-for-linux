@@ -196,6 +196,8 @@ pub struct ClipGuard {
     was_manual: bool,
     enabled: bool,
     apply_os: bool,
+    last_os_sync: std::time::Instant,
+    last_vol_write: Arc<Mutex<std::time::Instant>>,
     clipped_frames_in_window: u8,
     window_frame_count: u8,
     last_step: std::time::Instant,
@@ -219,6 +221,8 @@ impl ClipGuard {
             was_manual: false,
             enabled,
             apply_os: cfg!(not(test)),
+            last_os_sync: past,
+            last_vol_write: Arc::new(Mutex::new(past)),
             clipped_frames_in_window: 0,
             window_frame_count: 0,
             last_step: std::time::Instant::now(),
@@ -235,10 +239,30 @@ impl ClipGuard {
         mut self,
         far_active: Option<Arc<AtomicBool>>,
         manual: Arc<AtomicBool>,
+        last_vol_write: Arc<Mutex<std::time::Instant>>,
     ) -> Self {
         self.far_active = far_active;
         self.manual = manual;
+        self.last_vol_write = last_vol_write;
         self
+    }
+
+    pub fn sync_os_volume(&mut self) {
+        if !self.apply_os || self.last_os_sync.elapsed() < std::time::Duration::from_millis(500) {
+            return;
+        }
+        if let Ok(ts) = self.last_vol_write.lock() {
+            if ts.elapsed() < std::time::Duration::from_millis(800) {
+                return;
+            }
+        }
+        self.last_os_sync = std::time::Instant::now();
+        if let Some(actual) = get_mic_volume_opt(self.device.as_deref()).map(|v| v.min(100)) {
+            let prev = self.current_vol.swap(actual, Ordering::Relaxed);
+            if prev != actual {
+                eprintln!("[audio-io] mic volume: {}%", actual);
+            }
+        }
     }
 
     pub fn set_device(&mut self, device: Option<String>) {
@@ -264,6 +288,9 @@ impl ClipGuard {
             let actual = get_mic_volume_opt(self.device.as_deref())
                 .map(|v| v.min(100))
                 .unwrap_or(new_vol);
+            if let Ok(mut ts) = self.last_vol_write.lock() {
+                *ts = std::time::Instant::now();
+            }
             self.current_vol.store(actual, Ordering::Relaxed);
             eprintln!("[audio-io] mic volume: {}%", actual);
         } else {
@@ -359,7 +386,7 @@ impl ClipGuard {
     }
 }
 
-fn init_mic_volume_for_device(device: Option<&str>, agc_enabled: bool) -> u8 {
+fn init_mic_volume_for_device(device: Option<&str>, agc_enabled: bool, boost_floor: bool) -> u8 {
     match get_mic_volume_opt(device) {
         Some(initial_mic_vol) => {
             if agc_enabled && initial_mic_vol > 80 {
@@ -369,6 +396,15 @@ fn init_mic_volume_for_device(device: Option<&str>, agc_enabled: bool) -> u8 {
                         .unwrap_or(70)
                 } else {
                     eprintln!("[audio-io] warn: could not set initial mic volume to 70%");
+                    initial_mic_vol.min(100)
+                }
+            } else if agc_enabled && boost_floor && initial_mic_vol < 20 {
+                if set_mic_volume(device, 50) {
+                    get_mic_volume_opt(device)
+                        .map(|v| v.min(100))
+                        .unwrap_or(50)
+                } else {
+                    eprintln!("[audio-io] warn: could not boost muted/low mic volume to 50%");
                     initial_mic_vol.min(100)
                 }
             } else {
@@ -441,13 +477,16 @@ fn main() {
 
     let active_mic: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(config.mic_device.clone()));
     let mic_switch: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
+    let last_vol_write: Arc<Mutex<std::time::Instant>> = Arc::new(Mutex::new(
+        std::time::Instant::now() - std::time::Duration::from_secs(10),
+    ));
 
     let mic_volume_val = if config.test_tone {
         get_mic_volume_opt(config.mic_device.as_deref())
             .map(|v| v.min(100))
             .unwrap_or(100)
     } else {
-        init_mic_volume_for_device(config.mic_device.as_deref(), agc_enabled)
+        init_mic_volume_for_device(config.mic_device.as_deref(), agc_enabled, false)
     };
     let mic_volume = Arc::new(AtomicU8::new(mic_volume_val));
     eprintln!("[audio-io] mic volume: {}%", mic_volume_val);
@@ -497,6 +536,7 @@ fn main() {
     let mic_apm = apm_instance.as_ref().map(Arc::clone);
     let mic_dev = config.mic_device.clone();
     let cap_mic_switch = Arc::clone(&mic_switch);
+    let cap_last_vol_write = Arc::clone(&last_vol_write);
     let bitrate = config.bitrate_bps;
     let tone_mode = config.test_tone;
     let mic_handle = thread::spawn(move || {
@@ -525,7 +565,7 @@ fn main() {
 
         let leveler_far_active = Arc::clone(&mic_far_active);
         let mut guard = ClipGuard::new(mic_dev.clone(), Arc::clone(&mic_vol))
-            .with_controls(Some(mic_far_active), Arc::clone(&mic_manual));
+            .with_controls(Some(mic_far_active), Arc::clone(&mic_manual), cap_last_vol_write);
         let mut leveler = MicLeveler::new(Some(Arc::clone(&leveler_far_active)));
         while mic_running.load(Ordering::Relaxed) {
             if !tone_mode {
@@ -564,6 +604,10 @@ fn main() {
             let samples = unsafe {
                 std::slice::from_raw_parts_mut(pcm_raw.as_mut_ptr() as *mut i16, FRAME_SAMPLES)
             };
+
+            if !tone_mode {
+                guard.sync_os_volume();
+            }
 
             if muted {
                 for s in samples.iter_mut() {
@@ -845,6 +889,9 @@ fn main() {
                 let pct = arg[0].min(100);
                 let prev_manual = manual_mic_vol.swap(true, Ordering::Relaxed);
                 let dev = active_mic.lock().ok().and_then(|g| g.clone());
+                if let Ok(mut ts) = last_vol_write.lock() {
+                    *ts = std::time::Instant::now();
+                }
                 if !config.test_tone && set_mic_volume(dev.as_deref(), pct) {
                     let actual = get_mic_volume_opt(dev.as_deref())
                         .map(|v| v.min(100))
@@ -869,6 +916,21 @@ fn main() {
                 }
                 let want_auto = arg[0] != 0 && agc_enabled;
                 manual_mic_vol.store(!want_auto, Ordering::Relaxed);
+                if let Ok(mut ts) = last_vol_write.lock() {
+                    *ts = std::time::Instant::now();
+                }
+                if !config.test_tone {
+                    let dev = active_mic.lock().ok().and_then(|g| g.clone());
+                    let synced = if want_auto {
+                        init_mic_volume_for_device(dev.as_deref(), true, true)
+                    } else {
+                        get_mic_volume_opt(dev.as_deref())
+                            .map(|v| v.min(100))
+                            .unwrap_or_else(|| mic_volume.load(Ordering::Relaxed))
+                    };
+                    mic_volume.store(synced, Ordering::Relaxed);
+                    eprintln!("[audio-io] mic volume: {}%", synced);
+                }
                 eprintln!(
                     "[audio-io] mic mode: {}",
                     if want_auto { "auto" } else { "manual" }
@@ -912,7 +974,10 @@ fn main() {
                             .map(|v| v.min(100))
                             .unwrap_or(100)
                     } else {
-                        init_mic_volume_for_device(new_dev.as_deref(), agc_enabled)
+                        if let Ok(mut ts) = last_vol_write.lock() {
+                            *ts = std::time::Instant::now();
+                        }
+                        init_mic_volume_for_device(new_dev.as_deref(), agc_enabled, false)
                     };
                     mic_volume.store(new_vol, Ordering::Relaxed);
                     eprintln!("[audio-io] mic volume: {}%", new_vol);
@@ -1014,7 +1079,13 @@ mod tests {
         let far_active = Arc::new(AtomicBool::new(false));
         let manual = Arc::new(AtomicBool::new(false));
         let mut guard = ClipGuard::new(None, Arc::clone(&vol))
-            .with_controls(Some(Arc::clone(&far_active)), Arc::clone(&manual));
+            .with_controls(
+                Some(Arc::clone(&far_active)),
+                Arc::clone(&manual),
+                Arc::new(Mutex::new(
+                    std::time::Instant::now() - std::time::Duration::from_secs(10),
+                )),
+            );
         guard.enabled = true;
         guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(2000);
 
