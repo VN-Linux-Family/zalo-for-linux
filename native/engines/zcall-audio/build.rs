@@ -2,6 +2,13 @@ fn main() {
     println!("cargo:rustc-link-lib=opus");
     println!("cargo:rustc-link-lib=pulse-simple");
     println!("cargo:rustc-link-lib=pulse");
+    println!("cargo:rerun-if-changed=src/c_pulse_vol.c");
+    println!("cargo:rerun-if-changed=src/c_apm.cpp");
+
+    cc::Build::new()
+        .file("src/c_pulse_vol.c")
+        .warnings(false)
+        .compile("zcall_pulse_vol");
 
     let has_webrtc = std::process::Command::new("pkg-config")
         .args(&["--exists", "webrtc-audio-processing-1"])

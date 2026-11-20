@@ -83,6 +83,34 @@ extern "C" {
     fn pa_simple_get_latency(s: *mut c_void, error: *mut c_int) -> u64;
 
     fn pa_strerror(error: c_int) -> *const c_char;
+
+    fn zcall_pulse_get_source_volume(source_name: *const c_char, out_pct: *mut c_int) -> c_int;
+    fn zcall_pulse_set_source_volume(source_name: *const c_char, pct: c_int) -> c_int;
+}
+
+/// Query hardware/PulseAudio/PipeWire source volume (0..=150%) directly via libpulse.
+pub fn pulse_get_source_volume(source: Option<&str>) -> Option<u8> {
+    let cstr = source.and_then(|s| if s.is_empty() { None } else { CString::new(s).ok() });
+    let ptr = cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
+    let mut pct: c_int = 0;
+    let rc = unsafe { zcall_pulse_get_source_volume(ptr, &mut pct) };
+    if rc == 0 {
+        Some(pct.clamp(0, 150) as u8)
+    } else {
+        None
+    }
+}
+
+/// Set hardware/PulseAudio/PipeWire source volume (0..=100%) directly via libpulse.
+pub fn pulse_set_source_volume(source: Option<&str>, pct: u8) -> Result<(), String> {
+    let cstr = source.and_then(|s| if s.is_empty() { None } else { CString::new(s).ok() });
+    let ptr = cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
+    let rc = unsafe { zcall_pulse_set_source_volume(ptr, pct.min(100) as c_int) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err("libpulse source volume update failed".to_string())
+    }
 }
 
 pub struct PulseRecorder {
