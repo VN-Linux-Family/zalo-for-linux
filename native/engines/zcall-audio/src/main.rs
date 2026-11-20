@@ -333,16 +333,40 @@ impl ClipGuard {
             }
         }
 
-        if self.quiet_speech_frames >= 25
+        if self.quiet_speech_frames >= 10
             && self.last_clip.elapsed() >= std::time::Duration::from_secs(3)
-            && self.last_step.elapsed() >= std::time::Duration::from_millis(1500)
+            && self.last_step.elapsed() >= std::time::Duration::from_millis(1000)
         {
             let cur = self.current_vol.load(Ordering::Relaxed);
-            if cur < 85 {
-                let new_vol = cur.saturating_add(5).min(85);
+            if cur < 100 {
+                let step = if level_db < -36.0 { 8 } else { 5 };
+                let new_vol = cur.saturating_add(step).min(100);
                 self.apply_step(new_vol);
             }
             self.quiet_speech_frames = 0;
+        }
+    }
+}
+
+fn init_mic_volume_for_device(device: Option<&str>, agc_enabled: bool) -> u8 {
+    match get_mic_volume_opt(device) {
+        Some(initial_mic_vol) => {
+            if agc_enabled && initial_mic_vol > 80 {
+                if set_mic_volume(device, 70) {
+                    get_mic_volume_opt(device)
+                        .map(|v| v.min(100))
+                        .unwrap_or(70)
+                } else {
+                    eprintln!("[audio-io] warn: could not set initial mic volume to 70%");
+                    initial_mic_vol.min(100)
+                }
+            } else {
+                initial_mic_vol.min(100)
+            }
+        }
+        None => {
+            eprintln!("[audio-io] warn: could not query initial mic volume");
+            100
         }
     }
 }
@@ -412,26 +436,7 @@ fn main() {
             .map(|v| v.min(100))
             .unwrap_or(100)
     } else {
-        match get_mic_volume_opt(config.mic_device.as_deref()) {
-            Some(initial_mic_vol) => {
-                if agc_enabled && initial_mic_vol > 50 {
-                    if set_mic_volume(config.mic_device.as_deref(), 40) {
-                        get_mic_volume_opt(config.mic_device.as_deref())
-                            .map(|v| v.min(100))
-                            .unwrap_or(40)
-                    } else {
-                        eprintln!("[audio-io] warn: could not set initial mic volume to 40%");
-                        initial_mic_vol.min(100)
-                    }
-                } else {
-                    initial_mic_vol.min(100)
-                }
-            }
-            None => {
-                eprintln!("[audio-io] warn: could not query initial mic volume");
-                100
-            }
-        }
+        init_mic_volume_for_device(config.mic_device.as_deref(), agc_enabled)
     };
     let mic_volume = Arc::new(AtomicU8::new(mic_volume_val));
     eprintln!("[audio-io] mic volume: {}%", mic_volume_val);
@@ -865,24 +870,19 @@ fn main() {
                     } else {
                         Some(name.into_owned())
                     };
+                    manual_mic_vol.store(false, Ordering::Relaxed);
                     if let Ok(mut am) = active_mic.lock() {
                         *am = new_dev.clone();
                     }
                     if let Ok(mut req) = mic_switch.lock() {
                         *req = Some(new_dev.clone());
                     }
-                    let new_vol = match get_mic_volume_opt(new_dev.as_deref()) {
-                        Some(v) if agc_enabled && !manual_mic_vol.load(Ordering::Relaxed) && v > 50 => {
-                            if set_mic_volume(new_dev.as_deref(), 40) {
-                                get_mic_volume_opt(new_dev.as_deref())
-                                    .map(|x| x.min(100))
-                                    .unwrap_or(40)
-                            } else {
-                                v.min(100)
-                            }
-                        }
-                        Some(v) => v.min(100),
-                        None => 100,
+                    let new_vol = if config.test_tone {
+                        get_mic_volume_opt(new_dev.as_deref())
+                            .map(|v| v.min(100))
+                            .unwrap_or(100)
+                    } else {
+                        init_mic_volume_for_device(new_dev.as_deref(), agc_enabled)
                     };
                     mic_volume.store(new_vol, Ordering::Relaxed);
                     eprintln!("[audio-io] mic volume: {}%", new_vol);
@@ -998,19 +998,19 @@ mod tests {
         }
         assert_eq!(vol.load(Ordering::Relaxed), 40);
 
-        // Near-end quiet speech must step volume up by +5%
+        // Near-end quiet speech (~ -36.3 dBFS < -36 dBFS) must step volume up by +8%
         far_active.store(false, Ordering::Relaxed);
-        for _ in 0..30 {
+        for _ in 0..15 {
             guard.feed(&quiet_speech);
         }
-        assert_eq!(vol.load(Ordering::Relaxed), 45);
+        assert_eq!(vol.load(Ordering::Relaxed), 48);
 
         // Manual slider lock stops further auto-adjustments
         manual.store(true, Ordering::Relaxed);
         guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(2000);
-        for _ in 0..30 {
+        for _ in 0..15 {
             guard.feed(&quiet_speech);
         }
-        assert_eq!(vol.load(Ordering::Relaxed), 45);
+        assert_eq!(vol.load(Ordering::Relaxed), 48);
     }
 }
