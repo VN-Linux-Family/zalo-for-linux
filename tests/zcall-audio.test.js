@@ -198,3 +198,69 @@ test('ZrtcMediaBackend network handover, P2P fallback to relay, and SRTP ROC rec
   assert.equal(receivedFrames.length, 3, 'Audio packets after backward sequence reset must decrypt and play');
   assert.equal(media.counters.rxBad, 0, 'Must have zero SRTP auth failures after ROC fallback recovery');
 });
+
+test('ZrtcMediaBackend, EngineCore, ElectronCallUi, and call.js mic auto/manual mode wiring', () => {
+  const { EventEmitter } = require('events');
+  const vm = require('vm');
+  const { ZrtcMediaBackend } = require('../native/engines/zcall/native-engine/backends/zrtc-media');
+  const { EngineCore } = require('../native/engines/zcall/native-engine/engine-core');
+  const { ElectronCallUi } = require('../native/engines/zcall/native-engine/ui-client');
+
+  // 1. ZrtcMediaBackend sends [0x41, 1|0] on setMicAutoGain()
+  const writes = [];
+  const backend = new ZrtcMediaBackend({ audio: false });
+  backend.audio = { stdin: { write: (buf) => writes.push(Buffer.from(buf)) } };
+  backend.setMicAutoGain(true);
+  backend.setMicAutoGain(false);
+  assert.deepEqual(writes, [Buffer.from([0x41, 1]), Buffer.from([0x41, 0])]);
+
+  // 2. EngineCore + ElectronCallUi bidirectional micAutoGain / micVolume sync
+  const fakeSock = new EventEmitter();
+  const sentJson = [];
+  fakeSock.destroyed = false;
+  fakeSock.write = (chunk) => {
+    const str = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+    for (const line of str.split('\n')) {
+      if (line.startsWith('{')) sentJson.push(JSON.parse(line));
+    }
+  };
+  const ui = Object.create(ElectronCallUi.prototype);
+  ui.log = () => {};
+  ui.cb = { hangup() {}, mute() {}, speaker() {}, videoFrame() {}, camera() {}, device() {}, screen() {} };
+  ui.state = { phase: 'connected', micVolume: 0, micAutoGain: true };
+  ui.sock = fakeSock;
+  ui.fallback = null;
+
+  const media = new EventEmitter();
+  const autoCalls = [];
+  media.setMicAutoGain = (on) => autoCalls.push(on);
+  media.setMicVolume = () => {};
+  new EngineCore({ emit: () => {}, media, log: () => {}, ui });
+
+  // Backend emits mic mode manual -> UI state updates
+  media.emit('micAutoGain', false);
+  assert.equal(ui.state.micAutoGain, false);
+  assert.equal(sentJson.at(-1).micAutoGain, false);
+
+  // UI toggles switch ON -> forwarded to media.setMicAutoGain(true)
+  ui._onAction({ action: 'micAutoGain', on: true });
+  assert.deepEqual(autoCalls, [true]);
+  assert.equal(ui.state.micAutoGain, true);
+
+  // 3. Locale dictionary completeness & call.js UI contract
+  const locale = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'plugins/zcall/ui/locale.json'), 'utf8')).messages;
+  for (const key of ['micAutoGain', 'micModeAuto', 'micModeManual']) {
+    assert.deepEqual(Object.keys(locale['zcall.' + key] || {}).sort(), ['en', 'vi'], `Missing vi/en for zcall.${key}`);
+  }
+
+  const callSrc = fs.readFileSync(path.join(__dirname, '..', 'plugins/zcall/ui/call.js'), 'utf8');
+  assert.match(callSrc, /micAutoModeShown\(false\)/, 'Dragging mic slider must flip UI to manual');
+  assert.match(callSrc, /act\('micAutoGain',\s*\{\s*on\s*\}\)/, 'Toggling auto switch must send micAutoGain action');
+  assert.match(callSrc, /micAutoModeShown\(state\.micAutoGain\)/, 'State updates must refresh badge & switch');
+  const i18nSrc = fs.readFileSync(path.join(__dirname, '..', 'plugins/zcall/ui/i18n.js'), 'utf8');
+  const uiDir = path.join(__dirname, '..', 'plugins/zcall/ui');
+  const i18nWin = { location: { href: new URL('call.html', 'file://' + uiDir + '/').href } };
+  vm.runInNewContext(i18nSrc, { window: i18nWin, URL, require, document: { documentElement: { lang: '' } } });
+  assert.equal(i18nWin.zcallI18n.t('micModeAuto'), 'Tự động');
+  assert.equal(i18nWin.zcallI18n.t('micModeManual'), 'Thủ công');
+});
