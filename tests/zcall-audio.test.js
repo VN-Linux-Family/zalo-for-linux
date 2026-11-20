@@ -51,15 +51,22 @@ test('Native zcall-audio engine full IPC protocol and state transitions', async 
   assert.equal(typeof initialFrame.level, 'number', 'Audio level must be a number');
   assert.ok(initialFrame.level < 100, `Tone frame level (${initialFrame.level} dBov) must reflect audible signal (<100)`);
   assert.ok(initialFrame.len > 0, 'Opus payload must not be empty');
-  // Verify that zcall-audio announced initial mic volume and probed hardware at startup
+  // Verify that zcall-audio announced initial mic volume, auto mode, and probed hardware at startup
   assert.match(stderrLogs, /\[audio-io\] mic volume: \d+%/, 'Engine must announce initial mic volume at startup');
+  assert.match(stderrLogs, /\[audio-io\] mic mode: (auto|manual)/, 'Engine must announce initial mic mode at startup');
   assert.match(stderrLogs, /\[audio-io\] hw: audio backend=PulseAudio\/PipeWire/, 'Engine must probe audio backend');
 
 
-  // 2. Test Volume adjustment 'V' (percent: 75)
+  // 2. Test Volume adjustment 'V' (percent: 75) -> transitions to manual mode
   proc.stdin.write(Buffer.from([0x56, 75]));
   await new Promise((r) => setTimeout(r, 50));
   assert.ok(stderrLogs.includes('mic volume: 75%'), 'Stderr must acknowledge volume change to 75%');
+  assert.ok(stderrLogs.includes('mic mode: manual'), 'Manual volume change must switch mode to manual');
+
+  // 2b. Test Auto Gain toggle 'A' (on: 1) -> restores auto mode
+  proc.stdin.write(Buffer.from([0x41, 1]));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.match(stderrLogs.slice(stderrLogs.lastIndexOf('mic mode: manual')), /mic mode: auto/, 'CMD_IN_AUTO_GAIN=1 must restore auto mode');
 
   // 3. Test Mute command 'M' (mute: 1)
   proc.stdin.write(Buffer.from([0x4d, 1]));

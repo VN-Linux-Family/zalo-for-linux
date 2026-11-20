@@ -591,6 +591,12 @@ class ZrtcMediaBackend extends EventEmitter {
     this.audio.stdin.write(Buffer.from([0x56, pct]));
   }
 
+  // Toggle automatic mic gain control: true = auto (ClipGuard), false = manual.
+  setMicAutoGain(on) {
+    if (!this.audio) return;
+    this.audio.stdin.write(Buffer.from([0x41, on ? 1 : 0]));
+  }
+
   // Speaker off: keep decoding (timing, stats) but play silence.
   setSpeaker(off) {
     this.speakerOff = !!off;
@@ -715,6 +721,8 @@ class ZrtcMediaBackend extends EventEmitter {
         if (m && this.audio === audio) this.emit('audioFault', m[1]);
         const v = /^\[audio-io\] mic volume: (\d+)%/.exec(l);
         if (v && this.audio === audio) this.emit('micVolume', Number(v[1]));
+        const mode = /^\[audio-io\] mic mode: (auto|manual)\b/.exec(l);
+        if (mode && this.audio === audio) this.emit('micAutoGain', mode[1] === 'auto');
       }
     });
     audio.on('exit', (code, signal) => {

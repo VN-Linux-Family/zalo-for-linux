@@ -8,6 +8,7 @@
 //!   'M' (0x4d), u8 on (mute mic)
 //!   'S' (0x53), u8 off (speaker off)
 //!   'V' (0x56), u8 percent (mic volume 0..100)
+//!   'A' (0x41), u8 on (auto mic volume / AGC: 1 = auto, 0 = manual)
 //!   'D' (0x44), u8 kind ('i' for mic, 'o' for speaker), u16 len, device name
 
 pub const SAMPLE_RATE: u32 = 16000;
@@ -19,6 +20,7 @@ pub const CMD_IN_FRAME: u8 = 0x46; // 'F'
 pub const CMD_IN_MUTE: u8 = 0x4d; // 'M'
 pub const CMD_IN_SPEAKER: u8 = 0x53; // 'S'
 pub const CMD_IN_VOLUME: u8 = 0x56; // 'V'
+pub const CMD_IN_AUTO_GAIN: u8 = 0x41; // 'A'
 pub const CMD_IN_DEVICE: u8 = 0x44; // 'D'
 
 pub const CMD_OUT_LEVEL: u8 = 0x4c; // 'L'

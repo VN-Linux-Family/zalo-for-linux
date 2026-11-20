@@ -193,6 +193,7 @@ pub struct ClipGuard {
     current_vol: Arc<AtomicU8>,
     far_active: Option<Arc<AtomicBool>>,
     manual: Arc<AtomicBool>,
+    was_manual: bool,
     enabled: bool,
     apply_os: bool,
     clipped_frames_in_window: u8,
@@ -215,6 +216,7 @@ impl ClipGuard {
             current_vol,
             far_active: None,
             manual: Arc::new(AtomicBool::new(false)),
+            was_manual: false,
             enabled,
             apply_os: cfg!(not(test)),
             clipped_frames_in_window: 0,
@@ -292,7 +294,16 @@ impl ClipGuard {
             self.noise_db = sorted[self.level_count / 10];
         }
 
-        let agc_active = self.enabled && !self.manual.load(Ordering::Relaxed);
+        let is_manual = self.manual.load(Ordering::Relaxed);
+        if self.was_manual && !is_manual {
+            // Re-entering auto mode: clear stale counters so AGC reacts cleanly.
+            self.clipped_frames_in_window = 0;
+            self.window_frame_count = 0;
+            self.quiet_speech_frames = 0;
+            self.last_step = std::time::Instant::now() - std::time::Duration::from_secs(2);
+        }
+        self.was_manual = is_manual;
+        let agc_active = self.enabled && !is_manual;
 
         if self.window_frame_count >= 10 {
             if agc_active
@@ -440,6 +451,10 @@ fn main() {
     };
     let mic_volume = Arc::new(AtomicU8::new(mic_volume_val));
     eprintln!("[audio-io] mic volume: {}%", mic_volume_val);
+    eprintln!(
+        "[audio-io] mic mode: {}",
+        if agc_enabled { "auto" } else { "manual" }
+    );
     let running = Arc::new(AtomicBool::new(true));
 
     // Initialize Embedded WebRTC AudioProcessing Module (AEC, Noise Suppression, High Pass Filter)
@@ -828,7 +843,7 @@ fn main() {
                     break;
                 }
                 let pct = arg[0].min(100);
-                manual_mic_vol.store(true, Ordering::Relaxed);
+                let prev_manual = manual_mic_vol.swap(true, Ordering::Relaxed);
                 let dev = active_mic.lock().ok().and_then(|g| g.clone());
                 if !config.test_tone && set_mic_volume(dev.as_deref(), pct) {
                     let actual = get_mic_volume_opt(dev.as_deref())
@@ -843,6 +858,21 @@ fn main() {
                     mic_volume.store(pct, Ordering::Relaxed);
                     eprintln!("[audio-io] mic volume: {}%", pct);
                 }
+                if !prev_manual {
+                    eprintln!("[audio-io] mic mode: manual");
+                }
+            }
+            CMD_IN_AUTO_GAIN => {
+                let mut arg = [0u8; 1];
+                if stdin.read_exact(&mut arg).is_err() {
+                    break;
+                }
+                let want_auto = arg[0] != 0 && agc_enabled;
+                manual_mic_vol.store(!want_auto, Ordering::Relaxed);
+                eprintln!(
+                    "[audio-io] mic mode: {}",
+                    if want_auto { "auto" } else { "manual" }
+                );
             }
             CMD_IN_DEVICE => {
                 let mut hdr = [0u8; 3]; // u8 kind, u16 len
@@ -886,6 +916,10 @@ fn main() {
                     };
                     mic_volume.store(new_vol, Ordering::Relaxed);
                     eprintln!("[audio-io] mic volume: {}%", new_vol);
+                    eprintln!(
+                        "[audio-io] mic mode: {}",
+                        if agc_enabled { "auto" } else { "manual" }
+                    );
                 } else if hdr[0] == b'o' {
                     let new_dev = if name.is_empty() {
                         None

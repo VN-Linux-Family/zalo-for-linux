@@ -107,6 +107,9 @@ class EngineCore {
     if (typeof this.ui.onMicVolume === 'function') {
       this.ui.onMicVolume((pct) => { if (this.media.setMicVolume) this.media.setMicVolume(pct); });
     }
+    if (typeof this.ui.onMicAutoGain === 'function') {
+      this.ui.onMicAutoGain((on) => { if (this.media.setMicAutoGain) this.media.setMicAutoGain(on); });
+    }
     if (typeof this.ui.onSpeaker === 'function') {
       this.ui.onSpeaker((on) => {
         if (this.call) this.call.speakerOff = !!on;
@@ -128,6 +131,7 @@ class EngineCore {
       media.on('earlyAudio', (phase) => this._earlyAudio(phase));
       media.on('audioFault', (kind) => this._audioFault(kind));
       media.on('micVolume', (pct) => { if (typeof this.ui.micVolume === 'function') this.ui.micVolume(pct); });
+      media.on('micAutoGain', (on) => { if (typeof this.ui.micAutoGain === 'function') this.ui.micAutoGain(on); });
       media.on('micLevel', (level) => { if (typeof this.ui.micLevel === 'function') this.ui.micLevel(level); });
       media.on('roster', (uids) => this._groupRoster(uids));
       media.on('memberLeft', (uid) => this._groupMemberLeft(uid, 'server'));
