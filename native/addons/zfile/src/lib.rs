@@ -65,17 +65,39 @@ pub fn can_read_and_write(path: String) -> bool {
 
 fn is_real_fs(fstype: &str, dev: &str) -> bool {
     const PSEUDO: &[&str] = &[
-        "proc", "sysfs", "tmpfs", "devtmpfs", "devpts", "cgroup", "cgroup2", "overlay",
-        "squashfs", "mqueue", "debugfs", "tracefs", "securityfs", "pstore", "bpf",
-        "configfs", "hugetlbfs", "autofs", "fusectl", "binfmt_misc", "ramfs", "nsfs",
-        "rpc_pipefs", "fuse.gvfsd-fuse", "fuse.portal", "efivarfs",
+        "proc",
+        "sysfs",
+        "tmpfs",
+        "devtmpfs",
+        "devpts",
+        "cgroup",
+        "cgroup2",
+        "overlay",
+        "squashfs",
+        "mqueue",
+        "debugfs",
+        "tracefs",
+        "securityfs",
+        "pstore",
+        "bpf",
+        "configfs",
+        "hugetlbfs",
+        "autofs",
+        "fusectl",
+        "binfmt_misc",
+        "ramfs",
+        "nsfs",
+        "rpc_pipefs",
+        "fuse.gvfsd-fuse",
+        "fuse.portal",
+        "efivarfs",
     ];
     if PSEUDO.contains(&fstype) {
         return false;
     }
     const ALLOW: &[&str] = &[
-        "ext2", "ext3", "ext4", "btrfs", "xfs", "vfat", "exfat", "ntfs", "ntfs3",
-        "fuseblk", "f2fs", "zfs", "jfs", "reiserfs",
+        "ext2", "ext3", "ext4", "btrfs", "xfs", "vfat", "exfat", "ntfs", "ntfs3", "fuseblk",
+        "f2fs", "zfs", "jfs", "reiserfs",
     ];
     if dev.starts_with("/dev/") {
         return true;
@@ -253,8 +275,8 @@ fn copy_dir_rec(src: &Path, dst: &Path) -> Result<()> {
         fs::create_dir_all(dst)
             .map_err(|e| Error::from_reason(format!("copyFolder failed: {}", e)))?;
     }
-    let entries = fs::read_dir(src)
-        .map_err(|e| Error::from_reason(format!("copyFolder failed: {}", e)))?;
+    let entries =
+        fs::read_dir(src).map_err(|e| Error::from_reason(format!("copyFolder failed: {}", e)))?;
 
     for entry in entries.flatten() {
         if CANCEL_COPY.load(Ordering::SeqCst) {

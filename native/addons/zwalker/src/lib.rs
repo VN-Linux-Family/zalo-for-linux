@@ -101,7 +101,11 @@ pub fn stat_unmarked_files(
     tracking_folder_paths: Vec<String>,
     age_thresholds: Vec<i64>,
 ) -> StatResult {
-    let o = stat_unmarked_impl(&ignore_folder_paths, &tracking_folder_paths, &age_thresholds);
+    let o = stat_unmarked_impl(
+        &ignore_folder_paths,
+        &tracking_folder_paths,
+        &age_thresholds,
+    );
     StatResult {
         file_number: o.file_number,
         size: o.size as i64,

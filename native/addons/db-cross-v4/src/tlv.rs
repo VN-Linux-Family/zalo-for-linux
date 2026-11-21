@@ -38,7 +38,8 @@ impl TlvBoxLite {
             } else {
                 cursor.read_u32_be()
             }
-            .ok_or_else(|| "Failed to read TLV length".to_string())?) as usize;
+            .ok_or_else(|| "Failed to read TLV length".to_string())?)
+                as usize;
 
             if cursor.remaining() < len {
                 return Err("TLV length out of bounds".to_string());

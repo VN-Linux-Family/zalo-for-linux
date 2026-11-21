@@ -41,7 +41,9 @@ pub fn get_os_architecture() -> &'static str {
 }
 
 #[allow(non_snake_case)]
-pub fn getOsArchitecture() -> &'static str { get_os_architecture() }
+pub fn getOsArchitecture() -> &'static str {
+    get_os_architecture()
+}
 
 /// Returns the machine label (`x64` or `arm64`) reported by Linux.
 pub fn get_os_machine() -> Option<String> {
@@ -54,7 +56,9 @@ pub fn get_os_machine() -> Option<String> {
 }
 
 #[allow(non_snake_case)]
-pub fn getOsMachine() -> Option<String> { get_os_machine() }
+pub fn getOsMachine() -> Option<String> {
+    get_os_machine()
+}
 
 /// Collects one snapshot per unique, valid positive PID, preserving input order.
 /// Values that are fractional, non-positive, or at least 2^31 are ignored.
@@ -79,7 +83,9 @@ pub fn get_process_snapshot(pids: &[f64]) -> ProcessSnapshot {
 }
 
 #[allow(non_snake_case)]
-pub fn getProcessSnapshot(pids: &[f64]) -> ProcessSnapshot { get_process_snapshot(pids) }
+pub fn getProcessSnapshot(pids: &[f64]) -> ProcessSnapshot {
+    get_process_snapshot(pids)
+}
 
 fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
     let base = format!("/proc/{pid}");
@@ -92,30 +98,49 @@ fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
     })?;
     let ticks_per_second = unsafe { sysconf(2) };
     if ticks_per_second <= 0 {
-        return Err(ProcessError { pid, op: "getClockTicks".to_owned(), code: io::Error::last_os_error().raw_os_error().unwrap_or(-1) });
+        return Err(ProcessError {
+            pid,
+            op: "getClockTicks".to_owned(),
+            code: io::Error::last_os_error().raw_os_error().unwrap_or(-1),
+        });
     }
     let hz = ticks_per_second as u64;
     let kernel = ticks_to_100ns(fields.stime, hz);
     let user = ticks_to_100ns(fields.utime, hz);
     let boot_time = get_boot_time().map_err(|e| process_error(pid, "readBootTime", e))?;
-    let creation = boot_time.saturating_mul(10_000_000).saturating_add(ticks_to_100ns(fields.starttime, hz));
+    let creation = boot_time
+        .saturating_mul(10_000_000)
+        .saturating_add(ticks_to_100ns(fields.starttime, hz));
 
     let status = fs::read_to_string(format!("{base}/status"))
         .map_err(|e| process_error(pid, "readProcessStatus", e))?;
-    let rss_kib = status_value(&status, "VmRSS:").ok_or_else(|| ProcessError { pid, op: "readWorkingSet".to_owned(), code: -1 })?;
-    let working_set = rss_kib.checked_mul(1024).ok_or_else(|| ProcessError { pid, op: "readWorkingSet".to_owned(), code: -1 })?;
+    let rss_kib = status_value(&status, "VmRSS:").ok_or_else(|| ProcessError {
+        pid,
+        op: "readWorkingSet".to_owned(),
+        code: -1,
+    })?;
+    let working_set = rss_kib.checked_mul(1024).ok_or_else(|| ProcessError {
+        pid,
+        op: "readWorkingSet".to_owned(),
+        code: -1,
+    })?;
 
     let private_bytes = if let Ok(smaps) = fs::read_to_string(format!("{base}/smaps_rollup")) {
         let clean = status_value(&smaps, "Private_Clean:").unwrap_or(0);
         let dirty = status_value(&smaps, "Private_Dirty:").unwrap_or(0);
         let hugetlb = status_value(&smaps, "Private_Hugetlb:").unwrap_or(0);
-        clean.saturating_add(dirty).saturating_add(hugetlb).saturating_mul(1024)
+        clean
+            .saturating_add(dirty)
+            .saturating_add(hugetlb)
+            .saturating_mul(1024)
     } else {
         status_value(&status, "RssAnon:")
             .map(|anon_kib| anon_kib.saturating_mul(1024))
             .unwrap_or(working_set)
     };
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     static MONOTONIC_START: LazyLock<Instant> = LazyLock::new(Instant::now);
     let monotonic_ms = MONOTONIC_START.elapsed().as_millis() as u64;
 
@@ -132,7 +157,12 @@ fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
     })
 }
 
-struct StatFields { ppid: u32, utime: u64, stime: u64, starttime: u64 }
+struct StatFields {
+    ppid: u32,
+    utime: u64,
+    stime: u64,
+    starttime: u64,
+}
 
 fn parse_stat(stat: &str) -> Option<StatFields> {
     // The command name in field 2 may contain spaces and parentheses.
@@ -158,7 +188,11 @@ fn ticks_to_100ns(ticks: u64, hz: u64) -> u64 {
 }
 
 fn process_error(pid: u32, op: &str, error: io::Error) -> ProcessError {
-    ProcessError { pid, op: op.to_owned(), code: error.raw_os_error().unwrap_or(-1) }
+    ProcessError {
+        pid,
+        op: op.to_owned(),
+        code: error.raw_os_error().unwrap_or(-1),
+    }
 }
 static BOOT_TIME: LazyLock<io::Result<u64>> = LazyLock::new(|| {
     let content = fs::read_to_string("/proc/stat")?;
@@ -175,20 +209,36 @@ fn get_boot_time() -> io::Result<u64> {
     }
 }
 
-
 #[repr(C)]
-struct UtsName { sysname: [i8; 65], nodename: [i8; 65], release: [i8; 65], version: [i8; 65], machine: [i8; 65], domainname: [i8; 65] }
+struct UtsName {
+    sysname: [i8; 65],
+    nodename: [i8; 65],
+    release: [i8; 65],
+    version: [i8; 65],
+    machine: [i8; 65],
+    domainname: [i8; 65],
+}
 
 fn uname_machine() -> io::Result<String> {
     let mut name = std::mem::MaybeUninit::<UtsName>::zeroed();
     let rc = unsafe { uname(name.as_mut_ptr()) };
-    if rc != 0 { return Err(io::Error::last_os_error()); }
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
     let name = unsafe { name.assume_init() };
-    let bytes: Vec<u8> = name.machine.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+    let bytes: Vec<u8> = name
+        .machine
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-#[cfg(not(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[cfg(not(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+)))]
 compile_error!("os-sys-info supports only Linux x86_64 and Linux arm64");
 
 unsafe extern "C" {
@@ -253,35 +303,43 @@ impl napi::Task for NodeProcessSnapshotTask {
         Ok(get_process_snapshot(&self.pids))
     }
 
-    fn resolve(
-        &mut self,
-        _env: napi::Env,
-        snapshot: Self::Output,
-    ) -> napi::Result<Self::JsValue> {
+    fn resolve(&mut self, _env: napi::Env, snapshot: Self::Output) -> napi::Result<Self::JsValue> {
         Ok(NodeProcessSnapshot {
-            samples: snapshot.samples.into_iter().map(|sample| NodeProcessSample {
-                pid: sample.pid,
-                ppid: sample.ppid,
-                creation100ns: sample.creation100ns as f64,
-                kernel_time100ns: sample.kernel_time100ns as f64,
-                user_time100ns: sample.user_time100ns as f64,
-                working_set: sample.working_set as f64,
-                private_bytes: sample.private_bytes as f64,
-                wall_unix_ms: sample.wall_unix_ms as f64,
-                monotonic_ms: sample.monotonic_ms as f64,
-            }).collect(),
-            errors: snapshot.errors.into_iter().map(|error| NodeProcessError {
-                pid: error.pid,
-                op: error.op,
-                code: error.code,
-            }).collect(),
+            samples: snapshot
+                .samples
+                .into_iter()
+                .map(|sample| NodeProcessSample {
+                    pid: sample.pid,
+                    ppid: sample.ppid,
+                    creation100ns: sample.creation100ns as f64,
+                    kernel_time100ns: sample.kernel_time100ns as f64,
+                    user_time100ns: sample.user_time100ns as f64,
+                    working_set: sample.working_set as f64,
+                    private_bytes: sample.private_bytes as f64,
+                    wall_unix_ms: sample.wall_unix_ms as f64,
+                    monotonic_ms: sample.monotonic_ms as f64,
+                })
+                .collect(),
+            errors: snapshot
+                .errors
+                .into_iter()
+                .map(|error| NodeProcessError {
+                    pid: error.pid,
+                    op: error.op,
+                    code: error.code,
+                })
+                .collect(),
         })
     }
 }
 
 #[napi_derive::napi(js_name = "getProcessSnapshot")]
-pub fn node_get_process_snapshot(pids: Vec<f64>) -> napi::Result<napi::bindgen_prelude::AsyncTask<NodeProcessSnapshotTask>> {
-    Ok(napi::bindgen_prelude::AsyncTask::new(NodeProcessSnapshotTask { pids }))
+pub fn node_get_process_snapshot(
+    pids: Vec<f64>,
+) -> napi::Result<napi::bindgen_prelude::AsyncTask<NodeProcessSnapshotTask>> {
+    Ok(napi::bindgen_prelude::AsyncTask::new(
+        NodeProcessSnapshotTask { pids },
+    ))
 }
 
 #[cfg(test)]

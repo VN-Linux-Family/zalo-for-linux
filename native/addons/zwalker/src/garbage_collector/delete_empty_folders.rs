@@ -37,7 +37,9 @@ pub fn delete_empty_folders(root: &str) -> EmptyFolderOutcome {
     // Deepest first: more path separators == deeper. Removing a child before its parent
     // lets the parent be seen as empty on this same pass.
     dirs.sort_by(|a, b| {
-        b.matches(std::path::MAIN_SEPARATOR).count().cmp(&a.matches(std::path::MAIN_SEPARATOR).count())
+        b.matches(std::path::MAIN_SEPARATOR)
+            .count()
+            .cmp(&a.matches(std::path::MAIN_SEPARATOR).count())
     });
 
     let mut deleted_dirs = Vec::new();

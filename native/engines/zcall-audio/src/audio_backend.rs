@@ -73,12 +73,7 @@ extern "C" {
         error: *mut c_int,
     ) -> c_int;
 
-    fn pa_simple_read(
-        s: *mut c_void,
-        data: *mut c_void,
-        bytes: usize,
-        error: *mut c_int,
-    ) -> c_int;
+    fn pa_simple_read(s: *mut c_void, data: *mut c_void, bytes: usize, error: *mut c_int) -> c_int;
 
     fn pa_simple_get_latency(s: *mut c_void, error: *mut c_int) -> u64;
 
@@ -105,7 +100,13 @@ pub struct PulseSourceInfo {
 
 /// Query hardware/PulseAudio/PipeWire source volume, mute state, and resolved name via libpulse.
 pub fn pulse_get_source_info(source: Option<&str>) -> Option<PulseSourceInfo> {
-    let cstr = source.and_then(|s| if s.is_empty() { None } else { CString::new(s).ok() });
+    let cstr = source.and_then(|s| {
+        if s.is_empty() {
+            None
+        } else {
+            CString::new(s).ok()
+        }
+    });
     let ptr = cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
     let mut pct: c_int = 0;
     let mut muted: c_int = 0;
@@ -124,7 +125,11 @@ pub fn pulse_get_source_info(source: Option<&str>) -> Option<PulseSourceInfo> {
             let s = std::ffi::CStr::from_ptr(resolved_buf.as_ptr() as *const c_char)
                 .to_string_lossy()
                 .into_owned();
-            if s.is_empty() { None } else { Some(s) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         };
         Some(PulseSourceInfo {
             pct: pct.clamp(0, 150) as u8,
@@ -138,7 +143,13 @@ pub fn pulse_get_source_info(source: Option<&str>) -> Option<PulseSourceInfo> {
 
 /// Set hardware/PulseAudio/PipeWire source volume (0..=100%) directly via libpulse.
 pub fn pulse_set_source_volume(source: Option<&str>, pct: u8) -> Result<(), String> {
-    let cstr = source.and_then(|s| if s.is_empty() { None } else { CString::new(s).ok() });
+    let cstr = source.and_then(|s| {
+        if s.is_empty() {
+            None
+        } else {
+            CString::new(s).ok()
+        }
+    });
     let ptr = cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
     let rc = unsafe { zcall_pulse_set_source_volume(ptr, pct.min(100) as c_int) };
     if rc == 0 {
@@ -150,7 +161,13 @@ pub fn pulse_set_source_volume(source: Option<&str>, pct: u8) -> Result<(), Stri
 
 /// Set hardware/PulseAudio/PipeWire source mute state directly via libpulse.
 pub fn pulse_set_source_mute(source: Option<&str>, mute: bool) -> Result<(), String> {
-    let cstr = source.and_then(|s| if s.is_empty() { None } else { CString::new(s).ok() });
+    let cstr = source.and_then(|s| {
+        if s.is_empty() {
+            None
+        } else {
+            CString::new(s).ok()
+        }
+    });
     let ptr = cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
     let rc = unsafe { zcall_pulse_set_source_mute(ptr, if mute { 1 } else { 0 }) };
     if rc == 0 {
@@ -178,7 +195,13 @@ impl PulseRecorder {
     pub fn new(device: Option<&str>) -> Result<Self, String> {
         let name = CString::new("ZaloCall").unwrap();
         let stream = CString::new("microphone").unwrap();
-        let dev_cstr = device.and_then(|d| if d.is_empty() { None } else { CString::new(d).ok() });
+        let dev_cstr = device.and_then(|d| {
+            if d.is_empty() {
+                None
+            } else {
+                CString::new(d).ok()
+            }
+        });
         let dev_ptr = dev_cstr.as_ref().map(|d| d.as_ptr()).unwrap_or(ptr::null());
 
         let ss = PaSampleSpec {
@@ -213,7 +236,9 @@ impl PulseRecorder {
         if handle.is_null() {
             let msg = unsafe {
                 let err_str = pa_strerror(error);
-                std::ffi::CStr::from_ptr(err_str).to_string_lossy().into_owned()
+                std::ffi::CStr::from_ptr(err_str)
+                    .to_string_lossy()
+                    .into_owned()
             };
             return Err(format!("pa_simple_new (record) failed: {}", msg));
         }
@@ -224,12 +249,19 @@ impl PulseRecorder {
     pub fn read(&mut self, buf: &mut [u8]) -> Result<(), String> {
         let mut error = 0;
         let res = unsafe {
-            pa_simple_read(self.handle, buf.as_mut_ptr() as *mut c_void, buf.len(), &mut error)
+            pa_simple_read(
+                self.handle,
+                buf.as_mut_ptr() as *mut c_void,
+                buf.len(),
+                &mut error,
+            )
         };
         if res < 0 {
             let msg = unsafe {
                 let err_str = pa_strerror(error);
-                std::ffi::CStr::from_ptr(err_str).to_string_lossy().into_owned()
+                std::ffi::CStr::from_ptr(err_str)
+                    .to_string_lossy()
+                    .into_owned()
             };
             Err(format!("pa_simple_read failed: {}", msg))
         } else {
@@ -256,7 +288,13 @@ impl PulsePlayer {
     pub fn new(device: Option<&str>) -> Result<Self, String> {
         let name = CString::new("ZaloCall").unwrap();
         let stream = CString::new("playback").unwrap();
-        let dev_cstr = device.and_then(|d| if d.is_empty() { None } else { CString::new(d).ok() });
+        let dev_cstr = device.and_then(|d| {
+            if d.is_empty() {
+                None
+            } else {
+                CString::new(d).ok()
+            }
+        });
         let dev_ptr = dev_cstr.as_ref().map(|d| d.as_ptr()).unwrap_or(ptr::null());
 
         let ss = PaSampleSpec {
@@ -291,7 +329,9 @@ impl PulsePlayer {
         if handle.is_null() {
             let msg = unsafe {
                 let err_str = pa_strerror(error);
-                std::ffi::CStr::from_ptr(err_str).to_string_lossy().into_owned()
+                std::ffi::CStr::from_ptr(err_str)
+                    .to_string_lossy()
+                    .into_owned()
             };
             return Err(format!("pa_simple_new (playback) failed: {}", msg));
         }
@@ -302,12 +342,19 @@ impl PulsePlayer {
     pub fn write(&mut self, buf: &[u8]) -> Result<(), String> {
         let mut error = 0;
         let res = unsafe {
-            pa_simple_write(self.handle, buf.as_ptr() as *const c_void, buf.len(), &mut error)
+            pa_simple_write(
+                self.handle,
+                buf.as_ptr() as *const c_void,
+                buf.len(),
+                &mut error,
+            )
         };
         if res < 0 {
             let msg = unsafe {
                 let err_str = pa_strerror(error);
-                std::ffi::CStr::from_ptr(err_str).to_string_lossy().into_owned()
+                std::ffi::CStr::from_ptr(err_str)
+                    .to_string_lossy()
+                    .into_owned()
             };
             Err(format!("pa_simple_write failed: {}", msg))
         } else {

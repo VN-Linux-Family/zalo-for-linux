@@ -27,3 +27,5 @@ same-file = "=1.0.6"
 [build-dependencies]
 napi-build = "2"
 
+[lints]
+workspace = true

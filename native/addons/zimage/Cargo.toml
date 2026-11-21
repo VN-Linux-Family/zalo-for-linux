@@ -20,3 +20,5 @@ image = "0.25.10"
 [build-dependencies]
 napi-build = "2"
 
+[lints]
+workspace = true
