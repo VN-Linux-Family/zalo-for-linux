@@ -197,9 +197,7 @@ where
         let ct_slice = &ct_full[sp.off..sp.off + sp.len];
 
         // Try chunked reset IV first
-        let tmp = if let Some(dec) =
-            aes256cbc_decrypt_nopad_chunked_reset_iv(ct_slice, &aes_key)
-        {
+        let tmp = if let Some(dec) = aes256cbc_decrypt_nopad_chunked_reset_iv(ct_slice, &aes_key) {
             if has_zdb4_magic_at0(&dec) {
                 Some(dec)
             } else {
@@ -286,10 +284,7 @@ where
     let decompressed = match decompress_zdb4_payload(lzma_payload) {
         Ok(data) => data,
         Err(e) => {
-            return DecryptResult {
-                code: -3,
-                err: e,
-            };
+            return DecryptResult { code: -3, err: e };
         }
     };
 
@@ -324,7 +319,10 @@ where
             None => {
                 return DecryptResult {
                     code: -12,
-                    err: format!("Unsafe or invalid file name in container TOC: {}", file.name),
+                    err: format!(
+                        "Unsafe or invalid file name in container TOC: {}",
+                        file.name
+                    ),
                 };
             }
         };

@@ -1,7 +1,8 @@
+mod handshake;
 pub mod protocol;
 pub mod schema;
-mod handshake;
 mod unix_socket;
+use crate::{config::Config, engine::Engine, image};
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 use std::{
@@ -12,7 +13,6 @@ use std::{
         Arc, Mutex,
     },
 };
-use crate::{config::Config, engine::Engine, image};
 use unix_socket::SocketServer;
 pub type Output = Arc<Mutex<io::Stdout>>;
 pub fn reply(writer: &mut impl Write, _kind: u8, value: &Value) -> Result<()> {
@@ -30,7 +30,9 @@ pub fn event(output: &Output, kind: u8, pid: u32, detail: &str) -> Result<()> {
     let mut payload = vec![kind];
     payload.extend_from_slice(&pid.to_le_bytes());
     payload.extend_from_slice(&protocol::string_payload(detail));
-    let mut writer = output.lock().map_err(|_| anyhow::anyhow!("stdout mutex poisoned"))?;
+    let mut writer = output
+        .lock()
+        .map_err(|_| anyhow::anyhow!("stdout mutex poisoned"))?;
     protocol::write_reply(&mut *writer, protocol::PIPE_EVENT, &payload)?;
     Ok(())
 }
@@ -39,41 +41,48 @@ struct Stdin {
 }
 impl Read for Stdin {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if buffer.is_empty() { return Ok(0); }
+        if buffer.is_empty() {
+            return Ok(0);
+        }
         loop {
             if self.stop.load(Ordering::Relaxed) {
-                return Err(io::Error::new(io::ErrorKind::ConnectionAborted,
-                            "shutdown"));
+                return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "shutdown"));
             }
-            let mut fd =
-                libc::pollfd {
-                    fd: libc::STDIN_FILENO,
-                    events: libc::POLLIN,
-                    revents: 0,
-                };
+            let mut fd = libc::pollfd {
+                fd: libc::STDIN_FILENO,
+                events: libc::POLLIN,
+                revents: 0,
+            };
             let ready = unsafe { libc::poll(&mut fd, 1, 50) };
             if ready < 0 {
                 let e = io::Error::last_os_error();
-                if e.kind() == io::ErrorKind::Interrupted { continue; }
+                if e.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
                 return Err(e);
             }
-            if ready == 0 { continue; }
+            if ready == 0 {
+                continue;
+            }
             let n =
-                unsafe {
-                    libc::read(libc::STDIN_FILENO, buffer.as_mut_ptr().cast(),
-                        buffer.len())
-                };
+                unsafe { libc::read(libc::STDIN_FILENO, buffer.as_mut_ptr().cast(), buffer.len()) };
             if n < 0 {
                 let e = io::Error::last_os_error();
-                if e.kind() == io::ErrorKind::Interrupted { continue; }
+                if e.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
                 return Err(e);
             }
             return Ok(n as usize);
         }
     }
 }
-pub fn run(engine: Arc<Mutex<Engine>>, cfg: Config, stop: Arc<AtomicBool>,
-    socket_directory: &Path) -> Result<()> {
+pub fn run(
+    engine: Arc<Mutex<Engine>>,
+    cfg: Config,
+    stop: Arc<AtomicBool>,
+    socket_directory: &Path,
+) -> Result<()> {
     let mut stdin = Stdin { stop: stop.clone() };
     if !handshake::verify_control(&mut stdin, cfg.auth_token.as_bytes())? {
         bail!("handshake token mismatch");
@@ -92,23 +101,40 @@ pub fn run(engine: Arc<Mutex<Engine>>, cfg: Config, stop: Arc<AtomicBool>,
             protocol::PIPE_OPEN => {
                 let result = (|| -> Result<Vec<u8>> {
                     let token = protocol::pipe_token(&frame.payload)?.to_owned();
-                    if server.is_some() { bail!("pipe is already open"); }
-                    let socket = SocketServer::start(engine.clone(), cfg.clone(),
-                        stop.clone(), socket_directory, token, output.clone())?;
+                    if server.is_some() {
+                        bail!("pipe is already open");
+                    }
+                    let socket = SocketServer::start(
+                        engine.clone(),
+                        cfg.clone(),
+                        stop.clone(),
+                        socket_directory,
+                        token,
+                        output.clone(),
+                    )?;
                     let mut payload = protocol::string_payload(&socket.path.to_string_lossy());
                     payload.extend_from_slice(&std::process::id().to_le_bytes());
                     server = Some(socket);
                     Ok(payload)
                 })();
-                let mut writer = output.lock().map_err(|_| anyhow::anyhow!("stdout mutex poisoned"))?;
+                let mut writer = output
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("stdout mutex poisoned"))?;
                 match result {
-                    Ok(payload) => protocol::write_reply(&mut *writer, protocol::PIPE_READY, &payload)?,
-                    Err(error) => protocol::write_reply(&mut *writer, protocol::PIPE_ERR,
-                        &protocol::string_payload(&format!("{error:#}")))?,
+                    Ok(payload) => {
+                        protocol::write_reply(&mut *writer, protocol::PIPE_READY, &payload)?
+                    }
+                    Err(error) => protocol::write_reply(
+                        &mut *writer,
+                        protocol::PIPE_ERR,
+                        &protocol::string_payload(&format!("{error:#}")),
+                    )?,
                 }
             }
             protocol::PIPE_CLOSE => {
-                if !frame.payload.is_empty() { bail!("PIPE_CLOSE payload must be empty"); }
+                if !frame.payload.is_empty() {
+                    bail!("PIPE_CLOSE payload must be empty");
+                }
                 server = None;
                 event(&output, 4, 0, "")?;
             }
@@ -116,12 +142,17 @@ pub fn run(engine: Arc<Mutex<Engine>>, cfg: Config, stop: Arc<AtomicBool>,
                 let value = (|| -> Result<Value> {
                     let path = PathBuf::from(protocol::image_path(&frame.payload)?);
                     let (image, timings) = image::read_profiled(&path)?;
-                    let mut value = engine.lock().map_err(|_| anyhow::anyhow!("engine mutex poisoned"))?
+                    let mut value = engine
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("engine mutex poisoned"))?
                         .recognize(image)?;
                     input_profile(&mut value, cfg.benchmark_profile, timings);
                     Ok(value)
-                })().unwrap_or_else(|error| json!({"ok":false,"error":format!("{error:#}")}));
-                let mut writer = output.lock().map_err(|_| anyhow::anyhow!("stdout mutex poisoned"))?;
+                })()
+                .unwrap_or_else(|error| json!({"ok":false,"error":format!("{error:#}")}));
+                let mut writer = output
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("stdout mutex poisoned"))?;
                 reply(&mut *writer, protocol::OK, &value)?;
             }
             _ => bail!("unsupported command type {}", frame.kind),
@@ -131,9 +162,10 @@ pub fn run(engine: Arc<Mutex<Engine>>, cfg: Config, stop: Arc<AtomicBool>,
     Ok(())
 }
 
-pub(crate) fn input_profile(value: &mut Value, enabled: bool,
-    timings: image::InputTimings) {
-    if !enabled { return; }
+pub(crate) fn input_profile(value: &mut Value, enabled: bool, timings: image::InputTimings) {
+    if !enabled {
+        return;
+    }
     let stages = &mut value["result"]["meta"]["stages"];
     stages["readMicros"] = json!(timings.read_micros);
     stages["imageDecodeMicros"] = json!(timings.decode_micros);

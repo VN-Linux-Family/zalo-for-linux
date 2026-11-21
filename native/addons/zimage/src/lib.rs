@@ -17,15 +17,15 @@ use std::thread;
 /// image Buffer as its second argument on success.
 #[napi]
 pub fn thumbnail(options: BufferOptions, callback: JsFunction) -> Result<()> {
-  let mut task = BufferThumbnailTask::new(options)?;
-  let callback: ThreadsafeFunction<Buffer> =
-    callback.create_threadsafe_function(0, |context| Ok(vec![context.value]))?;
+    let mut task = BufferThumbnailTask::new(options)?;
+    let callback: ThreadsafeFunction<Buffer> =
+        callback.create_threadsafe_function(0, |context| Ok(vec![context.value]))?;
 
-  thread::spawn(move || {
-    let result = task.compute().map(Buffer::from);
-    let _ = callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
-  });
-  Ok(())
+    thread::spawn(move || {
+        let result = task.compute().map(Buffer::from);
+        let _ = callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+    });
+    Ok(())
 }
 
 /// Creates a thumbnail from a file and writes it to `outputPath`.
@@ -34,13 +34,13 @@ pub fn thumbnail(options: BufferOptions, callback: JsFunction) -> Result<()> {
 /// PNG, matching this replacement's documented JPEG/PNG output surface.
 #[napi(js_name = "thumbnailFs")]
 pub fn thumbnail_fs(options: FileOptions, callback: JsFunction) -> Result<()> {
-  let mut task = FileThumbnailTask::new(options)?;
-  let callback: ThreadsafeFunction<Buffer> =
-    callback.create_threadsafe_function(0, |context| Ok(vec![context.value]))?;
+    let mut task = FileThumbnailTask::new(options)?;
+    let callback: ThreadsafeFunction<Buffer> =
+        callback.create_threadsafe_function(0, |context| Ok(vec![context.value]))?;
 
-  thread::spawn(move || {
-    let result = task.compute().map(|()| Buffer::from(Vec::new()));
-    let _ = callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
-  });
-  Ok(())
+    thread::spawn(move || {
+        let result = task.compute().map(|()| Buffer::from(Vec::new()));
+        let _ = callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+    });
+    Ok(())
 }

@@ -16,3 +16,6 @@ libc = "0.2"
 
 [build-dependencies]
 napi-build = "2"
+
+[lints]
+workspace = true

@@ -23,3 +23,5 @@ ort-sys = { version = "=2.0.0-rc.13", default-features = false, features = ["dis
 libloading = "0.8"
 clipper2-rust = "1"
 
+[lints]
+workspace = true

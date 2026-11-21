@@ -10,8 +10,12 @@ impl fmt::Display for SegmentError {
 impl std::error::Error for SegmentError {}
 
 pub fn build(shape: &[i64], widths: &[u32]) -> Result<([i64; 2], Vec<i32>), SegmentError> {
-    if shape.len() != 4 || !(1..=16).contains(&shape[0]) || shape[1] != 3
-        || shape[2] != 48 || !(8..=4096).contains(&shape[3]) || shape[3] % 8 != 0
+    if shape.len() != 4
+        || !(1..=16).contains(&shape[0])
+        || shape[1] != 3
+        || shape[2] != 48
+        || !(8..=4096).contains(&shape[3])
+        || shape[3] % 8 != 0
         || widths.len() != shape[0] as usize
         || widths.iter().any(|&w| w == 0 || w > shape[3] as u32)
     {

@@ -401,7 +401,10 @@ impl ClipGuard {
 
     fn apply_step(&mut self, new_vol: u8) {
         if self.apply_os {
-            if !self.backend.set_source_volume(self.device.as_deref(), new_vol) {
+            if !self
+                .backend
+                .set_source_volume(self.device.as_deref(), new_vol)
+            {
                 eprintln!(
                     "[audio-io] warn: failed to auto-adjust mic volume to {}%",
                     new_vol
@@ -510,10 +513,7 @@ impl ClipGuard {
             return;
         }
 
-        if self.level_count >= 20
-            && level_db > -58.0
-            && level_db > self.noise_db + 9.0
-        {
+        if self.level_count >= 20 && level_db > -58.0 && level_db > self.noise_db + 9.0 {
             if level_db < -28.0 {
                 self.quiet_speech_frames = self.quiet_speech_frames.saturating_add(1);
             } else if level_db >= -24.0 {
@@ -624,7 +624,10 @@ fn main() {
         "[audio-io] Starting native zcall-audio engine (bitrate: {} bps, group: {})",
         config.bitrate_bps, config.is_group
     );
-    probe_hardware(config.speaker_device.as_deref(), config.mic_device.as_deref());
+    probe_hardware(
+        config.speaker_device.as_deref(),
+        config.mic_device.as_deref(),
+    );
 
     let is_muted = Arc::new(AtomicBool::new(false));
     let speaker_off = Arc::new(AtomicBool::new(false));
@@ -649,7 +652,12 @@ fn main() {
     let mic_volume_val = if config.test_tone {
         100
     } else {
-        init_mic_volume_for_device(vol_backend.as_ref(), config.mic_device.as_deref(), agc_enabled, false)
+        init_mic_volume_for_device(
+            vol_backend.as_ref(),
+            config.mic_device.as_deref(),
+            agc_enabled,
+            false,
+        )
     };
     let mic_volume = Arc::new(AtomicU8::new(mic_volume_val));
     eprintln!("[audio-io] mic volume: {}%", mic_volume_val);
@@ -663,28 +671,23 @@ fn main() {
     let aec_on = !config.no_aec;
     let ns_on = !config.no_ns;
     let hpf_on = !config.no_high_pass;
-    let apm_instance = match apm::Apm::new(
-        SAMPLE_RATE as i32,
-        CHANNELS as i32,
-        aec_on,
-        ns_on,
-        hpf_on,
-    ) {
-        Ok(a) => {
-            eprintln!(
-                "[audio-io] Embedded WebRTC AudioProcessing enabled (AEC: {}, NS: {}, HPF: {})",
-                aec_on, ns_on, hpf_on
-            );
-            Some(Arc::new(a))
-        }
-        Err(e) => {
-            eprintln!(
+    let apm_instance =
+        match apm::Apm::new(SAMPLE_RATE as i32, CHANNELS as i32, aec_on, ns_on, hpf_on) {
+            Ok(a) => {
+                eprintln!(
+                    "[audio-io] Embedded WebRTC AudioProcessing enabled (AEC: {}, NS: {}, HPF: {})",
+                    aec_on, ns_on, hpf_on
+                );
+                Some(Arc::new(a))
+            }
+            Err(e) => {
+                eprintln!(
                 "[audio-io] warning: WebRTC APM unavailable ({}); continuing without embedded AEC",
                 e
             );
-            None
-        }
-    };
+                None
+            }
+        };
 
     if let (Some(a), Some(d)) = (&apm_instance, config.min_delay_ms) {
         a.set_delay_ms(d);
@@ -804,7 +807,12 @@ fn main() {
                     cap_vol_backend.normalize_own_stream();
                     leveler = MicLeveler::new(Some(Arc::clone(&leveler_far_active)));
                     let should_cap = agc_enabled && !guard_manual.load(Ordering::Relaxed);
-                    let nv = init_mic_volume_for_device(cap_vol_backend.as_ref(), None, should_cap, false);
+                    let nv = init_mic_volume_for_device(
+                        cap_vol_backend.as_ref(),
+                        None,
+                        should_cap,
+                        false,
+                    );
                     guard.current_vol.store(nv, Ordering::Relaxed);
                     eprintln!("[audio-io] mic volume: {}%", nv);
                 }
@@ -917,7 +925,9 @@ fn main() {
                 }
             }
 
-            if player.is_none() && last_reopen_attempt.elapsed() >= std::time::Duration::from_millis(500) {
+            if player.is_none()
+                && last_reopen_attempt.elapsed() >= std::time::Duration::from_millis(500)
+            {
                 last_reopen_attempt = std::time::Instant::now();
                 if let Ok(p) = PulsePlayer::new(speaker_dev.as_deref()) {
                     eprintln!("[audio-io] info: speaker stream recovered");
@@ -989,7 +999,10 @@ fn main() {
                         }
                     }
                     Err(e) => {
-                        eprintln!("[audio-io] warn: speaker write failed ({}), re-opening stream", e);
+                        eprintln!(
+                            "[audio-io] warn: speaker write failed ({}), re-opening stream",
+                            e
+                        );
                         player = None;
                         last_reopen_attempt = std::time::Instant::now();
                     }
@@ -1205,7 +1218,9 @@ fn main() {
                             if agc_enabled { "auto" } else { "manual" }
                         );
                     } else {
-                        eprintln!("[audio-io] warn: keeping previous microphone after switch failure");
+                        eprintln!(
+                            "[audio-io] warn: keeping previous microphone after switch failure"
+                        );
                     }
                 } else if hdr[0] == b'o' {
                     let new_dev = if name.is_empty() {
@@ -1300,14 +1315,13 @@ mod tests {
         let vol = Arc::new(AtomicU8::new(40));
         let far_active = Arc::new(AtomicBool::new(false));
         let manual = Arc::new(AtomicBool::new(false));
-        let mut guard = ClipGuard::new(None, Arc::clone(&vol))
-            .with_controls(
-                Some(Arc::clone(&far_active)),
-                Arc::clone(&manual),
-                Arc::new(Mutex::new(
-                    std::time::Instant::now() - std::time::Duration::from_secs(10),
-                )),
-            );
+        let mut guard = ClipGuard::new(None, Arc::clone(&vol)).with_controls(
+            Some(Arc::clone(&far_active)),
+            Arc::clone(&manual),
+            Arc::new(Mutex::new(
+                std::time::Instant::now() - std::time::Duration::from_secs(10),
+            )),
+        );
         guard.enabled = true;
         guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(2000);
 
@@ -1393,13 +1407,22 @@ mod tests {
     #[test]
     fn test_init_mic_volume_caps_above_80_and_boosts_below_20() {
         let hot_backend = MockVolumeBackend::new(100, false, Some("alsa_input"));
-        assert_eq!(init_mic_volume_for_device(&hot_backend, None, true, false), 70);
+        assert_eq!(
+            init_mic_volume_for_device(&hot_backend, None, true, false),
+            70
+        );
         assert_eq!(hot_backend.state.lock().unwrap().pct, 70);
 
         let zero_backend = MockVolumeBackend::new(0, false, Some("alsa_input"));
         // Startup leaves 0% untouched unless boost_floor=true (explicit Auto re-enable)
-        assert_eq!(init_mic_volume_for_device(&zero_backend, None, true, false), 0);
-        assert_eq!(init_mic_volume_for_device(&zero_backend, None, true, true), 50);
+        assert_eq!(
+            init_mic_volume_for_device(&zero_backend, None, true, false),
+            0
+        );
+        assert_eq!(
+            init_mic_volume_for_device(&zero_backend, None, true, true),
+            50
+        );
         assert_eq!(zero_backend.state.lock().unwrap().pct, 50);
     }
 
@@ -1466,8 +1489,11 @@ mod tests {
         let vol = Arc::new(AtomicU8::new(80));
         let manual = Arc::new(AtomicBool::new(false));
         let past = std::time::Instant::now() - std::time::Duration::from_secs(10);
-        let mut guard = ClipGuard::new(None, Arc::clone(&vol))
-            .with_controls(None, Arc::clone(&manual), Arc::new(Mutex::new(past)));
+        let mut guard = ClipGuard::new(None, Arc::clone(&vol)).with_controls(
+            None,
+            Arc::clone(&manual),
+            Arc::new(Mutex::new(past)),
+        );
         guard.enabled = true;
         guard.last_step = past;
 

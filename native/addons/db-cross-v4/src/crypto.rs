@@ -18,7 +18,8 @@ pub fn aes256cbc_decrypt_nopad(ct: &[u8], key: &[u8; 32], iv: &[u8; 16]) -> Opti
         return None;
     }
     let mut pt = ct.to_vec();
-    let mut decryptor = Aes256CbcDec::new(GenericArray::from_slice(key), GenericArray::from_slice(iv));
+    let mut decryptor =
+        Aes256CbcDec::new(GenericArray::from_slice(key), GenericArray::from_slice(iv));
     for block in pt.chunks_exact_mut(16) {
         decryptor.decrypt_block_mut(GenericArray::from_mut_slice(block));
     }

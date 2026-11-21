@@ -25,19 +25,11 @@ extern "C" {
         max_data_bytes: i32,
     ) -> i32;
 
-    fn opus_encoder_ctl(
-        st: *mut std::ffi::c_void,
-        request: c_int,
-        val: c_int,
-    ) -> c_int;
+    fn opus_encoder_ctl(st: *mut std::ffi::c_void, request: c_int, val: c_int) -> c_int;
 
     fn opus_encoder_destroy(st: *mut std::ffi::c_void);
 
-    fn opus_decoder_create(
-        fs: i32,
-        channels: c_int,
-        error: *mut c_int,
-    ) -> *mut std::ffi::c_void;
+    fn opus_decoder_create(fs: i32, channels: c_int, error: *mut c_int) -> *mut std::ffi::c_void;
 
     fn opus_decode(
         st: *mut std::ffi::c_void,
@@ -60,9 +52,8 @@ unsafe impl Send for OpusEncoder {}
 impl OpusEncoder {
     pub fn new(sample_rate: i32, channels: i32, bitrate_bps: i32) -> Result<Self, String> {
         let mut err = 0;
-        let handle = unsafe {
-            opus_encoder_create(sample_rate, channels, OPUS_APPLICATION_VOIP, &mut err)
-        };
+        let handle =
+            unsafe { opus_encoder_create(sample_rate, channels, OPUS_APPLICATION_VOIP, &mut err) };
         if err != 0 || handle.is_null() {
             return Err(format!("opus_encoder_create failed: error code {}", err));
         }

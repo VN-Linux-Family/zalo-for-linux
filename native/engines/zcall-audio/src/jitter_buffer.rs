@@ -243,11 +243,15 @@ impl JitterBuffer {
         if let Some(payload) = self.queue.remove(&cur_idx) {
             self.consecutive_plc = 0;
             self.stats.played_frames += 1;
-            match self.decoder.decode(&payload, &mut self.decode_scratch, false) {
+            match self
+                .decoder
+                .decode(&payload, &mut self.decode_scratch, false)
+            {
                 Ok(n) if n >= out_pcm.len() => {
                     out_pcm.copy_from_slice(&self.decode_scratch[..out_pcm.len()]);
                     if n > out_pcm.len() {
-                        self.carry_pcm.extend(&self.decode_scratch[out_pcm.len()..n]);
+                        self.carry_pcm
+                            .extend(&self.decode_scratch[out_pcm.len()..n]);
                     }
                 }
                 _ => {

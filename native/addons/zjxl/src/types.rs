@@ -76,7 +76,13 @@ pub struct DecompressTask {
 
 impl Default for DecompressTask {
     fn default() -> Self {
-        Self { max_width: None, max_height: None, width: None, height: None, output_path: None }
+        Self {
+            max_width: None,
+            max_height: None,
+            width: None,
+            height: None,
+            output_path: None,
+        }
     }
 }
 

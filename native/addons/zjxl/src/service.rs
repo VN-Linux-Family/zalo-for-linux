@@ -5,8 +5,8 @@ use napi::bindgen_prelude::{Buffer, Result};
 use crate::{
     image::{decode, dimensions, encode_jpeg, encode_jxl, err, resize},
     types::{
-        BitmapToJxlOptions, DecompressMultiOptions, DecompressMultiOutput, DecompressTask,
-        JxlInfo, JxlToJpegOptions, LocalPathOptions, LocalPathOutput, ResizeJxlOptions,
+        BitmapToJxlOptions, DecompressMultiOptions, DecompressMultiOutput, DecompressTask, JxlInfo,
+        JxlToJpegOptions, LocalPathOptions, LocalPathOutput, ResizeJxlOptions,
     },
 };
 
@@ -28,13 +28,22 @@ pub fn bitmap_to_jxl(options: BitmapToJxlOptions) -> Result<Buffer> {
 }
 
 pub fn resize_jxl(options: ResizeJxlOptions) -> Result<Buffer> {
-    let pixels = resize(decode(&options.buffer)?, options.width as i32, options.height as i32)?;
+    let pixels = resize(
+        decode(&options.buffer)?,
+        options.width as i32,
+        options.height as i32,
+    )?;
     Ok(encode_jxl(&pixels.data, pixels.width, pixels.height)?.into())
 }
 
 pub fn to_jpeg_from_local_path(options: LocalPathOptions) -> Result<LocalPathOutput> {
-    let data = fs::read(&options.local_path).map_err(|e| err(format!("cannot read localPath: {e}")))?;
-    let pixels = resize(decode(&data)?, options.max_width.unwrap_or(-1), options.max_height.unwrap_or(-1))?;
+    let data =
+        fs::read(&options.local_path).map_err(|e| err(format!("cannot read localPath: {e}")))?;
+    let pixels = resize(
+        decode(&data)?,
+        options.max_width.unwrap_or(-1),
+        options.max_height.unwrap_or(-1),
+    )?;
     let quality = options.quality.unwrap_or(0.95);
     let jpeg = encode_jpeg(&pixels, quality)?;
     if let Some(path) = &options.output_path {
@@ -62,18 +71,26 @@ pub fn to_jpeg_from_local_path(options: LocalPathOptions) -> Result<LocalPathOut
 pub fn decompress_multi(options: DecompressMultiOptions) -> Result<Vec<DecompressMultiOutput>> {
     let source = match (options.buffer, options.local_path) {
         (Some(buffer), _) => buffer.to_vec(),
-        (None, Some(path)) => fs::read(path).map_err(|e| err(format!("cannot read localPath: {e}")))?,
+        (None, Some(path)) => {
+            fs::read(path).map_err(|e| err(format!("cannot read localPath: {e}")))?
+        }
         (None, None) => return Err(err("buffer or localPath is required")),
     };
     let quality = options.quality.unwrap_or(0.95);
-    let tasks = options.tasks.unwrap_or_else(|| vec![DecompressTask::default()]);
+    let tasks = options
+        .tasks
+        .unwrap_or_else(|| vec![DecompressTask::default()]);
     tasks
         .into_iter()
         .map(|task| decompress_task(&source, task, quality))
         .collect()
 }
 
-fn decompress_task(source: &[u8], task: DecompressTask, quality: f64) -> Result<DecompressMultiOutput> {
+fn decompress_task(
+    source: &[u8],
+    task: DecompressTask,
+    quality: f64,
+) -> Result<DecompressMultiOutput> {
     let pixels = resize(
         decode(source)?,
         task.width.or(task.max_width).unwrap_or(-1),
