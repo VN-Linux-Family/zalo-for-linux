@@ -72,6 +72,7 @@ class ElectronCallUi {
   onCamera(cb) { this.cb.camera = cb; }
   onDevice(cb) { this.cb.device = cb; }
   onMicVolume(cb) { this.cb.micVolume = cb; }
+  onMicAutoGain(cb) { this.cb.micAutoGain = cb; }
   onScreen(cb) { this.cb.screen = cb; }
   onNeedKey(cb) { this.cb.needKey = cb; }
   onTile(cb) { this.cb.tile = cb; }
@@ -115,6 +116,13 @@ class ElectronCallUi {
   micVolume(pct) {
     if (!this.state) return;
     this.state = { ...this.state, micVolume: pct };
+    this._send({ type: 'state', ...this.state });
+  }
+
+  // Automatic vs manual microphone volume mode for the window's toggle switch.
+  micAutoGain(on) {
+    if (!this.state) return;
+    this.state = { ...this.state, micAutoGain: !!on };
     this._send({ type: 'state', ...this.state });
   }
 
@@ -242,6 +250,10 @@ class ElectronCallUi {
         return;
       case 'micVolume':
         if (this.cb.micVolume && Number.isFinite(Number(m.value))) this.cb.micVolume(Number(m.value));
+        return;
+      case 'micAutoGain':
+        if (this.state) this.state = { ...this.state, micAutoGain: !!m.on };
+        if (this.cb.micAutoGain) this.cb.micAutoGain(!!m.on);
         return;
       case 'mute':
         if (this.state) this.state = { ...this.state, muted: !!m.on };

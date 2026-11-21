@@ -10,5 +10,7 @@ authors = ["ngxccc", "Việt Nam Linux Family"]
 name = "zcall-audio"
 path = "src/main.rs"
 
-[dependencies]
-libc = "0.2"
+
+
+[build-dependencies]
+cc = "1.0"

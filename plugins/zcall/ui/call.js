@@ -57,7 +57,7 @@ let held = null, heldAt = 0, repeatAt = 0;
 let pendingScreen = null;
 let dec = null, decCodec = null, ts = 0;
 let decErrLogged = false, shown = 0, shownSince = 0, shownTotal = 0, rxBytes = 0;
-let micSlider = null, micMeter = null, micPct = null, micDragging = false, micSentAt = 0, micTimer = null;
+let micSlider = null, micMeter = null, micPct = null, micAutoSwitch = null, micModeBadge = null, micDragging = false, micSentAt = 0, micTimer = null;
 
 const act = (action, extra) => ipcRenderer.send('zcall-ui-action', Object.assign({ action }, extra || {}));
 
@@ -449,6 +449,7 @@ ipcRenderer.on('zcall-ui-state', (_e, s) => {
     if (state.members) syncMembers(state.members);
   }
   if (Number.isFinite(state.micVolume)) micVolumeShown(state.micVolume);
+  if (typeof state.micAutoGain === 'boolean') micAutoModeShown(state.micAutoGain);
   if (state.phase === 'ended') {
     stopVideo(); stopLocal(); sharing = false;
     if (pendingScreen) { pendingScreen.stop(); pendingScreen = null; }
@@ -1083,38 +1084,71 @@ async function openMenu(kind, anchor) {
   document.querySelectorAll('.caret').forEach((b) => b.classList.toggle('open', b.dataset.kind === kind));
 }
 // Microphone level, set during the call (the engine moves the PulseAudio source;
-// its automatic step-down stops once this is used). The meter is the loudest
-// 100 ms of what we send: red from -9 dBFS, where a voice starts to clip.
+// dragging the slider switches to manual mode, and ticking the Auto switch
+// re-enables automatic gain adjustment). The meter is the loudest 100 ms of
+// what we send: red from -9 dBFS, where a voice starts to clip.
 const MIC_HOT_DBOV = 9;
-// micSlider, micMeter, micPct, etc. declared at top
+// micSlider, micMeter, micPct, micAutoSwitch, micModeBadge, etc. declared at top
 function micVolumeRow() {
+  const isAuto = state.micAutoGain !== false;
   const row = document.createElement('div'); row.className = 'vol';
   const title = document.createElement('div'); title.className = 'volTitle';
+  const right = document.createElement('span'); right.className = 'volRight';
+  micModeBadge = document.createElement('span');
   micPct = document.createElement('span'); micPct.className = 'volPct';
-  title.append(tr('micVolume'), micPct);
+  right.append(micModeBadge, micPct);
+  title.append(tr('micVolume'), right);
   micSlider = document.createElement('input');
   Object.assign(micSlider, { type: 'range', min: 0, max: 100, step: 1, value: state.micVolume });
   micSlider.setAttribute('aria-label', tr('micVolume'));
   micMeter = document.createElement('div'); micMeter.className = 'meter';
   const fill = document.createElement('div'); fill.className = 'fill'; micMeter.appendChild(fill);
+
+  const autoRow = document.createElement('label'); autoRow.className = 'volAuto';
+  const autoLabel = document.createElement('span'); autoLabel.textContent = tr('micAutoGain');
+  const toggleWrap = document.createElement('span'); toggleWrap.className = 'volToggle';
+  micAutoSwitch = document.createElement('input');
+  micAutoSwitch.type = 'checkbox';
+  micAutoSwitch.checked = isAuto;
+  micAutoSwitch.setAttribute('aria-label', tr('micAutoGain'));
+  const track = document.createElement('span'); track.className = 'volTrack';
+  toggleWrap.append(micAutoSwitch, track);
+  autoRow.append(autoLabel, toggleWrap);
+  micAutoSwitch.onchange = () => {
+    const on = !!micAutoSwitch.checked;
+    micAutoModeShown(on);
+    act('micAutoGain', { on });
+  };
+
   const hint = document.createElement('div'); hint.className = 'volHint';
   hint.textContent = tr('micHint');
   micPct.textContent = state.micVolume + '%';
+  micAutoModeShown(isAuto);
   let last = null; // one message per value: input and change both end here
   const send = () => { const v = Number(micSlider.value); if (v === last) return; last = v; micSentAt = Date.now(); act('micVolume', { value: v }); };
   micSlider.oninput = () => {
     micDragging = true; micPct.textContent = micSlider.value + '%';
+    micAutoModeShown(false);
     clearTimeout(micTimer);
     if (Date.now() - micSentAt >= 150) send(); else micTimer = setTimeout(send, 150);
   };
   micSlider.onchange = () => { clearTimeout(micTimer); send(); micDragging = false; };
   row.onclick = (e) => e.stopPropagation();
-  row.append(title, micSlider, micMeter, hint);
+  row.append(title, micSlider, micMeter, autoRow, hint);
   return row;
 }
 function micVolumeShown(pct) {
   if (!micSlider || !document.body.contains(micSlider) || micDragging) return;
   micSlider.value = pct; micPct.textContent = pct + '%';
+}
+function micAutoModeShown(on) {
+  const isAuto = !!on;
+  state.micAutoGain = isAuto;
+  if (micAutoSwitch && document.body.contains(micAutoSwitch)) micAutoSwitch.checked = isAuto;
+  if (micModeBadge && document.body.contains(micModeBadge)) {
+    micModeBadge.className = 'volBadge ' + (isAuto ? 'auto' : 'manual');
+    micModeBadge.textContent = tr(isAuto ? 'micModeAuto' : 'micModeManual');
+  }
 }
 ipcRenderer.on('zcall-ui-mic-level', (_e, level) => {
   if (!micMeter || !document.body.contains(micMeter)) return;

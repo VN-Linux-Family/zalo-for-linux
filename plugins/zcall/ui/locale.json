@@ -150,6 +150,18 @@
       "vi": "Âm lượng micro",
       "en": "Microphone volume"
     },
+    "zcall.micAutoGain": {
+      "vi": "Tự động chỉnh âm lượng",
+      "en": "Auto-adjust volume"
+    },
+    "zcall.micModeAuto": {
+      "vi": "Tự động",
+      "en": "Auto"
+    },
+    "zcall.micModeManual": {
+      "vi": "Thủ công",
+      "en": "Manual"
+    },
     "zcall.micHint": {
       "vi": "Nói to bình thường: vạch không nên chạm đỏ.",
       "en": "Speak at a normal level: the meter should not reach red."
