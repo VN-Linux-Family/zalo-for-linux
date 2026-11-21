@@ -80,7 +80,92 @@ extern "C" {
         error: *mut c_int,
     ) -> c_int;
 
+    fn pa_simple_get_latency(s: *mut c_void, error: *mut c_int) -> u64;
+
     fn pa_strerror(error: c_int) -> *const c_char;
+
+    fn zcall_pulse_get_source_info(
+        source_name: *const c_char,
+        out_pct: *mut c_int,
+        out_muted: *mut c_int,
+        out_resolved: *mut c_char,
+        resolved_cap: c_int,
+    ) -> c_int;
+    fn zcall_pulse_set_source_volume(source_name: *const c_char, pct: c_int) -> c_int;
+    fn zcall_pulse_set_source_mute(source_name: *const c_char, mute: c_int) -> c_int;
+    fn zcall_pulse_normalize_own_stream(target_pid: c_int) -> c_int;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PulseSourceInfo {
+    pub pct: u8,
+    pub muted: bool,
+    pub resolved_name: Option<String>,
+}
+
+/// Query hardware/PulseAudio/PipeWire source volume, mute state, and resolved name via libpulse.
+pub fn pulse_get_source_info(source: Option<&str>) -> Option<PulseSourceInfo> {
+    let cstr = source.and_then(|s| if s.is_empty() { None } else { CString::new(s).ok() });
+    let ptr = cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
+    let mut pct: c_int = 0;
+    let mut muted: c_int = 0;
+    let mut resolved_buf = [0u8; 512];
+    let rc = unsafe {
+        zcall_pulse_get_source_info(
+            ptr,
+            &mut pct,
+            &mut muted,
+            resolved_buf.as_mut_ptr() as *mut c_char,
+            resolved_buf.len() as c_int,
+        )
+    };
+    if rc == 0 {
+        let resolved_name = unsafe {
+            let s = std::ffi::CStr::from_ptr(resolved_buf.as_ptr() as *const c_char)
+                .to_string_lossy()
+                .into_owned();
+            if s.is_empty() { None } else { Some(s) }
+        };
+        Some(PulseSourceInfo {
+            pct: pct.clamp(0, 150) as u8,
+            muted: muted != 0,
+            resolved_name,
+        })
+    } else {
+        None
+    }
+}
+
+/// Set hardware/PulseAudio/PipeWire source volume (0..=100%) directly via libpulse.
+pub fn pulse_set_source_volume(source: Option<&str>, pct: u8) -> Result<(), String> {
+    let cstr = source.and_then(|s| if s.is_empty() { None } else { CString::new(s).ok() });
+    let ptr = cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
+    let rc = unsafe { zcall_pulse_set_source_volume(ptr, pct.min(100) as c_int) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err("libpulse source volume update failed".to_string())
+    }
+}
+
+/// Set hardware/PulseAudio/PipeWire source mute state directly via libpulse.
+pub fn pulse_set_source_mute(source: Option<&str>, mute: bool) -> Result<(), String> {
+    let cstr = source.and_then(|s| if s.is_empty() { None } else { CString::new(s).ok() });
+    let ptr = cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
+    let rc = unsafe { zcall_pulse_set_source_mute(ptr, if mute { 1 } else { 0 }) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err("libpulse source mute update failed".to_string())
+    }
+}
+
+/// Ensure this process's own PulseAudio/PipeWire capture stream (source-output) is unmuted and at 100%.
+pub fn pulse_normalize_own_stream() {
+    let pid = std::process::id() as c_int;
+    unsafe {
+        let _ = zcall_pulse_normalize_own_stream(pid);
+    }
 }
 
 pub struct PulseRecorder {
@@ -182,9 +267,9 @@ impl PulsePlayer {
 
         let attr = PaBufferAttr {
             maxlength: u32::MAX,
-            tlength: 2560, // ~80 ms buffer latency (gives extra headroom against underruns on laptops)
+            tlength: 1920, // 60 ms buffer latency (matches audio-io.py LATENCY_MS = 60 for tight A/V sync)
             prebuf: u32::MAX,
-            minreq: 640,  // 20 ms frame
+            minreq: u32::MAX,
             fragsize: u32::MAX,
         };
 
@@ -227,6 +312,19 @@ impl PulsePlayer {
             Err(format!("pa_simple_write failed: {}", msg))
         } else {
             Ok(())
+        }
+    }
+
+    pub fn latency_ms(&self) -> Option<u64> {
+        if self.handle.is_null() {
+            return None;
+        }
+        let mut error = 0;
+        let us = unsafe { pa_simple_get_latency(self.handle, &mut error) };
+        if error != 0 {
+            None
+        } else {
+            Some(us / 1000)
         }
     }
 }

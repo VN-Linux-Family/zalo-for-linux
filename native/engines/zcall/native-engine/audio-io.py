@@ -1468,6 +1468,16 @@ def main():
                     threading.Thread(target=guard.set_percent, args=(pct[0],), daemon=True).start()
                 else:
                     log("mic volume: no microphone level to set")
+            elif kind == b"A":
+                on = read_exact(inp, 1)
+                if on is None:
+                    break
+                guard = getattr(mic, "guard", None) if mic else None
+                want_auto = bool(on[0])
+                if guard:
+                    guard.manual = not want_auto
+                    want_auto = guard.on and not guard.manual
+                log(f"mic mode: {'auto' if want_auto else 'manual'}")
             elif kind == b"M":
                 on = read_exact(inp, 1)
                 if on is None:
