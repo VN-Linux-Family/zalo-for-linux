@@ -6,6 +6,24 @@ const { pathToFileURL } = require('url');
 
 const RENDERER_SCRIPT = fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8');
 
+// Clean up redundant/clutter UI inside ZaDark's popup across all build targets
+// (theme radio duplicates Zalo's native theme setting synced by renderer.js).
+const UI_CLEANUP_CSS = `
+#zadark-popup .zadark-popup__header__menu-list,
+#zadark-popup .zadark-popup__footer,
+#zadark-popup #js-radio-input-theme {
+  display: none !important;
+}
+#zadark-popup #js-radio-input-theme + .font-settings--border-default {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  border-top: 0 !important;
+}
+#zadark-popup .zadark-popup__main {
+  padding-bottom: 1px !important;
+}
+`.trim();
+
 const ASSETS_BY_TYPE = {
   index: {
     css: [
@@ -179,6 +197,7 @@ async function injectZaDarkAssets(win, zadarkDir, type = 'index', options = {}) 
   if (win.isDestroyed()) return false;
   try {
     await win.webContents.executeJavaScript(`
+      window.__zflZadarkInjected = true;
       document.documentElement.setAttribute('data-zadark-os', 'Windows');
       document.documentElement.setAttribute('data-zadark-version', ${JSON.stringify(zadarkVersion)});
       document.body.classList.add('zadark', 'zadark-pc', 'zadark-linux');
@@ -224,9 +243,13 @@ function register({ app, ipcMain, appDir }) {
   }
 
   app.on('browser-window-created', (_event, win) => {
+    const inFlight = new WeakSet();
+
     win.webContents.on('dom-ready', async () => {
+      if (win.isDestroyed() || inFlight.has(win.webContents)) return;
+      inFlight.add(win.webContents);
+
       try {
-        if (win.isDestroyed()) return;
         const windowType = resolveWindowType(win.webContents.getURL());
         if (!windowType) return;
 
@@ -234,6 +257,8 @@ function register({ app, ipcMain, appDir }) {
         let hasZaDark = await win.webContents.executeJavaScript(`
           Boolean(
             window.__zadark ||
+            window.__zflZadarkInjected ||
+            document.getElementById('div_Main_TabZaDark') ||
             document.querySelector('link[href*="zadark"]') ||
             document.querySelector('script[src*="zadark"]') ||
             document.documentElement.hasAttribute('data-zadark-theme') ||
@@ -250,12 +275,17 @@ function register({ app, ipcMain, appDir }) {
 
         if (!hasZaDark || win.isDestroyed()) return;
 
-        // Inject the two-way theme synchronization script (main window only)
+        // Apply popup UI cleanup and two-way theme synchronization (main window only)
         if (windowType === 'index') {
+          if (typeof win.webContents.insertCSS === 'function') {
+            await win.webContents.insertCSS(UI_CLEANUP_CSS);
+          }
           await win.webContents.executeJavaScript(RENDERER_SCRIPT, true);
         }
       } catch (err) {
         console.error('[ZaDark Plugin] Error injecting renderer sync:', err);
+      } finally {
+        inFlight.delete(win.webContents);
       }
     });
   });
@@ -271,5 +301,6 @@ module.exports = {
   rewriteZaDarkCssPaths,
   rewriteZaDarkScriptPaths,
   injectZaDarkAssets,
-  ASSETS_BY_TYPE
+  ASSETS_BY_TYPE,
+  UI_CLEANUP_CSS
 };

@@ -316,10 +316,14 @@ describe('ZaDark Flatpak Extension & Dynamic Injection', () => {
       // Simulate window creation and dom-ready
       let domReadyHandler;
       const executed = [];
+      const insertedCss = [];
       const mockWin = {
         isDestroyed: () => false,
         webContents: {
           getURL: () => 'file:///app/pc-dist/index.html',
+          insertCSS: async (css) => {
+            insertedCss.push(css);
+          },
           executeJavaScript: async (code) => {
             executed.push(code);
             // Simulate that ZaDark is already loaded (static AppImage bake)
@@ -339,8 +343,65 @@ describe('ZaDark Flatpak Extension & Dynamic Injection', () => {
 
       await domReadyHandler();
 
-      // Should have checked hasZaDark and injected RENDERER_SCRIPT
+      // Should have checked hasZaDark (including #div_Main_TabZaDark guard), injected UI cleanup CSS, and RENDERER_SCRIPT
+      assert.ok(executed[0].includes('div_Main_TabZaDark'), 'hasZaDark check must guard against duplicate sidebar tab');
+      assert.ok(insertedCss.includes(zadarkPlugin.UI_CLEANUP_CSS), 'UI cleanup CSS must be injected for index windows');
+      assert.ok(zadarkPlugin.UI_CLEANUP_CSS.includes('#js-radio-input-theme'), 'UI cleanup CSS must hide redundant theme selector');
+      assert.ok(zadarkPlugin.UI_CLEANUP_CSS.includes('.zadark-popup__header__menu-list'), 'UI cleanup CSS must hide header menu links');
+      assert.ok(zadarkPlugin.UI_CLEANUP_CSS.includes('.zadark-popup__footer'), 'UI cleanup CSS must hide popup footer');
       assert.ok(executed.length >= 2);
+    });
+
+    it('prevents concurrent dom-ready events from double-injecting ZaDark assets', async () => {
+      const zadarkDir = path.join(tmpDir, 'ext-zadark');
+      fs.mkdirSync(path.join(zadarkDir, 'js'), { recursive: true });
+      fs.writeFileSync(path.join(zadarkDir, 'js', 'zadark.min.js'), 'window.__testZadarkRuns = (window.__testZadarkRuns || 0) + 1;', 'utf8');
+
+      process.env.ZADARK_DIR = zadarkDir;
+      delete process.env.FLATPAK_ID;
+
+      const mockApp = createMockApp();
+      zadarkPlugin.register({ app: mockApp, ipcMain: {}, appDir: tmpDir });
+
+      let domReadyHandler;
+      let zadarkExecCount = 0;
+      let hasInjected = false;
+      const mockWin = {
+        isDestroyed: () => false,
+        webContents: {
+          getURL: () => 'file:///app/pc-dist/index.html',
+          on: (event, handler) => {
+            if (event === 'dom-ready') domReadyHandler = handler;
+          },
+          insertCSS: async () => {},
+          executeJavaScript: async (code) => {
+            if (code.includes('window.__zflZadarkInjected = true')) {
+              hasInjected = true;
+              return true;
+            }
+            if (code.includes('window.__zadark ||')) {
+              // Simulate slow async check so two concurrent dom-ready calls overlap
+              await new Promise(resolve => setTimeout(resolve, 15));
+              return hasInjected;
+            }
+            if (code.includes('__testZadarkRuns')) {
+              zadarkExecCount++;
+            }
+            return true;
+          }
+        }
+      };
+
+      const windowHandler = mockApp._listeners.get('browser-window-created')[0];
+      windowHandler({}, mockWin);
+
+      // Fire two overlapping dom-ready events
+      await Promise.all([domReadyHandler(), domReadyHandler()]);
+      assert.strictEqual(zadarkExecCount, 1, 'zadark.min.js must execute only once when dom-ready races');
+
+      // Subsequent dom-ready after injection completes must see hasZaDark === true
+      await domReadyHandler();
+      assert.strictEqual(zadarkExecCount, 1, 'zadark.min.js must not re-execute once injected');
     });
   });
 });
