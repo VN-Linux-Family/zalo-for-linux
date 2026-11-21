@@ -177,9 +177,11 @@ describe('ZaDark Flatpak Extension & Dynamic Injection', () => {
       assert.ok(!fontCss.includes('../fonts/'), 'Relative ../fonts/ must be replaced with file:// URL');
       assert.ok(fontCss.includes('/fonts/'), 'Font URL must point to fonts directory');
 
-      // Verify body class injection
+      // Verify body class and metadata attributes injection
       const classScript = mockWin._executedScripts.find(s => s.includes('zadark-linux'));
       assert.ok(classScript, 'Should execute script setting body class names');
+      assert.ok(classScript.includes('data-zadark-os'), 'Should set data-zadark-os attribute');
+      assert.ok(classScript.includes('data-zadark-version'), 'Should set data-zadark-version attribute');
 
       // Verify JS execution order
       const jqIndex = mockWin._executedScripts.findIndex(s => s.includes('window.jQuery'));
@@ -187,6 +189,81 @@ describe('ZaDark Flatpak Extension & Dynamic Injection', () => {
       assert.ok(jqIndex !== -1, 'jQuery script must be executed');
       assert.ok(zadarkIndex !== -1, 'zadark script must be executed');
       assert.ok(jqIndex < zadarkIndex, 'jQuery must execute before main zadark script');
+    });
+
+    it('rewrites relative zadark/ URLs, require() paths, and resolves popup-viewer & znotification assets', async () => {
+      const mockWin = createMockWindow();
+      const baseUrl = require('url').pathToFileURL(tmpDir).href;
+
+      fs.mkdirSync(path.join(tmpDir, 'css'), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, 'js'), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, 'libs'), { recursive: true });
+
+      fs.writeFileSync(
+        path.join(tmpDir, 'js', 'zadark.min.js'),
+        [
+          'if("function"==typeof require){window.$=require("zadark/libs/zadark-jquery.min.js")}',
+          'const s=["zadark/css/zadark-fonts.min.css","zadark/css/zadark.min.css"];',
+          'document.documentElement.setAttribute("data-zadark-emoji-url","zadark/images/zalo-emoji-md.png");',
+          'const h=\'<img src="zadark/images/zadark-lockup.svg">\';',
+          'localStorage.setItem("zadark/reaction-recent-emojis","[]");'
+        ].join('\n'),
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, 'js', 'zadark-popup-viewer.min.js'),
+        'document.documentElement.setAttribute("data-zadark-theme","dark");',
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, 'css', 'zadark-znotification.min.css'),
+        'html[data-zadark-theme=dark]{color:#e5e5e5;}',
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, 'js', 'zadark-znotification.min.js'),
+        'window.WebFont=require("zadark/libs/zadark-webfont.min.js");',
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, 'package.json'),
+        JSON.stringify({ version: '26.1.0' }),
+        'utf8'
+      );
+
+      await zadarkPlugin.injectZaDarkAssets(mockWin, tmpDir, 'index');
+
+      const metaScript = mockWin._executedScripts.find(s => s.includes('data-zadark-version'));
+      assert.ok(metaScript.includes('"26.1.0"'), 'Version must be resolved from package.json');
+
+      const zadarkJs = mockWin._executedScripts.find(s => s.includes('data-zadark-emoji-url'));
+      assert.ok(zadarkJs, 'zadark.min.js must be executed');
+      assert.ok(zadarkJs.includes(`require("${tmpDir.replace(/\\/g, '/')}/libs/zadark-jquery.min.js")`), 'require() path must be rewritten to filesystem path');
+      assert.ok(zadarkJs.includes(`"${baseUrl}/css/zadark-fonts.min.css"`), 'CSS href must be rewritten to file:// URL');
+      assert.ok(zadarkJs.includes(`"${baseUrl}/images/zalo-emoji-md.png"`), 'Emoji sprite URL must be rewritten to file:// URL');
+      assert.ok(zadarkJs.includes(`"${baseUrl}/images/zadark-lockup.svg"`), 'Logo img src must be rewritten to file:// URL');
+      assert.ok(zadarkJs.includes('"zadark/reaction-recent-emojis"'), 'Non-asset localStorage key must remain untouched');
+
+      const popupWin = createMockWindow();
+      await zadarkPlugin.injectZaDarkAssets(popupWin, tmpDir, 'popup');
+      assert.strictEqual(popupWin._insertedCss.length, 0, 'popup-viewer should not inject index CSS');
+      assert.ok(
+        popupWin._executedScripts.some(s => s.includes('data-zadark-theme')),
+        'popup-viewer must execute js/zadark-popup-viewer.min.js'
+      );
+
+      const notifWin = createMockWindow();
+      await zadarkPlugin.injectZaDarkAssets(notifWin, tmpDir, 'znotification');
+      assert.strictEqual(notifWin._insertedCss.length, 1, 'znotification should inject zadark-znotification.min.css');
+      assert.ok(
+        notifWin._executedScripts.some(s => s.includes(`require("${tmpDir.replace(/\\/g, '/')}/libs/zadark-webfont.min.js")`)),
+        'znotification script require() must be rewritten'
+      );
+
+      assert.strictEqual(zadarkPlugin.resolveWindowType('file:///app/pc-dist/index.html'), 'index');
+      assert.strictEqual(zadarkPlugin.resolveWindowType('file:///app/pc-dist/popup-viewer.html'), 'popup');
+      assert.strictEqual(zadarkPlugin.resolveWindowType('file:///app/pc-dist/znotification.html'), 'znotification');
+      assert.strictEqual(zadarkPlugin.resolveWindowType('file:///app/pc-dist/other.html'), null);
     });
   });
 
