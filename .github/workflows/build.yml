@@ -5,10 +5,8 @@ on:
     - cron: '0 0 * * *'
   push:
     branches:
-      - main
   pull_request:
     branches:
-      - main
   workflow_dispatch:
     inputs:
       zalo_version:
@@ -201,7 +199,7 @@ jobs:
   release:
     name: Release the AppImages
     needs: build
-    if: github.event_name != 'pull_request' && needs.build.outputs.build == 'true'
+    if: github.event_name != 'pull_request' && needs.build.outputs.build == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
