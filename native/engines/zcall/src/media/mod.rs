@@ -4971,9 +4971,15 @@ mod video_transport_tests {
         let mut received = Vec::new();
         let mut events = Vec::new();
         for _ in 0..100 {
-            received = backend.drain_video_frames();
-            events = backend.drain_group_events();
-            if !received.is_empty() && events.contains(&GroupMediaEvent::MemberVideo(222)) {
+            received.extend(backend.drain_video_frames());
+            events.extend(backend.drain_group_events());
+            let received_222 = received.iter().any(|frame| frame.src == Some(222));
+            let received_223 = received.iter().any(|frame| frame.src == Some(223));
+            if received_222
+                && received_223
+                && events.contains(&GroupMediaEvent::MemberVideo(222))
+                && events.contains(&GroupMediaEvent::MemberVideo(223))
+            {
                 break;
             }
             thread::sleep(Duration::from_millis(10));
