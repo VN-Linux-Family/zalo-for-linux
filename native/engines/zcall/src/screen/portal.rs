@@ -72,7 +72,7 @@ fn report_capture_failure(
     }
 }
 
-fn c_buffer_string(buffer: &[i8]) -> String {
+fn c_buffer_string(buffer: &[c_char]) -> String {
     let bytes = buffer
         .iter()
         .take_while(|&&byte| byte != 0)
@@ -85,7 +85,7 @@ struct PipeWireCaptureGuard(NonNull<PipeWireCapture>);
 
 impl PipeWireCaptureGuard {
     fn new(remote_fd: OwnedFd, node_id: u32, userdata: &CaptureData) -> Result<Self, String> {
-        let mut error = [0i8; 512];
+        let mut error = [0 as c_char; 512];
         let capture = zcall_pw_capture_new(
             remote_fd.into_raw_fd(),
             node_id,
@@ -134,7 +134,7 @@ impl PipeWireCaptureGuard {
     }
 
     fn error(&self) -> Option<String> {
-        let mut error = [0i8; 512];
+        let mut error = [0 as c_char; 512];
         zcall_pw_capture_error(self.0.as_ptr(), error.as_mut_ptr(), error.len());
         let error = c_buffer_string(&error);
         (!error.is_empty()).then_some(error)

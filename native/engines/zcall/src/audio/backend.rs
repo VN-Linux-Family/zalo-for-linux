@@ -109,7 +109,7 @@ pub fn pulse_get_source_info(source: Option<&str>) -> Option<PulseSourceInfo> {
     let source_ptr = source_c.as_ref().map_or(ptr::null(), |s| s.as_ptr());
     let mut pct = 0;
     let mut muted = 0;
-    let mut resolved = [0i8; 512];
+    let mut resolved = [0 as c_char; 512];
     let rc = unsafe {
         zcall_pulse_get_source_info(
             source_ptr,
