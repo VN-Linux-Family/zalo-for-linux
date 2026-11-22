@@ -23,3 +23,4 @@ zlib1g-dev
 zsync
 libopus-dev
 libpulse-dev
+libpipewire-0.3-dev
