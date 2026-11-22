@@ -23,10 +23,11 @@ void zcall_pw_capture_free(zcall_pw_capture *capture);
 #include <pipewire/stream.h>
 #include <spa/buffer/buffer.h>
 #include <spa/pod/builder.h>
+#include <spa/pod/parser.h>
 #include <spa/pod/vararg.h>
 #include <spa/param/format.h>
-#include <spa/param/video/format-utils.h>
-#include <spa/param/video/raw-utils.h>
+#include <spa/param/video/raw.h>
+#include <spa/utils/type.h>
 #include <spa/utils/defs.h>
 
 static pthread_once_t pipewire_init_once = PTHREAD_ONCE_INIT;
@@ -139,15 +140,20 @@ static void on_state_changed(void *userdata, enum pw_stream_state old_state,
 static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *param)
 {
     struct zcall_pw_capture *capture = userdata;
-    struct spa_video_info info = {0};
+    uint32_t media_type = SPA_MEDIA_TYPE_unknown;
+    uint32_t media_subtype = SPA_MEDIA_SUBTYPE_unknown;
+    struct spa_rectangle size = {0};
     if (id != SPA_PARAM_Format || param == NULL)
         return;
-    if (spa_format_video_parse(param, &info) < 0 ||
-        info.media_type != SPA_MEDIA_TYPE_video ||
-        info.media_subtype != SPA_MEDIA_SUBTYPE_raw)
+    if (spa_pod_parse_object(param, SPA_TYPE_OBJECT_Format, NULL,
+                             SPA_FORMAT_mediaType, SPA_POD_Id(&media_type),
+                             SPA_FORMAT_mediaSubtype, SPA_POD_Id(&media_subtype),
+                             SPA_FORMAT_VIDEO_size, SPA_POD_OPT_Rectangle(&size)) < 0 ||
+        media_type != SPA_MEDIA_TYPE_video ||
+        media_subtype != SPA_MEDIA_SUBTYPE_raw)
         return;
-    capture->width = info.info.raw.size.width;
-    capture->height = info.info.raw.size.height;
+    capture->width = size.width;
+    capture->height = size.height;
 }
 
 static void on_process(void *userdata)
