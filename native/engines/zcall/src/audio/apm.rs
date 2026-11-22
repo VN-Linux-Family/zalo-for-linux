@@ -5,9 +5,6 @@
 use std::os::raw::{c_int, c_void};
 use std::sync::atomic::{AtomicI32, Ordering};
 
-#[link(name = "webrtc-audio-processing-1")]
-unsafe extern "C" {}
-
 #[link(name = "zcall_apm", kind = "static")]
 unsafe extern "C" {
     fn zcall_apm_create(

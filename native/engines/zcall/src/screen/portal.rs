@@ -1,16 +1,17 @@
 //! Wayland XDG ScreenCast portal and PipeWire capture implementation.
 use super::{
-    encode_frames, portal_error_message, EncodedScreenFrame, RawScreenFrame, ScreenEncodeConfig,
+    encode_frames, portal_error_message, EncodedScreenFrame, LatestFrameQueue, RawScreenFrame,
+    ScreenEncodeConfig,
 };
 use futures_util::future::{select, Either};
-use pipewire as pw;
-use pw::properties::properties;
-use pw::spa::pod::Pod;
+use std::ffi::{c_char, c_int, c_void};
 use std::future::Future;
-use std::os::fd::OwnedFd;
+use std::os::fd::{IntoRawFd, OwnedFd};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::SyncSender;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -20,11 +21,236 @@ use ashpd::desktop::screencast::{
 use ashpd::desktop::PersistMode;
 
 struct CaptureData {
-    format: pw::spa::param::video::VideoInfoRaw,
-    raw_tx: SyncSender<RawScreenFrame>,
-    status: SyncSender<Result<(), String>>,
+    raw_frames: Arc<LatestFrameQueue>,
     raw_frame_seen: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
+}
+
+#[repr(C)]
+struct PipeWireCapture {
+    _private: [u8; 0],
+}
+
+type PipeWireFrameFn = Option<extern "C" fn(*mut c_void, *const u8, u32, u32, u32, i32, u32, u32)>;
+
+// These safe declarations are private to this module. `PipeWireCaptureGuard`
+// passes only live handles and bounded output buffers; the callback userdata
+// remains allocated until the capture is freed.
+unsafe extern "C" {
+    safe fn zcall_pw_capture_new(
+        remote_fd: c_int,
+        node_id: u32,
+        on_frame: PipeWireFrameFn,
+        userdata: *mut c_void,
+        error: *mut c_char,
+        error_size: usize,
+    ) -> *mut PipeWireCapture;
+    safe fn zcall_pw_capture_node_seen(capture: *const PipeWireCapture) -> c_int;
+    safe fn zcall_pw_capture_connect(capture: *mut PipeWireCapture) -> c_int;
+    safe fn zcall_pw_capture_streaming(capture: *const PipeWireCapture) -> c_int;
+    safe fn zcall_pw_capture_iterate(capture: *mut PipeWireCapture, timeout_ms: c_int) -> c_int;
+    safe fn zcall_pw_capture_error(
+        capture: *const PipeWireCapture,
+        output: *mut c_char,
+        output_size: usize,
+    );
+    safe fn zcall_pw_capture_disconnect(capture: *mut PipeWireCapture);
+    safe fn zcall_pw_capture_free(capture: *mut PipeWireCapture);
+}
+
+fn report_capture_failure(
+    result: &Result<(), String>,
+    stop: &AtomicBool,
+    status: &SyncSender<Result<(), String>>,
+) {
+    if let Err(error) = result {
+        if !stop.load(Ordering::Acquire) {
+            crate::zcall_log!(
+                "[zcall-screen] PipeWire capture failed; reporting terminal status: {error}"
+            );
+            let _ = status.try_send(Err(error.clone()));
+        }
+    }
+}
+
+fn c_buffer_string(buffer: &[i8]) -> String {
+    let bytes = buffer
+        .iter()
+        .take_while(|&&byte| byte != 0)
+        .map(|&byte| byte as u8)
+        .collect::<Vec<_>>();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+struct PipeWireCaptureGuard(NonNull<PipeWireCapture>);
+
+impl PipeWireCaptureGuard {
+    fn new(remote_fd: OwnedFd, node_id: u32, userdata: &CaptureData) -> Result<Self, String> {
+        let mut error = [0i8; 512];
+        let capture = zcall_pw_capture_new(
+            remote_fd.into_raw_fd(),
+            node_id,
+            Some(pipewire_frame),
+            (userdata as *const CaptureData).cast_mut().cast(),
+            error.as_mut_ptr(),
+            error.len(),
+        );
+        let Some(capture) = NonNull::new(capture) else {
+            let detail = c_buffer_string(&error);
+            return Err(if detail.is_empty() {
+                "Create PipeWire capture failed".into()
+            } else {
+                detail
+            });
+        };
+        Ok(Self(capture))
+    }
+
+    fn node_seen(&self) -> bool {
+        zcall_pw_capture_node_seen(self.0.as_ptr()) != 0
+    }
+
+    fn streaming(&self) -> bool {
+        zcall_pw_capture_streaming(self.0.as_ptr()) != 0
+    }
+
+    fn connect(&mut self) -> Result<(), String> {
+        let result = zcall_pw_capture_connect(self.0.as_ptr());
+        if result < 0 {
+            Err(self
+                .error()
+                .unwrap_or_else(|| format!("Connect PipeWire capture failed: {result}")))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn iterate(&mut self, timeout_ms: c_int) -> Result<(), String> {
+        let result = zcall_pw_capture_iterate(self.0.as_ptr(), timeout_ms);
+        if result < 0 {
+            Err(format!("PipeWire main loop iteration failed: {result}"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn error(&self) -> Option<String> {
+        let mut error = [0i8; 512];
+        zcall_pw_capture_error(self.0.as_ptr(), error.as_mut_ptr(), error.len());
+        let error = c_buffer_string(&error);
+        (!error.is_empty()).then_some(error)
+    }
+
+    fn disconnect(&mut self) {
+        zcall_pw_capture_disconnect(self.0.as_ptr());
+    }
+}
+
+impl Drop for PipeWireCaptureGuard {
+    fn drop(&mut self) {
+        zcall_pw_capture_free(self.0.as_ptr());
+    }
+}
+
+struct PipeWireFrame {
+    userdata: *mut c_void,
+    mapped: *const u8,
+    max_size: u32,
+    offset: u32,
+    size: u32,
+    stride: i32,
+    width: u32,
+    height: u32,
+}
+
+extern "C" fn pipewire_frame(
+    userdata: *mut c_void,
+    mapped: *const u8,
+    max_size: u32,
+    offset: u32,
+    size: u32,
+    stride: i32,
+    width: u32,
+    height: u32,
+) {
+    let frame = PipeWireFrame {
+        userdata,
+        mapped,
+        max_size,
+        offset,
+        size,
+        stride,
+        width,
+        height,
+    };
+    let _ = catch_unwind(AssertUnwindSafe(|| pipewire_frame_inner(frame)));
+}
+
+fn pipewire_frame_inner(frame: PipeWireFrame) {
+    let PipeWireFrame {
+        userdata,
+        mapped,
+        max_size,
+        offset,
+        size,
+        stride,
+        width,
+        height,
+    } = frame;
+    let width = width as usize;
+    let height = height as usize;
+    let offset = offset as usize;
+    let size = size as usize;
+    let stride = stride.unsigned_abs() as usize;
+    if userdata.is_null()
+        || mapped.is_null()
+        || width < 2
+        || height < 2
+        || width > 4096
+        || height > 4096
+        || stride < width * 4
+    {
+        return;
+    }
+    let Some(end) = offset.checked_add(size) else {
+        return;
+    };
+    if end > max_size as usize || size < stride.saturating_mul(height) {
+        return;
+    }
+
+    // SAFETY: PipeWire invokes this callback synchronously with a valid mapped
+    // buffer for `max_size` bytes; userdata points to the live CaptureData box.
+    // The mapped buffer is copied before this callback returns.
+    let (data, mapped) = unsafe {
+        (
+            &*userdata.cast::<CaptureData>(),
+            std::slice::from_raw_parts(mapped, max_size as usize),
+        )
+    };
+    let source = &mapped[offset..end];
+    let mut compact = Vec::with_capacity(width * height * 4);
+    for row in 0..height {
+        let begin = row * stride;
+        let Some(line_end) = begin.checked_add(width * 4) else {
+            return;
+        };
+        if line_end > source.len() {
+            return;
+        }
+        compact.extend_from_slice(&source[begin..line_end]);
+    }
+
+    let frame = RawScreenFrame {
+        bgra: compact,
+        width: width as u32,
+        height: height as u32,
+    };
+    data.raw_frames.push(frame);
+    if !data.raw_frame_seen.swap(true, Ordering::AcqRel) {
+        crate::zcall_log!(
+            "[zcall-screen] first raw PipeWire frame received: {width}x{height}, stride={stride}, bytes={size}"
+        );
+    }
 }
 
 fn portal_source_types(source: Option<&str>) -> Result<SourceType, String> {
@@ -193,72 +419,31 @@ fn pipewire_capture(
     status: SyncSender<Result<(), String>>,
     settings: ScreenEncodeConfig,
 ) -> Result<(), String> {
-    pw::init();
-    let mainloop = pw::main_loop::MainLoopRc::new(None)
-        .map_err(|error| format!("Create PipeWire main loop: {error}"))?;
-    let context = pw::context::ContextRc::new(&mainloop, None)
-        .map_err(|error| format!("Create PipeWire context: {error}"))?;
-    let core = context
-        .connect_fd_rc(remote_fd, None)
-        .map_err(|error| format!("Connect to portal PipeWire stream: {error}"))?;
+    let raw_frames = Arc::new(LatestFrameQueue::default());
+    let encoder_frames = raw_frames.clone();
+    let raw_frame_seen = Arc::new(AtomicBool::new(false));
+    let encoded_frame_seen = Arc::new(AtomicBool::new(false));
+    // Keep userdata alive until the C capture is fully destroyed. Rust drops
+    // locals in reverse order, so the guard below is intentionally declared after it.
+    let user_data = Box::new(CaptureData {
+        raw_frames,
+        raw_frame_seen: raw_frame_seen.clone(),
+    });
+    let mut capture = PipeWireCaptureGuard::new(remote_fd, node_id, &user_data)?;
     crate::zcall_log!(
         "[zcall-screen] connected to portal PipeWire remote; expected node_id={node_id}"
     );
 
     // Start() may return before the portal has published its PipeWire node on
-    // this remote connection. Connecting immediately races registry export and
-    // KDE reports `target not found` (core error -2). Wait for the exact node.
-    let core_error = Arc::new(Mutex::new(None::<String>));
-    let core_error_callback = core_error.clone();
-    let _core_listener = core
-        .add_listener_local()
-        .error(move |id, seq, result, message| {
-            let detail = format!(
-                "PipeWire core error: object={id}, seq={seq}, result={result}, message={message}"
-            );
-            crate::zcall_log!("[zcall-screen] {detail}");
-            if let Ok(mut error) = core_error_callback.lock() {
-                if error.is_none() {
-                    *error = Some(detail);
-                }
-            }
-        })
-        .register();
-
-    let registry = core
-        .get_registry_rc()
-        .map_err(|error| format!("Get portal PipeWire registry: {error}"))?;
-    let target_node_seen = Arc::new(AtomicBool::new(false));
-    let target_node_callback = target_node_seen.clone();
-    let target_node_removed = target_node_seen.clone();
-    let _registry_listener = registry
-        .add_listener_local()
-        .global(move |global| {
-            if global.id == node_id {
-                crate::zcall_log!(
-                    "[zcall-screen] portal PipeWire target appeared in registry: node_id={node_id}"
-                );
-                target_node_callback.store(true, Ordering::Release);
-            }
-        })
-        .global_remove(move |id| {
-            if id == node_id {
-                crate::zcall_log!(
-                    "[zcall-screen] portal PipeWire target disappeared: node_id={node_id}"
-                );
-                target_node_removed.store(false, Ordering::Release);
-            }
-        })
-        .register();
-
+    // this remote connection. Wait for the exact node before connecting.
     let node_deadline = std::time::Instant::now() + Duration::from_secs(8);
-    while !target_node_seen.load(Ordering::Acquire) {
+    while !capture.node_seen() {
         if stop.load(Ordering::Acquire) {
             return Err(
                 "Screen sharing cancelled while waiting for the portal PipeWire node".into(),
             );
         }
-        if let Some(error) = core_error.lock().ok().and_then(|mut error| error.take()) {
+        if let Some(error) = capture.error() {
             return Err(error);
         }
         if std::time::Instant::now() >= node_deadline {
@@ -266,217 +451,20 @@ fn pipewire_capture(
                 "Timed out waiting for portal PipeWire node {node_id} to appear in the remote registry"
             ));
         }
-        mainloop
-            .loop_()
-            .iterate(pw::loop_::Timeout::Finite(Duration::from_millis(50)));
+        capture.iterate(50)?;
     }
-
-    let stream = pw::stream::StreamBox::new(
-        &core,
-        "Zalo Call Screen Share",
-        properties! {
-            *pw::keys::MEDIA_TYPE => "Video",
-            *pw::keys::MEDIA_CATEGORY => "Capture",
-            *pw::keys::MEDIA_ROLE => "Screen",
-        },
-    )
-    .map_err(|error| format!("Create PipeWire screen stream: {error}"))?;
-
-    let stream_ready = Arc::new(AtomicBool::new(false));
-    let ready_callback = stream_ready.clone();
-    let connected_callback = stream_ready.clone();
-    let raw_frame_seen = Arc::new(AtomicBool::new(false));
-    let raw_frame_seen_callback = raw_frame_seen.clone();
-    let (raw_tx, raw_rx) = sync_channel(2);
-    let encoded_frame_seen = Arc::new(AtomicBool::new(false));
-    let user_data = CaptureData {
-        format: pw::spa::param::video::VideoInfoRaw::new(),
-        raw_tx,
-        status: status.clone(),
-        raw_frame_seen: raw_frame_seen_callback,
-        stop: stop.clone(),
-    };
-    let _listener = stream
-        .add_local_listener_with_user_data(user_data)
-        .state_changed(move |_, data, old, new| {
-            crate::zcall_log!("[zcall-screen] PipeWire stream state: {old:?} -> {new:?}");
-            match new {
-            pw::stream::StreamState::Streaming => {
-                ready_callback.store(true, Ordering::Release);
-            }
-            pw::stream::StreamState::Error(error) => {
-                let message = format!("PipeWire screen stream failed: {error}");
-                crate::zcall_log!("[zcall-screen] {message}");
-                let _ = data.status.try_send(Err(message));
-                data.stop.store(true, Ordering::Release);
-            }
-            pw::stream::StreamState::Unconnected
-                if connected_callback.load(Ordering::Acquire)
-                    && !data.stop.load(Ordering::Acquire) =>
-            {
-                let message = "PipeWire screen stream disconnected".to_string();
-                crate::zcall_log!("[zcall-screen] {message}");
-                let _ = data.status.try_send(Err(message));
-                data.stop.store(true, Ordering::Release);
-            }
-            _ => {}
-            }
-        })
-        .param_changed(|_, data, id, param| {
-            let Some(param) = param else {
-                return;
-            };
-            if id != pw::spa::param::ParamType::Format.as_raw() {
-                return;
-            }
-            let Ok((media_type, media_subtype)) = pw::spa::param::format_utils::parse_format(param)
-            else {
-                return;
-            };
-            if media_type != pw::spa::param::format::MediaType::Video
-                || media_subtype != pw::spa::param::format::MediaSubtype::Raw
-            {
-                return;
-            }
-            let _ = data.format.parse(param);
-        })
-        .process(|stream, data| {
-            let Some(mut buffer) = stream.dequeue_buffer() else {
-                return;
-            };
-            let datas = buffer.datas_mut();
-            let Some(frame_data) = datas.first_mut() else {
-                return;
-            };
-            let chunk = frame_data.chunk();
-            let offset = chunk.offset() as usize;
-            let size = chunk.size() as usize;
-            let width = data.format.size().width as usize;
-            let height = data.format.size().height as usize;
-            let stride = chunk.stride().unsigned_abs() as usize;
-            if width < 2 || height < 2 || width > 4096 || height > 4096 || stride < width * 4 {
-                return;
-            }
-            let Some(mapped) = frame_data.data() else {
-                return;
-            };
-            let Some(end) = offset.checked_add(size) else {
-                return;
-            };
-            if end > mapped.len() || size < stride.saturating_mul(height) {
-                return;
-            }
-
-            // Compact potentially padded PipeWire BGRx rows before passing the
-            // pixels to OpenH264. BGRx uses the same channel layout as BGRA.
-            let source = &mapped[offset..end];
-            let mut compact = Vec::with_capacity(width * height * 4);
-            for row in 0..height {
-                let begin = row * stride;
-                let Some(line_end) = begin.checked_add(width * 4) else {
-                    return;
-                };
-                if line_end > source.len() {
-                    return;
-                }
-                compact.extend_from_slice(&source[begin..line_end]);
-            }
-
-            let frame = RawScreenFrame {
-                bgra: compact,
-                width: width as u32,
-                height: height as u32,
-            };
-            match data.raw_tx.try_send(frame) {
-                Ok(()) => {
-                    if !data.raw_frame_seen.swap(true, Ordering::AcqRel) {
-                        crate::zcall_log!(
-                            "[zcall-screen] first raw PipeWire frame received: {width}x{height}, stride={stride}, bytes={size}"
-                        );
-                    }
-                },
-                Err(TrySendError::Full(_)) => {}
-                Err(TrySendError::Disconnected(_)) => {
-                    data.stop.store(true, Ordering::Release);
-                }
-            }
-        })
-        .register()
-        .map_err(|error| format!("Register PipeWire stream listener: {error}"))?;
-
-    let obj = pw::spa::pod::object!(
-        pw::spa::utils::SpaTypes::ObjectParamFormat,
-        pw::spa::param::ParamType::EnumFormat,
-        pw::spa::pod::property!(
-            pw::spa::param::format::FormatProperties::MediaType,
-            Id,
-            pw::spa::param::format::MediaType::Video
-        ),
-        pw::spa::pod::property!(
-            pw::spa::param::format::FormatProperties::MediaSubtype,
-            Id,
-            pw::spa::param::format::MediaSubtype::Raw
-        ),
-        pw::spa::pod::property!(
-            pw::spa::param::format::FormatProperties::VideoFormat,
-            Choice,
-            Enum,
-            Id,
-            pw::spa::param::video::VideoFormat::BGRA,
-            pw::spa::param::video::VideoFormat::BGRA,
-            pw::spa::param::video::VideoFormat::BGRx,
-        ),
-        pw::spa::pod::property!(
-            pw::spa::param::format::FormatProperties::VideoSize,
-            Choice,
-            Range,
-            Rectangle,
-            pw::spa::utils::Rectangle {
-                width: 1920,
-                height: 1080
-            },
-            pw::spa::utils::Rectangle {
-                width: 320,
-                height: 240
-            },
-            pw::spa::utils::Rectangle {
-                width: 1920,
-                height: 1080
-            }
-        ),
-        // Do not constrain VideoFramerate here. KDE's portal source advertises
-        // an unspecified frame rate (0/1) plus VideoMaxFramerate; forcing a
-        // fixed/ranged VideoFramerate makes PipeWire's SPA intersection fail
-        // with `no more input formats` before the stream can start.
-    );
-    let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
-        std::io::Cursor::new(Vec::new()),
-        &pw::spa::pod::Value::Object(obj),
-    )
-    .map_err(|error| format!("Serialize PipeWire video format: {error:?}"))?
-    .0
-    .into_inner();
-    let mut params = [Pod::from_bytes(&values)
-        .ok_or_else(|| "Could not build PipeWire video format".to_string())?];
-
     crate::zcall_log!(
-        "[zcall-screen] negotiating BGRA/BGRx PipeWire format without a framerate constraint"
+        "[zcall-screen] portal PipeWire target appeared in registry: node_id={node_id}"
     );
-    stream
-        .connect(
-            pw::spa::utils::Direction::Input,
-            Some(node_id),
-            pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS,
-            &mut params,
-        )
-        .map_err(|error| {
-            format!("Negotiate PipeWire screen node {node_id} (BGRA/BGRx): {error}")
-        })?;
-    crate::zcall_log!("[zcall-screen] PipeWire stream connected; waiting for first frame");
+
+    capture.connect().map_err(|error| {
+        format!("Negotiate PipeWire screen node {node_id} (BGRA/BGRx): {error}")
+    })?;
+    crate::zcall_log!(
+        "[zcall-screen] PipeWire stream connected; negotiating BGRA/BGRx without a framerate constraint"
+    );
 
     // Start the encoder only after all fallible PipeWire setup has succeeded.
-    // This prevents a failed connect/format negotiation from detaching a worker
-    // blocked on raw_rx before the capture loop has a chance to shut it down.
     let encoder_stop = stop.clone();
     let encoder_settings = settings.clone();
     let encoder_status = status.clone();
@@ -486,7 +474,7 @@ fn pipewire_capture(
         .name("zcall-screen-encoder".into())
         .spawn(move || {
             if let Err(error) = encode_frames(
-                raw_rx,
+                encoder_frames,
                 encoder_tx,
                 encoder_stop.clone(),
                 encoder_settings,
@@ -500,6 +488,7 @@ fn pipewire_capture(
         })
         .map_err(|error| format!("Start screen encoder worker: {error}"))?;
 
+    crate::zcall_log!("[zcall-screen] PipeWire stream connected; waiting for first frame");
     let stream_deadline = std::time::Instant::now() + Duration::from_secs(15);
     let mut frame_deadline = None;
     let capture_result = loop {
@@ -507,11 +496,11 @@ fn pipewire_capture(
             crate::zcall_log!("[zcall-screen] stop observed in PipeWire capture loop");
             break Ok(());
         }
-        if let Some(error) = core_error.lock().ok().and_then(|mut error| error.take()) {
+        if let Some(error) = capture.error() {
             break Err(error);
         }
         let now = std::time::Instant::now();
-        if stream_ready.load(Ordering::Acquire) {
+        if capture.streaming() {
             let deadline = frame_deadline.get_or_insert(now + Duration::from_secs(15));
             if !raw_frame_seen.load(Ordering::Acquire) && now >= *deadline {
                 break Err("Timed out waiting for the first PipeWire screen frame".into());
@@ -525,30 +514,21 @@ fn pipewire_capture(
         } else if now >= stream_deadline {
             break Err("Timed out waiting for the PipeWire screen stream to start".into());
         }
-        let result = mainloop
-            .loop_()
-            .iterate(pw::loop_::Timeout::Finite(Duration::from_millis(50)));
-        if result < 0 {
-            break Err(format!("PipeWire main loop iteration failed: {result}"));
+        if let Err(error) = capture.iterate(50) {
+            break Err(error);
         }
     };
 
-    // Every exit path closes the PipeWire stream and stops/joins the encoder;
-    // otherwise a timeout detached an encoder waiting forever on its channel.
+    // Publish unexpected PipeWire loss before setting the shared stop flag.
+    // `report_worker_result` suppresses errors after stop to avoid duplicate
+    // terminal events for user cancellation; report native failure while
+    // cancellation is still distinguishable.
+    report_capture_failure(&capture_result, &stop, &status);
+
     stop.store(true, Ordering::Release);
     crate::zcall_log!("[zcall-screen] disconnecting PipeWire stream");
-    if let Err(error) = stream.disconnect() {
-        crate::zcall_log!("[zcall-screen] PipeWire stream disconnect returned: {error}");
-    }
-    let disconnect_result = mainloop
-        .loop_()
-        .iterate(pw::loop_::Timeout::Finite(Duration::from_millis(50)));
-    crate::zcall_log!(
-        "[zcall-screen] PipeWire disconnect processed (iterate={disconnect_result}); releasing stream listener"
-    );
-    drop(_listener);
-    drop(stream);
-    crate::zcall_log!("[zcall-screen] PipeWire stream and listener released; joining encoder");
+    capture.disconnect();
+    crate::zcall_log!("[zcall-screen] PipeWire stream disconnected; joining encoder");
     let encoder_result = encoder_worker
         .join()
         .map_err(|_| "Screen encoder worker panicked".to_string());
@@ -560,6 +540,50 @@ fn pipewire_capture(
 mod tests {
     use super::portal_source_types;
     use ashpd::desktop::screencast::SourceType;
+
+    #[test]
+    fn pipewire_failure_is_reported_before_worker_stop_suppresses_duplicates() {
+        use super::report_capture_failure;
+        use crate::screen::report_worker_result;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::mpsc::sync_channel;
+
+        let (status_tx, status_rx) = sync_channel(2);
+        let stop = AtomicBool::new(false);
+        let result = Err("PipeWire screen source disappeared".to_string());
+
+        report_capture_failure(&result, &stop, &status_tx);
+        stop.store(true, Ordering::Release);
+        report_worker_result(result, &stop, &status_tx);
+
+        assert_eq!(
+            status_rx.try_recv().unwrap().unwrap_err(),
+            "PipeWire screen source disappeared"
+        );
+        assert!(status_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn pipewire_capture_setup_and_teardown_can_be_repeated() {
+        use super::{CaptureData, PipeWireCaptureGuard};
+        use crate::screen::LatestFrameQueue;
+        use std::fs::File;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+
+        let data = CaptureData {
+            raw_frames: Arc::new(LatestFrameQueue::default()),
+            raw_frame_seen: Arc::new(AtomicBool::new(false)),
+        };
+
+        for _ in 0..64 {
+            let remote_fd = File::open("/dev/null").unwrap().into();
+            if let Ok(mut capture) = PipeWireCaptureGuard::new(remote_fd, 1, &data) {
+                let _ = capture.iterate(0);
+                capture.disconnect();
+            }
+        }
+    }
 
     #[test]
     fn portal_source_selection_restricts_monitor_and_window_choices() {

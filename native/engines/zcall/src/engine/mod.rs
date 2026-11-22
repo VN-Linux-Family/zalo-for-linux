@@ -153,6 +153,7 @@ pub struct EngineCore {
     screen_request_id: Option<String>,
     screen_restart_request_id: Option<String>,
     screen_stop_ack_pending: bool,
+    screen_first_frame_reported: bool,
     ui: Option<Box<dyn UiTransport>>,
     outgoing_frames: Vec<Value>,
     last_ended_call: Option<u32>,
@@ -192,6 +193,7 @@ impl EngineCore {
             screen_request_id: None,
             screen_restart_request_id: None,
             screen_stop_ack_pending: false,
+            screen_first_frame_reported: false,
             ui,
             outgoing_frames: Vec::new(),
             last_ended_call: None,
@@ -448,15 +450,28 @@ impl EngineCore {
         }
         for frame in screen_frames {
             if let Some(media) = self.media.as_ref() {
-                let result = if self
+                let group_share = self
                     .group
                     .as_ref()
-                    .is_some_and(|group| group.sharing_screen)
-                {
+                    .is_some_and(|group| group.sharing_screen);
+                let result = if group_share {
                     media.send_group_share_frame(frame.key, &frame.data, frame.width, frame.height)
                 } else {
                     media.send_video_frame(frame.key, &frame.data)
                 };
+                if !self.screen_first_frame_reported {
+                    match &result {
+                        Ok(packets) => self.log(&format!(
+                            "first screen H.264 frame transport: key={}, size={} bytes, {}x{}, packets={}, group_share={group_share}",
+                            frame.key, frame.data.len(), frame.width, frame.height, packets
+                        )),
+                        Err(error) => self.log(&format!(
+                            "first screen H.264 frame transport failed: key={}, size={} bytes, group_share={group_share}: {error}",
+                            frame.key, frame.data.len()
+                        )),
+                    }
+                    self.screen_first_frame_reported = true;
+                }
                 if let Err(error) = result {
                     self.log(&format!("screen H.264 send failed: {error}"));
                 }
@@ -3808,6 +3823,7 @@ impl EngineCore {
 
     fn start_screen_capture(&mut self, source: Option<String>, request_id: Option<String>) {
         self.screen_request_id = request_id.clone();
+        self.screen_first_frame_reported = false;
         let group_config = self
             .group
             .as_ref()
@@ -3888,7 +3904,12 @@ impl EngineCore {
         if call.phase != CallPhase::InCall || call.call_type != 3 {
             return;
         }
+        let requested_camera_on = camera_on;
         let camera_on = camera_on || call.sharing_screen;
+        self.log(&format!(
+            "outgoing camera state: call_id={}, requested={}, sharing_screen={}, effective={}",
+            call.call_id, requested_camera_on, call.sharing_screen, camera_on
+        ));
         self.emit(json!({"type":"sendSignal","command":12006,"data":{
             "callId":call.call_id,"calleeId":call.peer_id,"data":"",
             "isOnCam":if camera_on {1} else {0},"isOnMic":-1

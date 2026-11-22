@@ -10,12 +10,7 @@ build-essential
 libssl-dev
 liblzma-dev
 p7zip-full
-gcc
-g++
-clang
 libclang-dev
-llvm
-libc6-dev
 libx11-dev
 libxcb1-dev
 libxext-dev
@@ -24,3 +19,4 @@ zsync
 libopus-dev
 libpulse-dev
 libpipewire-0.3-dev
+libspeexdsp-dev

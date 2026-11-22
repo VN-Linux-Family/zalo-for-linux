@@ -330,10 +330,13 @@ fn encode_frames<F: RawFrameSource>(
     encoded_frame_seen: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut encoder: Option<Encoder> = None;
+    let mut yuv_buffer: Option<YUVBuffer> = None;
     let mut dimensions = (0u32, 0u32);
     let mut encoder_fps = 0;
     let mut cpu_fps = 30u32;
     let mut encode_ema_ms = 0.0f64;
+    let mut convert_ema_ms = 0.0f64;
+    let mut h264_ema_ms = 0.0f64;
     let mut last_evaluation = std::time::Instant::now();
     let mut good_since: Option<std::time::Instant> = None;
     let mut next_frame_at = std::time::Instant::now();
@@ -368,6 +371,11 @@ fn encode_frames<F: RawFrameSource>(
         // normalize every frame before constructing the YUV buffer.
         let (pixels, width, height) =
             resize_bgra(frame.bgra, frame.width, frame.height, settings.max_short)?;
+        if dimensions != (width, height) {
+            // Reuse the YUV allocation across frames. Creating a full-size
+            // 4:2:0 buffer for every desktop frame adds allocator churn at 30 FPS.
+            yuv_buffer = Some(YUVBuffer::new(width as usize, height as usize));
+        }
         if dimensions != (width, height) || encoder_fps != active_fps {
             encoder = Some(
                 Encoder::with_api_config(
@@ -383,12 +391,27 @@ fn encode_frames<F: RawFrameSource>(
             continue;
         };
         let bgra = BgraSliceU8::new(&pixels, (width as usize, height as usize));
-        let mut yuv = YUVBuffer::new(width as usize, height as usize);
+        let Some(yuv) = yuv_buffer.as_mut() else {
+            continue;
+        };
         yuv.read_bgra8(bgra);
+        let convert_ms = encode_started.elapsed().as_secs_f64() * 1000.0;
+        let h264_started = std::time::Instant::now();
         let bitstream = encoder
-            .encode(&yuv)
+            .encode(yuv)
             .map_err(|error| format!("Encode screen frame with OpenH264: {error}"))?;
+        let h264_ms = h264_started.elapsed().as_secs_f64() * 1000.0;
         let encode_ms = encode_started.elapsed().as_secs_f64() * 1000.0;
+        convert_ema_ms = if convert_ema_ms == 0.0 {
+            convert_ms
+        } else {
+            convert_ema_ms * 0.85 + convert_ms * 0.15
+        };
+        h264_ema_ms = if h264_ema_ms == 0.0 {
+            h264_ms
+        } else {
+            h264_ema_ms * 0.85 + h264_ms * 0.15
+        };
         encode_ema_ms = if encode_ema_ms == 0.0 {
             encode_ms
         } else {

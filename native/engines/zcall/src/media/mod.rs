@@ -3637,11 +3637,17 @@ impl ZrtcMediaBackend {
     /// session has no SRTP key, matching the existing Zalo group transport.
     pub fn send_video_frame(&self, key: bool, annex_b: &[u8]) -> Result<usize, String> {
         if !self.running.load(Ordering::Relaxed) || annex_b.is_empty() {
+            if key && !annex_b.is_empty() {
+                media_debug("video keyframe dropped: media backend is not running");
+            }
             return Ok(0);
         }
         let params_guard = self.params.lock().map_err(|e| e.to_string())?;
         let params = params_guard.as_ref().ok_or("no active media session")?;
         if !params.video_enabled {
+            if key {
+                media_debug("video keyframe dropped: media session video_enabled=false");
+            }
             return Ok(0);
         }
         let (server, token) = self
@@ -3658,6 +3664,9 @@ impl ZrtcMediaBackend {
             && keys.is_none()
             && !std::env::var("ZCALL_GROUP_CAMERA").is_ok_and(|value| value == "0");
         if keys.is_none() && !group_plain {
+            if key {
+                media_debug("video keyframe dropped: SRTP keys are not ready");
+            }
             return Ok(0);
         }
         let plan = if params.is_group {
@@ -4051,9 +4060,15 @@ impl ZrtcMediaBackend {
         }
         let mut guard = self.share_peer.lock().map_err(|e| e.to_string())?;
         let Some(peer) = guard.as_mut() else {
+            if key {
+                media_debug("group video keyframe dropped: share peer is not initialized");
+            }
             return Ok(0);
         };
         if peer.token == 0 {
+            if key {
+                media_debug("group video keyframe dropped: share peer token is not ready");
+            }
             return Ok(0);
         }
         let width = width.min(u16::MAX as u32) as u16;
