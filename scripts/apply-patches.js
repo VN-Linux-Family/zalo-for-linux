@@ -34,6 +34,7 @@ const PATCHES = [
   'patch-network-and-sync-fix',
   'patch-offline-startup',
   'patch-auto-theme',
+  'patch-zadark-keep',
   'patch-zocr-pc-dist',
   'patch-zocr-runtime',
   'patch-flatpak-file-transfer',
