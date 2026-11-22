@@ -2,8 +2,7 @@
 name = "zimage"
 version = "1.0.0"
 edition = "2021"
-license = "ISC"
-
+license.workspace = true
 [lib]
 crate-type = ["cdylib"]
 

@@ -2,16 +2,15 @@
  * plugins/zcall/ui/call.js (renderer): the call window.
  *
  * State comes from the engine through plugins/zcall/window.js
- * ('zcall-ui-state'); clicks go back as 'zcall-ui-action'. The capture,
- * H.264 encode (WebCodecs) and decode code is unchanged from the former
- * inline page of window.js; this file adds the layout of Zalo's macOS call
- * window (ui/call.css), its icons and sounds (ui/assets.js).
+ * ('zcall-ui-state'); clicks go back as 'zcall-ui-action'. Rust owns camera
+ * and screen capture, H.264 encoding and media transmission; this renderer
+ * decodes received and local preview frames and renders the call UI.
  */
 
 'use strict';
 
 const { ipcRenderer } = require('electron');
-const { setIcon, playSound, stopSound, params } = window.zcallAssets;
+const { setIcon, playSound, stopSound } = window.zcallAssets;
 const $ = (id) => document.getElementById(id);
 const tr = (key, params) => window.zcallI18n.t(key, params);
 ipcRenderer.on('zcall-ui-language', (_event, locale) => {
@@ -35,7 +34,6 @@ ipcRenderer.on('zcall-ui-language', (_event, locale) => {
   $('full').title = fullScreen ? tr('leaveFullscreen') : tr('fullscreen');
   refreshLocalizedStatuses();
 });
-const TEST_PATTERN = params.get('test') === '1';
 
 // Global state variables
 let state = {};
@@ -44,17 +42,9 @@ let compactMode = false, autoCompact = false;
 let fullScreen = false;
 let groupLayout = 'grid', pinned = null, talking = null;
 const tiles = new Map();
-let cameraEncode = null, screenEncode = null;
-let camChosen = false;
-let camOn = true, prevCamOn = true, noCamera = false, sharing = false, local = null, enc = null, nFrames = 0, nextDue = 0, encErrLogged = false;
+let camOn = true, noCamera = false, sharing = false, pendingScreen = null;
 let camPref = null, curCamId = '';
-let capFps = 0;
-let forceKey = true, lastKeyAt = 0;
-let scaler = null, scalerG = null;
-let groupProfile = null, groupKey = '';
-let groupScreen = null, groupScreenKey = '';
-let held = null, heldAt = 0, repeatAt = 0;
-let pendingScreen = null;
+let localDecoder = null, localCodec = null, localTs = 0;
 let dec = null, decCodec = null, ts = 0;
 let decErrLogged = false, shown = 0, shownSince = 0, shownTotal = 0, rxBytes = 0;
 let micSlider = null, micMeter = null, micPct = null, micAutoSwitch = null, micModeBadge = null, micDragging = false, micSentAt = 0, micTimer = null;
@@ -93,7 +83,7 @@ ipcRenderer.on('zcall-ui-compact', (_e, on) => {
   render();
 });
 window.addEventListener('blur', () => {
-  if ((sharing || pendingScreen) && !compactMode) {
+  if (sharing && !compactMode) {
     closeMenu();
     autoCompact = true;
     ipcRenderer.send('zcall-ui-window', 'compact');
@@ -138,7 +128,7 @@ function render() {
   document.title = 'Zalo Call - ' + name;
   for (const p of ['outgoing', 'connecting', 'connected', 'ended']) document.body.classList.toggle('phase-' + p, s.phase === p);
   document.body.classList.toggle('is-video', !!s.video);
-  document.body.classList.toggle('is-sharing', sharing);
+  document.body.classList.toggle('is-sharing', sharing || !!pendingScreen);
   if (s.group) {
     document.body.classList.add('has-tiles');
   } else {
@@ -173,11 +163,11 @@ function render() {
   // Micro: on / off. Camera: only in a video call (grey in a voice call, as in Zalo).
   setIcon($('micIcon'), s.muted ? 'micOff' : 'mic');
   $('mute').title = s.muted ? tr('unmute') : tr('mute');
-  const camUsable = (!!s.video || !!s.group) && !noCamera && !sharing;
+  const camUsable = (!!s.video || !!s.group) && !noCamera && !sharing && !pendingScreen;
   $('cam').disabled = !camUsable;
-  $('camCaret').disabled = !(s.video || s.group) || sharing;
+  $('camCaret').disabled = !(s.video || s.group) || sharing || !!pendingScreen;
   setIcon($('camIcon'), !camUsable ? 'camDisabled' : (camOn ? 'cam' : 'camOff'));
-  setIcon($('camCaret').firstElementChild, ((s.video || s.group) && !sharing) ? 'caret' : 'caretDisabled');
+  setIcon($('camCaret').firstElementChild, ((s.video || s.group) && !sharing && !pendingScreen) ? 'caret' : 'caretDisabled');
   $('cam').title = sharing ? tr('sharing') : (noCamera ? tr('noCamera') : (camOn ? tr('cameraOff') : tr('cameraOn')));
   $('camCaret').title = sharing ? tr('sharing') : tr('chooseCamera');
   setIcon($('screenIcon'), sharing ? 'shareOff' : 'share');
@@ -185,7 +175,7 @@ function render() {
   const tilesOn = document.body.classList.contains('has-tiles');
   setIcon($('layout').firstElementChild, tilesOn && groupLayout === 'grid' ? 'conference' : 'grid');
   $('layout').title = tilesOn ? (groupLayout === 'grid' ? tr('speakerLayout') : tr('gridLayout')) : tr('layout');
-  $('compactBtn').classList.toggle('hide', !(compactMode || sharing));
+  $('compactBtn').classList.toggle('hide', !(compactMode || sharing || !!pendingScreen));
   $('compactBtn').textContent = compactMode ? tr('expand') : tr('compact');
   clearInterval(tick);
   const upd = () => { $('timer').textContent = s.since && !ended ? fmt(Date.now() - s.since) : ''; };
@@ -431,18 +421,113 @@ function syncMembers(list) {
 }
 new MutationObserver(placeSelf).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-// Group: layer 0 of the SFU table. 1-1: the rung of the server's ladder the engine
-// picked from the phone's loss reports (send-rate.js), with keyMs (key frames on the
-// phone's request, plus one every 10 s) and captureBig (capture 1280x720 for rungs
-// above 640 px). open() omits the key, which clears it; status() keeps it.
+// Local preview is decoded from Rust's native camera/screen capture. Capture,
+// H.264 encoding and network transmission never run in the renderer.
+const self = $('self');
+const sg = self.getContext('2d');
+
+function stopLocal() {
+  if (localDecoder && localDecoder.state !== 'closed') {
+    try { localDecoder.close(); } catch (_) {}
+  }
+  localDecoder = null;
+  localCodec = null;
+  localTs = 0;
+  self.width = 1;
+  self.height = 1;
+  document.body.classList.remove('has-self');
+  if (state.group) updateSelfTile();
+}
+
+function decodeLocalVideo(m) {
+  if (state.phase !== 'connected' || (!sharing && !camOn)) return;
+  const codec = m.codec || 'avc1.42E01E';
+  if (m.key && (!localDecoder || localDecoder.state === 'closed' || codec !== localCodec)) {
+    if (localDecoder && localDecoder.state !== 'closed') {
+      try { localDecoder.close(); } catch (_) {}
+    }
+    localCodec = codec;
+    const mine = new VideoDecoder({
+      output: (frame) => {
+        if (localDecoder !== mine) { frame.close(); return; }
+        if (self.width !== frame.displayWidth || self.height !== frame.displayHeight) {
+          self.width = frame.displayWidth;
+          self.height = frame.displayHeight;
+        }
+        sg.drawImage(frame, 0, 0);
+        document.body.classList.add('has-self');
+        if (state.group) updateSelfTile();
+        frame.close();
+      },
+      error: (error) => {
+        if (localDecoder !== mine) return;
+        localDecoder = null;
+        act('log', { text: 'local video decode: ' + ((error && error.message) || error) });
+        act('keyframe');
+      },
+    });
+    localDecoder = mine;
+    try {
+      mine.configure({ codec, optimizeForLatency: true, hardwareAcceleration: 'prefer-software' });
+    } catch (error) {
+      localDecoder = null;
+      try { mine.close(); } catch (_) {}
+      act('log', { text: 'local video configure: ' + ((error && error.message) || error) });
+      return;
+    }
+  }
+  if (!localDecoder || localDecoder.state !== 'configured') return;
+  if (localDecoder.decodeQueueSize >= 3 && !m.key) return;
+  try {
+    localDecoder.decode(new EncodedVideoChunk({
+      type: m.key ? 'key' : 'delta',
+      timestamp: localTs += 33333,
+      data: annexB(m),
+    }));
+  } catch (error) {
+    const failed = localDecoder;
+    localDecoder = null;
+    try { if (failed && failed.state !== 'closed') failed.close(); } catch (_) {}
+    act('log', { text: 'local video decode: ' + ((error && error.message) || error) });
+    act('keyframe');
+  }
+}
+
+function startScreen(source = null) {
+  if (sharing || pendingScreen) return;
+  pendingScreen = true;
+  autoCompact = !compactMode;
+  const action = { on: true };
+  if (source) action.source = source;
+  act('screen', action);
+  render();
+}
+
+function stopScreen() {
+  if (!sharing && !pendingScreen) return;
+  sharing = false;
+  pendingScreen = false;
+  stopLocal();
+  act('screen', { on: false });
+  render();
+}
+
 ipcRenderer.on('zcall-ui-state', (_e, s) => {
   const before = state.phase;
   state = s || {};
-  cameraEncode = state.cameraEncode || null;
-  screenEncode = state.screenEncode || null;
-  if (state.phase === 'ended' || before === 'ended') { camChosen = false; camOn = true; prevCamOn = true; }
-  if (state.camStartOff && !camChosen) { camOn = false; prevCamOn = false; camChosen = true; }
-  if (!camChosen && state.phase === 'connected') camChosen = true;
+  if (typeof state.cameraOn === 'boolean') camOn = state.cameraOn;
+  if (typeof state.sharing === 'boolean') sharing = state.sharing;
+  if (state.phase === 'ended') {
+    stopVideo();
+    stopLocal();
+    sharing = false;
+    pendingScreen = false;
+    camOn = false;
+  } else if (!state.video && !state.group) {
+    stopLocal();
+  } else if (!sharing && !camOn) {
+    stopLocal();
+  }
   if (state.group) {
     document.body.classList.add('has-tiles');
     placeSelf();
@@ -450,404 +535,66 @@ ipcRenderer.on('zcall-ui-state', (_e, s) => {
   }
   if (Number.isFinite(state.micVolume)) micVolumeShown(state.micVolume);
   if (typeof state.micAutoGain === 'boolean') micAutoModeShown(state.micAutoGain);
-  if (state.phase === 'ended') {
-    stopVideo(); stopLocal(); sharing = false;
-    if (pendingScreen) { pendingScreen.stop(); pendingScreen = null; }
-  }
-  else if (!state.video && !state.group) {
-    if (local && !sharing) stopLocal();
-  }
-  else if ((state.video || state.group) && camOn && !local && !sharing) {
-    startLocal();
-  }
-  else if (local && local.kind === 'camera' && !sharing && local.big !== undefined && local.big !== wantBigCapture()) {
-    act('log', { text: 'camera capture size changes: restart' });
-    stopLocal(); startLocal();
-  }
-  else if ((state.video || state.group) && !camOn && !sharing) {
-    if (local && local.kind === 'camera') stopLocal();
-    if (before !== 'connected' && state.phase === 'connected') act('camera', { on: false });
-  }
   sounds(before);
   render();
 });
 
-// --- what we send (camera or screen): capture, preview, H.264 encode, frames to the engine ---
-const self = $('self'); const sg = self.getContext('2d');
-// local: the capture running, { kind: 'camera' | 'screen', stop }.
-// (camOn, noCamera, sharing, local, enc, etc. declared at top)
-// Encoder settings per source. Level 3.0 (avc1.42E01E) holds 640 px: a
-// 1920x1080 camera (Iriun) encoded as is never shows on the phone. The
-// screen needs level 4.0 (avc1.42E028) for 1280 px at any aspect ratio.
-const PROFILES = {
-  camera: { fps: 15, maxSide: 640, bitrate: 500000, codec: 'avc1.42E01E' },
-  screen: { fps: 10, maxSide: 1280, bitrate: 1500000, codec: 'avc1.42E028' }
-};
-const KEY_MS = 2000; // screen, and the camera until the engine's profile came
-function sendProfile() {
-  if (sharing) {
-    // Group: the server's limit on the shorter side and bitrate (engine screenEncode).
-    const s = screenEncode;
-    if (!s || !(s.maxShort > 0)) return PROFILES.screen;
-    const k = s.maxShort + '/' + s.bitrate;
-    if (!groupScreen || groupScreenKey !== k) {
-      groupScreenKey = k;
-      groupScreen = Object.assign({}, PROFILES.screen, { maxShort: s.maxShort, bitrate: s.bitrate > 0 ? s.bitrate : PROFILES.screen.bitrate, codec: 'avc1.42E01F', screen: true });
-    }
-    return groupScreen;
+ipcRenderer.on('zcall-ui-local-video', (_e, frame) => decodeLocalVideo(frame));
+ipcRenderer.on('zcall-ui-camera-error', (_e, error) => {
+  camOn = false;
+  noCamera = true;
+  stopLocal();
+  act('log', { text: 'camera capture failed: ' + ((error && error.message) || 'unknown error') });
+  render();
+});
+ipcRenderer.on('zcall-ui-screen-started', (_e, message) => {
+  sharing = true;
+  pendingScreen = false;
+  stopLocal();
+  if (message && typeof message.cameraWasOn === 'boolean') camOn = message.cameraWasOn;
+  render();
+});
+ipcRenderer.on('zcall-ui-screen-stopped', () => {
+  sharing = false;
+  pendingScreen = false;
+  stopLocal();
+  if (autoCompact) {
+    autoCompact = false;
+    ipcRenderer.send('zcall-ui-window', 'expand');
   }
-  const e = cameraEncode;
-  if (!e || !(e.width > 0) || !(e.height > 0)) return PROFILES.camera;
-  const w = e.width & ~1, h = e.height & ~1;
-  const fps = e.fps > 0 ? e.fps : PROFILES.camera.fps;
-  const bitrate = e.bitrate > 0 ? e.bitrate : PROFILES.camera.bitrate;
-  const keyMs = e.keyMs > 0 ? e.keyMs : 1000;
-  const codec = Math.max(w, h) <= 640 ? 'avc1.42E01E' : 'avc1.42E028';
-  const key = w + 'x' + h + '@' + fps + '/' + bitrate + '/' + keyMs + '/' + codec;
-  if (groupProfile && groupKey === key) return groupProfile;
-  groupKey = key;
-  groupProfile = { fps: fps, width: w, height: h, bitrate: bitrate, keyMs: keyMs, codec: codec, exact: true, rung: e.rung || 0 };
-  return groupProfile;
-}
+  if (camOn) act('keyframe');
+  render();
+});
+ipcRenderer.on('zcall-ui-screen-error', (_e, error) => {
+  sharing = false;
+  pendingScreen = false;
+  stopLocal();
+  act('log', { text: 'screen share failed: ' + ((error && error.message) || error) });
+  if (autoCompact) {
+    autoCompact = false;
+    ipcRenderer.send('zcall-ui-window', 'expand');
+  }
+  if (camOn) act('keyframe');
+  render();
+});
+ipcRenderer.on('zcall-ui-screen-sources', (_e, windows) => {
+  openMenu('share-windows', $('screen'), windows).catch(closeMenu);
+});
+ipcRenderer.on('zcall-ui-screen-source-mode', (_e, source) => startScreen(source || 'window'));
+
 $('cam').onclick = () => {
-  if (noCamera || sharing) return;
+  if (noCamera || sharing || pendingScreen) return;
   camOn = !camOn;
-  prevCamOn = camOn;
-  camChosen = true;
-  if (camOn) startLocal(); else { stopLocal(); act('camera', { on: false }); }
+  act('camera', { on: camOn });
+  if (!camOn) stopLocal();
   updateSelfTile();
   render();
 };
 $('screen').onclick = (e) => {
   e.stopPropagation();
-  if (sharing) { stopScreen(); return; }
-  openMenu('share', $('screen')).catch(() => startScreen());
+  if (sharing || pendingScreen) { stopScreen(); return; }
+  openMenu('share', $('screen')).catch(() => startScreen(null));
 };
-function b64(bytes) {
-  let s = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return btoa(s);
-}
-// What the send path did in the last 5 s, one log line: frames the capture gave,
-// skipped for the frame rate, skipped with the encoder queue full, handed to the
-// encoder, chunks out (key), queue size and encoder state now. Group camera froze
-// after ~3 s on 2026-10-08 (14 frames in 11 s left the engine): this shows where.
-// Also the bytes out (kbps the encoder really gives against the bitrate asked) and why
-// key frames were made: start (new encoder / call start), asked (the phone's PLI),
-// timer (keyMs).
-const tx = { got: 0, rep: 0, rate: 0, full: 0, enc: 0, out: 0, key: 0, bytes: 0, kStart: 0, kAsked: 0, kTimer: 0, at: performance.now() };
-function txReport(now) {
-  if (now - tx.at < 5000) return;
-  const P = enc && enc.profile;
-  act('log', { text: 'send ' + (sharing ? 'screen' : 'camera') + ' 5s: got ' + tx.got + ', repeated ' + tx.rep + ', rate-skip ' + tx.rate + ', queue-skip ' + tx.full +
-    ', encoded ' + tx.enc + ', out ' + tx.out + ' (' + tx.key + ' key: start ' + tx.kStart + ', asked ' + tx.kAsked + ', timer ' + tx.kTimer + '), ' +
-    Math.round(tx.bytes * 8 / ((now - tx.at) / 1000) / 1000) + ' kbps, queue ' + (enc ? enc.encodeQueueSize : '-') + ', encoder ' + (enc ? enc.state : 'none') +
-    (P ? ' ' + enc.w + 'x' + enc.h + '@' + P.fps + ' ' + Math.round(P.bitrate / 1000) + 'k' + (P.rung ? ' rung ' + P.rung : '') : '') });
-  tx.got = tx.rep = tx.rate = tx.full = tx.enc = tx.out = tx.key = tx.bytes = tx.kStart = tx.kAsked = tx.kTimer = 0; tx.at = now;
-}
-// Also when the capture gives nothing at all (then 'got 0' says so).
-setInterval(() => { if (local) txReport(performance.now()); }, 5000);
-// A camera that stops for seconds (Iriun Webcam over Wi-Fi measured 2026-10-08:
-// 25, 30, 5 frames, then nothing for 9 s, then 28 / s again, outside Zalo too):
-// the phone keeps the last picture only if frames keep coming, and a member who
-// starts watching in such a gap gets no key frame at all. So the last camera
-// frame is encoded again, REPEAT_FPS times a second, after REPEAT_AFTER_MS
-// without a new one (the key frame interval still applies).
-const REPEAT_AFTER_MS = 600, REPEAT_FPS = 4;
-// held, heldAt, repeatAt declared at top
-function holdFrame(frame) {
-  if (held) try { held.close(); } catch (_) {}
-  held = null;
-  try { held = frame.clone(); heldAt = performance.now(); } catch (_) {}
-}
-function dropHeld() { if (held) try { held.close(); } catch (_) {} held = null; }
-setInterval(() => {
-  const now = performance.now();
-  if (!held || !local || local.kind !== 'camera' || sharing) return;
-  if (now - heldAt < REPEAT_AFTER_MS || now - repeatAt < 1000 / REPEAT_FPS) return;
-  repeatAt = now;
-  let f = null;
-  // A fresh timestamp: the encoder is given frames in increasing time.
-  try { f = new VideoFrame(held, { timestamp: Math.round(now * 1000) }); } catch (_) { dropHeld(); return; }
-  tx.rep++;
-  nextDue = 0; // the frame-rate gate is for the capture, not for these
-  encodeFrame(f, true);
-}, 100);
-function encodeFrame(frame, repeat) {
-  let current = frame;
-  if (!repeat) {
-    tx.got++;
-    if (local && local.kind === 'camera' && !sharing) holdFrame(frame);
-  }
-  txReport(performance.now());
-  try {
-    const P = sendProfile();
-    const now = performance.now();
-    // Frame-rate gate on a schedule, not on the gap to the last frame: a 15 fps
-    // camera has frames 55-75 ms apart, and "at least 61 ms since the last one"
-    // let only 44 of its 75 frames in 5 s through (8.8 fps sent, logs 2026-10-08/09).
-    const iv = 1000 / P.fps;
-    if (now + iv * 0.5 < nextDue) { tx.rate++; return; }
-    nextDue = Math.max(nextDue + iv, now - iv * 0.5);
-    let w, h, src = current;
-    if (P.exact) {
-      // Exactly the announced layer, so the SPS matches sub 12. The camera fills it,
-      // cut at the centre (a 16:9 camera in the 2:1 layer loses a little at the top
-      // and bottom), instead of the black bars of a fit.
-      // Software encoder: the hardware path on this N100 stalled the preview.
-      w = P.width; h = P.height;
-      if (!scaler || scaler.width !== w || scaler.height !== h) { scaler = new OffscreenCanvas(w, h); scalerG = scaler.getContext('2d'); }
-      const sw = current.displayWidth || w, sh = current.displayHeight || h;
-      const cover = Math.max(w / sw, h / sh);
-      const cw = Math.min(sw, Math.round(w / cover)), ch = Math.min(sh, Math.round(h / cover));
-      const cx = Math.floor((sw - cw) / 2), cy = Math.floor((sh - ch) / 2);
-      scalerG.drawImage(current, cx, cy, cw, ch, 0, 0, w, h);
-      const ts = current.timestamp;
-      const cam = current;
-      current = new VideoFrame(scaler, { timestamp: ts });
-      cam.close();
-      src = scaler;
-    } else {
-      let k = Math.min(1, P.maxSide / Math.max(current.displayWidth, current.displayHeight));
-      if (P.maxShort > 0) k = Math.min(k, P.maxShort / Math.min(current.displayWidth, current.displayHeight));
-      w = Math.round(current.displayWidth * k) & ~1; h = Math.round(current.displayHeight * k) & ~1;
-      if (k < 1) {
-        if (!scaler || scaler.width !== w || scaler.height !== h) { scaler = new OffscreenCanvas(w, h); scalerG = scaler.getContext('2d'); }
-        scalerG.drawImage(current, 0, 0, w, h);
-        const ts = current.timestamp;
-        const cam = current;
-        current = new VideoFrame(scaler, { timestamp: ts });
-        cam.close();
-        src = scaler;
-      }
-    }
-    if (!enc || enc.state === 'closed' || enc.w !== w || enc.h !== h || enc.profile !== P) {
-      if (enc && enc.state !== 'closed') try { enc.close(); } catch (e1) {}
-      enc = new VideoEncoder({
-        output: (chunk) => {
-          const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
-          tx.out++; tx.bytes += chunk.byteLength; if (chunk.type === 'key') tx.key++;
-          act('videoFrame', { key: chunk.type === 'key', data: b64(data), screen: P === PROFILES.screen || !!P.screen, w: w, h: h });
-        },
-        error: (err) => {
-          if (!encErrLogged) { encErrLogged = true; act('log', { text: 'encoder error ' + ((err && err.message) || err || 'unknown') }); }
-          enc = null;
-        },
-      });
-      // OpenH264 spends bitrate / framerate per frame: a 15 fps camera on a 24 fps rung
-      // got 676 of 1100 kbps ("Actual input framerate 15 is different from framerate
-      // in setting 24"). Tell it the rate it really gets.
-      const fr = capFps > 0 && !sharing ? Math.min(P.fps, capFps) : P.fps;
-      const cfg = { codec: P.codec, width: w, height: h, bitrate: P.bitrate, framerate: fr, avc: { format: 'annexb' }, latencyMode: 'realtime' };
-      if (P.exact) cfg.hardwareAcceleration = 'prefer-software';
-      enc.configure(cfg);
-      act('log', { text: 'encoder ' + P.codec + ' ' + w + 'x' + h + '@' + fr + ' ' + Math.round(P.bitrate / 1000) + ' kbps, key every ' + (P.keyMs || KEY_MS) + ' ms' +
-        (P.rung ? ', rung ' + P.rung : '') + (cfg.hardwareAcceleration ? ', ' + cfg.hardwareAcceleration : '') });
-      enc.w = w; enc.h = h; enc.profile = P; nFrames = 0;
-    }
-    if (self.width !== w || self.height !== h) { self.width = w; self.height = h; if (selfTile.parentNode) layoutTiles(); }
-    sg.drawImage(src, 0, 0);
-    if (!document.body.classList.contains('has-self')) {
-      document.body.classList.add('has-self');
-      updateSelfTile();
-    }
-    if (enc.encodeQueueSize >= 3) tx.full++;
-    if (enc.encodeQueueSize < 3) {
-      tx.enc++;
-      const keyEvery = P.keyMs || KEY_MS;
-      const first = nFrames++ === 0;
-      const key = forceKey || first || now - lastKeyAt >= keyEvery;
-      if (key) {
-        if (first) tx.kStart++; else if (forceKey) tx.kAsked++; else tx.kTimer++;
-        forceKey = false; lastKeyAt = now;
-      }
-      enc.encode(current, { keyFrame: key });
-    }
-  } catch (err) {
-    if (!encErrLogged) { encErrLogged = true; act('log', { text: 'encode failed ' + ((err && err.message) || err || 'unknown') }); }
-    try { if (enc && enc.state !== 'closed') enc.close(); } catch (e2) {}
-    enc = null;
-  } finally {
-    try { current.close(); } catch (e3) {}
-  }
-}
-// Frames of the track to the encoder until cap.stop(). onFirst(frame)
-// decides about the first one (true: encode it); onEnd() when the track
-// ends by itself.
-function runTrack(track, cap, onFirst, onEnd) {
-  const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
-  let alive = true, first = true, muteTimer = null;
-  const finish = () => {
-    if (!alive) return;
-    alive = false;
-    clearTimeout(muteTimer);
-    track.stop();
-    try { reader.cancel(); } catch (_) {}
-    if (onEnd) onEnd();
-  };
-  cap.stop = () => {
-    alive = false;
-    clearTimeout(muteTimer);
-    track.stop();
-    try { reader.cancel(); } catch (_) {}
-  };
-  track.onended = () => {
-    act('log', { text: 'capture track ended' });
-    finish();
-  };
-  track.onmute = () => {
-    if (!cap || !cap.isWindow || first) return;
-    clearTimeout(muteTimer);
-    muteTimer = setTimeout(() => {
-      if (alive && track.muted) {
-        act('log', { text: 'capture window closed (track muted)' });
-        finish();
-      }
-    }, 50);
-  };
-  track.onunmute = () => {
-    clearTimeout(muteTimer);
-  };
-  (async () => {
-    try {
-      while (alive) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (first && onFirst) { first = false; if (!onFirst()) { value.close(); continue; } }
-        if (alive) encodeFrame(value); else value.close();
-      }
-    } catch (err) {
-      act('log', { text: 'capture stopped ' + ((err && err.message) || err || 'unknown') });
-    }
-    finish();
-  })();
-}
-// 1-1 rungs above 640 px and group layers above 640 px are cut from a 1280x720 capture.
-function wantBigCapture() {
-  return !!(cameraEncode && (cameraEncode.width > 640 || cameraEncode.captureBig));
-}
-async function startLocal() {
-  if (local) return;
-  local = { kind: 'camera', stop: () => {} };
-  const mine = local;
-  try {
-    // Capture at the size the 1-1 path already used. The group layer is
-    // scaled in the canvas; ideal 480x240 froze the camera on this PC.
-    // A group layer larger than 640 px (720x360 by default) is cut from a 1280x720
-    // capture, so it keeps its detail; 1-1 stays at 640x360.
-    const big = wantBigCapture();
-    mine.big = big;
-    const fps = cameraEncode && cameraEncode.fps > 0 ? cameraEncode.fps : PROFILES.camera.fps;
-    const want = { width: { ideal: big ? 1280 : 640 }, height: { ideal: big ? 720 : 360 }, frameRate: { ideal: Math.max(fps, PROFILES.camera.fps) } };
-    const camId = await chosenCamera();
-    let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia({ video: camId ? Object.assign({ deviceId: { exact: camId } }, want) : want, audio: false }); }
-    catch (e) { if (!camId) throw e; stream = await navigator.mediaDevices.getUserMedia({ video: want, audio: false }); }
-    if (local !== mine) { stream.getTracks().forEach((t) => t.stop()); return; }
-    const track = stream.getVideoTracks()[0];
-    const st = (track.getSettings && track.getSettings()) || {};
-    curCamId = st.deviceId || '';
-    capFps = st.frameRate > 0 ? Math.round(st.frameRate) : 0;
-    act('log', { text: 'camera capture ' + st.width + 'x' + st.height + '@' + st.frameRate + ' (asked ' + want.width.ideal + 'x' + want.height.ideal + '@' + want.frameRate.ideal + ')' });
-    runTrack(track, local);
-    act('camera', { on: true });
-  } catch (e) {
-    if (!TEST_PATTERN) { noCamera = true; camOn = false; local = null; act('camera', { on: false }); render(); return; }
-    // No camera: a moving test pattern (ZCALL_TEST_VIDEO=1).
-    const c = new OffscreenCanvas(360, 640); const g2 = c.getContext('2d'); let i = 0;
-    capFps = PROFILES.camera.fps;
-    const timer = setInterval(() => {
-      i++;
-      g2.fillStyle = 'hsl(' + (i * 4 % 360) + ',70%,45%)'; g2.fillRect(0, 0, 360, 640);
-      g2.fillStyle = '#fff'; g2.font = 'bold 44px sans-serif'; g2.textAlign = 'center';
-      g2.fillText('Zalo Linux', 180, 280); g2.fillText(new Date().toLocaleTimeString(), 180, 350);
-      g2.beginPath(); g2.arc(180 + 120 * Math.sin(i / 10), 480, 30, 0, 7); g2.fill();
-      encodeFrame(new VideoFrame(c, { timestamp: i * 66666 }));
-    }, 1000 / PROFILES.camera.fps);
-    local.stop = () => clearInterval(timer);
-    act('camera', { on: true });
-  }
-}
-// Our screen in place of the camera. On Wayland the desktop's portal asks
-// which screen only once the capture runs. GNOME denies the portal's dialog
-// the focus and puts it right under the focused window: with this window
-// minimized that was Zalo's main window, which hid the dialog. So the window
-// goes compact in the screen's corner and keeps the focus: the dialog comes
-// right under it, above Zalo's main window. The camera stays on until the first screen frame;
-// cancelling, or 60 s without a pick, gives up. Stopping it from the
-// desktop's indicator ends the share.
-// While sharing, the window is compact.
-// pendingScreen declared at top
-async function startScreen(attempt = 1, targetSourceId = null) {
-  if (sharing || (pendingScreen && attempt === 1)) return;
-  const isWindow = targetSourceId === 'window:select' || (typeof targetSourceId === 'string' && targetSourceId.startsWith('window:'));
-  const cap = pendingScreen = { kind: 'screen', stop: () => {}, sourceId: targetSourceId, isWindow };
-  const giveUp = (why) => {
-    if (pendingScreen !== cap) return;
-    pendingScreen = null;
-    cap.stop();
-    act('log', { text: 'screen share attempt ' + attempt + ': ' + why });
-    act('screen', { on: false });
-    if (autoCompact) { autoCompact = false; ipcRenderer.send('zcall-ui-window', 'expand'); }
-  };
-  if (!compactMode) { autoCompact = true; ipcRenderer.send('zcall-ui-window', 'compact'); }
-  let stream;
-  try {
-    const id = await ipcRenderer.invoke('zcall-ui-screen-source', targetSourceId);
-    if (!id) throw new Error('no screen source');
-    cap.sourceId = id;
-    if (typeof id === 'string' && id.startsWith('window:')) cap.isWindow = true;
-    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: {
-      chromeMediaSource: 'desktop', chromeMediaSourceId: id, maxWidth: 1920, maxHeight: 1080, maxFrameRate: PROFILES.screen.fps } } });
-  } catch (e) {
-    giveUp((e && e.name) + ': ' + (e && e.message)); // cancelled in the portal, or no capture
-    return;
-  }
-  if (pendingScreen !== cap || state.phase !== 'connected') { stream.getTracks().forEach((t) => t.stop()); giveUp('call over'); return; }
-  const track = stream.getVideoTracks()[0];
-  setTimeout(() => giveUp('timeout'), 60000);
-  runTrack(track, cap, () => {
-    if (pendingScreen !== cap || state.phase !== 'connected') { giveUp('call over'); return false; }
-    pendingScreen = null;
-    act('log', { text: 'screen share started (attempt ' + attempt + ')' });
-    if (!compactMode) { autoCompact = true; ipcRenderer.send('zcall-ui-window', 'compact'); }
-    prevCamOn = camOn;
-    stopLocal(); // the camera
-    sharing = true;
-    forceKey = true;
-    local = cap;
-    act('screen', { on: true });
-    act('camera', { on: true }); // the phone shows our video only while it thinks the camera is on
-    updateSelfTile();
-    render();
-    return true;
-  }, () => { if (local === cap) stopScreen(); else giveUp('ended before a frame'); });
-}
-function stopScreen() {
-  if (pendingScreen) { pendingScreen.stop(); pendingScreen = null; }
-  if (!sharing) return;
-  sharing = false;
-  if (autoCompact) { autoCompact = false; ipcRenderer.send('zcall-ui-window', 'expand'); }
-  stopLocal();
-  act('screen', { on: false });
-  camOn = prevCamOn;
-  if (camOn && (state.video || state.group) && !noCamera && state.phase === 'connected') {
-    startLocal();
-  } else {
-    act('camera', { on: false });
-  }
-  updateSelfTile();
-  render();
-}
-function stopLocal() {
-  if (local) { local.stop(); local = null; }
-  dropHeld();
-  curCamId = '';
-  if (enc && enc.state !== 'closed') try { enc.close(); } catch (_) {}
-  enc = null;
-  encErrLogged = false;
-  document.body.classList.remove('has-self');
-}
 
 // Received video: H.264 Annex-B frames decoded with WebCodecs, drawn on the canvas.
 // 1-1 is one stream on #video. A group call is one decoder per member (src):
@@ -978,24 +725,23 @@ ipcRenderer.on('zcall-ui-video', (_e, m) => {
   if (!dec || dec.state !== 'configured') return;
   try { dec.decode(new EncodedVideoChunk({ type: m.key ? 'key' : 'delta', timestamp: ts += 66666, data: annexB(m) })); } catch (e) { decoderBroke((e && e.message) || String(e), dec); }
 });
-ipcRenderer.on('zcall-ui-keyframe', () => { forceKey = true; });
 
-// --- device menu (▲ on the pills, the gear): micro and speakers from PipeWire, cameras from Chromium ---
+// --- device menu (▲ on the pills, the gear): devices come from the Rust engine ---
 const menu = $('menu');
-ipcRenderer.invoke('zcall-ui-devices').then((d) => { camPref = d.prefs.camera || null; }).catch(() => {});
+let screenWindows = [];
+ipcRenderer.invoke('zcall-ui-devices').then((d) => {
+  camPref = d.prefs.camera || null;
+  curCamId = camPref && camPref.id || '';
+  noCamera = !Array.isArray(d.cameras) || d.cameras.length === 0;
+  render();
+}).catch(() => {});
 async function cameras() {
-  return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput')
-    .map((d, i) => ({ id: d.deviceId, label: d.label || ('Camera ' + (i + 1)) }));
-}
-// The saved camera if it is plugged in (ids can change: fall back to the name).
-async function chosenCamera() {
-  if (!camPref) return null;
-  const cams = await cameras();
-  const prefName = (camPref.label || '').split(':')[0].trim().toLowerCase();
-  const m = cams.find((c) => c.id === camPref.id) ||
-            cams.find((c) => camPref.label && c.label === camPref.label) ||
-            cams.find((c) => prefName && c.label.toLowerCase().includes(prefName));
-  return m ? m.id : null;
+  const d = await ipcRenderer.invoke('zcall-ui-devices');
+  camPref = d.prefs.camera || null;
+  curCamId = camPref && camPref.id || '';
+  const items = Array.isArray(d.cameras) ? d.cameras : [];
+  noCamera = items.length === 0;
+  return items;
 }
 function closeMenu() {
   menu.classList.remove('show'); menu.textContent = ''; menu.dataset.kind = ''; menu.style.left = '';
@@ -1017,29 +763,25 @@ async function sections(kind) {
   }
   if ((kind === 'camera' && !sharing) || (kind === 'all' && state.video && !sharing)) {
     const items = await cameras();
-    out.push({ kind: 'camera', title: tr('chooseCamera'), icon: 'menuCam', items, current: curCamId || (await chosenCamera()) || (items[0] && items[0].id) });
+    out.push({ kind: 'camera', title: tr('chooseCamera'), icon: 'menuCam', items, current: curCamId || (items[0] && items[0].id) });
   }
   if (kind === 'share') {
     out.push({
       kind: 'share',
       noHeader: true,
       items: [
-        { id: 'screen:0:0', label: tr('chooseScreen') },
+        { id: 'screen:0', label: tr('chooseScreen') },
         { id: 'window:select', label: tr('chooseWindow') },
       ],
     });
   }
   if (kind === 'share-windows') {
-    const list = (await ipcRenderer.invoke('zcall-ui-x11-windows')) || [];
-    out.push({
-      kind: 'share-windows',
-      noHeader: true,
-      items: list,
-    });
+    out.push({ kind: 'share-windows', noHeader: true, items: screenWindows });
   }
   return out;
 }
-async function openMenu(kind, anchor) {
+async function openMenu(kind, anchor, suppliedWindows) {
+  if (kind === 'share-windows' && Array.isArray(suppliedWindows)) screenWindows = suppliedWindows;
   if (kind === 'camera' && sharing) return;
   if (menu.dataset.kind === kind) { closeMenu(); return; }
   const secs = await sections(kind);
@@ -1161,24 +903,22 @@ ipcRenderer.on('zcall-ui-mic-level', (_e, level) => {
 function pick(kind, it) {
   if (kind === 'share') {
     if (it.id === 'window:select') {
-      const isWayland = (process.env.XDG_SESSION_TYPE || '').trim().toLowerCase() === 'wayland';
-      if (!isWayland) {
-        openMenu('share-windows', $('screen'));
-        return;
-      }
+      act('listScreenSources');
+      return;
     }
-    startScreen(1, it.id);
+    startScreen('monitor');
     return;
   }
   if (kind === 'share-windows') {
-    startScreen(1, it.id);
+    startScreen(it.id);
     return;
   }
   if (kind === 'camera' && sharing) return;
   act('device', { kind, id: it.id, label: it.label });
   if (kind !== 'camera') return;
   camPref = { id: it.id, label: it.label };
-  if (local && local.kind === 'camera' && it.id !== curCamId) { stopLocal(); startLocal(); }
+  curCamId = it.id;
+  noCamera = false;
 }
 document.querySelectorAll('.caret').forEach((b) => {
   b.onclick = (e) => { e.stopPropagation(); if (!b.disabled) openMenu(b.dataset.kind, b.parentElement).catch(closeMenu); };

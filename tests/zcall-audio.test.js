@@ -1,266 +1,59 @@
+'use strict';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
-const path = require('node:path');
 const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
-test('Native zcall-audio engine full IPC protocol and state transitions', async (t) => {
-  const binaryPath = path.join(__dirname, '..', 'target', 'release', 'zcall-audio');
-  if (!fs.existsSync(binaryPath)) {
-    t.skip('zcall-audio release binary not built yet');
+const root = path.join(__dirname, '..');
+const manifest = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'Cargo.toml'), 'utf8');
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const core = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'lib.rs'), 'utf8');
+const codec = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'codec.rs'), 'utf8');
+const media = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'media', 'mod.rs'), 'utf8');
+const jitter = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'jitter.rs'), 'utf8');
+const clipGuard = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'clip_guard.rs'), 'utf8');
+const backend = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'backend.rs'), 'utf8');
+const pulseVolume = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'c_pulse_vol.c'), 'utf8');
+
+test('audio capture/playback and Opus are integrated into the standalone zcall Rust process', () => {
+  assert.match(manifest, /name\s*=\s*"zcall"/);
+  assert.match(core, /pub mod audio/);
+  assert.match(codec, /#\[link\(name\s*=\s*"opus"\)\]/);
+  assert.match(codec, /opus_voice_frame_encodes_and_decodes_at_call_sample_rate/);
+  assert.match(media, /Apm::new\(/, 'PR #220 WebRTC APM must be part of the active media pipeline');
+  assert.match(media, /apm\.process_render\(/);
+  assert.match(media, /apm\.process_capture\(/);
+  assert.ok(media.indexOf('clip_guard.feed(') < media.indexOf('apm.process_capture('),
+    'PR #220 ClipGuard must inspect raw PCM before APM processing');
+  assert.match(media, /clip_guard\.set_device\(/, 'ClipGuard must follow the active microphone');
+  assert.match(media, /ClipGuard::new\(/);
+  assert.match(media, /MicLeveler::new\(/);
+  assert.match(media, /JitterBuffer::new\(/);
+  assert.match(jitter, /decode\(next_payload, out_pcm, true\)/);
+  assert.match(jitter, /consecutive_plc/);
+  assert.match(clipGuard, /apply_soft_limiter/);
+  assert.match(clipGuard, /ZCALL_MIC_AGC/);
+  assert.match(backend, /zcall_pulse_get_source_volume/);
+  assert.match(backend, /zcall_pulse_set_source_volume/);
+  assert.match(backend, /Command::new\(\"pactl\"\)/, 'pactl remains a fallback when libpulse volume control is unavailable');
+  assert.match(pulseVolume, /pa_context_get_source_info_by_name/);
+  assert.match(pulseVolume, /pa_context_set_source_volume_by_index/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'scripts', 'build-native.js'), 'utf8'), /name:\s*'zcall-audio'/);
+  assert.ok(packageJson.build.extraFiles.some((entry) => entry.from === 'app' && entry.to === 'app'),
+    'the standalone app/native/zcall binary must be copied into the AppDir');
+  assert.ok(!packageJson.build.extraFiles.some((entry) => String(entry.from).includes('native/engines/zcall')),
+    'the source-only reference tree must not be packaged as a runtime engine');
+});
+
+test('built zcall binary exposes its version without loading Electron or Python', (t) => {
+  const binary = path.join(root, 'target', 'release', 'zcall');
+  if (!fs.existsSync(binary)) {
+    t.skip('Rust zcall release binary has not been built');
     return;
   }
-
-  const proc = spawn(binaryPath, ['--tone'], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  let stderrLogs = '';
-  proc.stderr.on('data', (d) => {
-    stderrLogs += d.toString('utf8');
-  });
-
-  const frames = [];
-  let buffer = Buffer.alloc(0);
-
-  const readNextFrame = () => {
-    return new Promise((resolve) => {
-      const check = () => {
-        while (buffer.length >= 4) {
-          if (buffer[0] === 0x4c) {
-            const level = buffer[1];
-            const len = buffer.readUInt16BE(2);
-            if (buffer.length < 4 + len) break;
-            const payload = buffer.subarray(4, 4 + len);
-            buffer = buffer.subarray(4 + len);
-            return resolve({ level, len, payload });
-          }
-          buffer = buffer.subarray(1);
-        }
-        proc.stdout.once('data', (chunk) => {
-          buffer = Buffer.concat([buffer, chunk]);
-          check();
-        });
-      };
-      check();
-    });
-  };
-
-  // 1. Verify initial audio frames with test tone (should have speech/tone loudness level < 127)
-  const initialFrame = await readNextFrame();
-  assert.equal(typeof initialFrame.level, 'number', 'Audio level must be a number');
-  assert.ok(initialFrame.level < 100, `Tone frame level (${initialFrame.level} dBov) must reflect audible signal (<100)`);
-  assert.ok(initialFrame.len > 0, 'Opus payload must not be empty');
-  // Verify that zcall-audio announced initial mic volume, auto mode, and probed hardware at startup
-  assert.match(stderrLogs, /\[audio-io\] mic volume: \d+%/, 'Engine must announce initial mic volume at startup');
-  assert.match(stderrLogs, /\[audio-io\] mic mode: (auto|manual)/, 'Engine must announce initial mic mode at startup');
-  assert.match(stderrLogs, /\[audio-io\] hw: audio backend=PulseAudio\/PipeWire/, 'Engine must probe audio backend');
-
-
-  // 2. Test Volume adjustment 'V' (percent: 75) -> transitions to manual mode
-  proc.stdin.write(Buffer.from([0x56, 75]));
-  await new Promise((r) => setTimeout(r, 50));
-  assert.ok(stderrLogs.includes('mic volume: 75%'), 'Stderr must acknowledge volume change to 75%');
-  assert.ok(stderrLogs.includes('mic mode: manual'), 'Manual volume change must switch mode to manual');
-
-  // 2b. Test Auto Gain toggle 'A' (on: 1) -> restores auto mode
-  proc.stdin.write(Buffer.from([0x41, 1]));
-  await new Promise((r) => setTimeout(r, 50));
-  assert.match(stderrLogs.slice(stderrLogs.lastIndexOf('mic mode: manual')), /mic mode: auto/, 'CMD_IN_AUTO_GAIN=1 must restore auto mode');
-
-  // 3. Test Mute command 'M' (mute: 1)
-  proc.stdin.write(Buffer.from([0x4d, 1]));
-  // Wait a couple frames to let mute take effect
-  await readNextFrame();
-  const mutedFrame = await readNextFrame();
-  assert.equal(mutedFrame.level, 127, 'Muted audio frame must have RFC 6464 level 127 (silence)');
-
-  // 4. Test Unmute command 'M' (mute: 0)
-  proc.stdin.write(Buffer.from([0x4d, 0]));
-  await readNextFrame();
-  const unmutedFrame = await readNextFrame();
-  assert.ok(unmutedFrame.level < 100, `Unmuted audio frame level (${unmutedFrame.level}) must return to audible`);
-
-  // 5. Test Inbound frame playback 'F' using the captured valid Opus packet stream (prime buffer)
-  for (let seq = 1; seq <= 4; seq++) {
-    const inboundHdr = Buffer.alloc(11);
-    inboundHdr[0] = 0x46; // 'F'
-    inboundHdr.writeUInt32BE(seq, 1);
-    inboundHdr.writeUInt32BE(0x1234, 5); // ssrc
-    inboundHdr.writeUInt16BE(unmutedFrame.payload.length, 9);
-    proc.stdin.write(Buffer.concat([inboundHdr, unmutedFrame.payload]));
-  }
-  await new Promise((r) => setTimeout(r, 80));
-  assert.match(stderrLogs, /\[audio-io\] info: jitter buffer primed/, 'JitterBuffer must prime after buffering target');
-
-  // 6. Test Speaker off command 'S' (off: 1)
-  proc.stdin.write(Buffer.from([0x53, 1]));
-
-  // 7. Test Device switch command 'D' (mic device)
-  const devName = Buffer.from('default_test_mic', 'utf8');
-  const devHdr = Buffer.from([0x44, 0x69, devName.length >> 8, devName.length & 0xff]);
-  proc.stdin.write(Buffer.concat([devHdr, devName]));
-  await new Promise((r) => setTimeout(r, 50));
-  assert.ok(stderrLogs.includes('default_test_mic'), 'Stderr must acknowledge device switch');
-
-  // 8. Clean shutdown on stdin EOF
-  proc.stdin.end();
-
-  const exitCode = await new Promise((resolve) => {
-    proc.on('exit', (code) => resolve(code));
-  });
-
-  assert.equal(exitCode, 0, 'zcall-audio process must exit cleanly with code 0 on EOF');
-});
-
-test('ZrtcMediaBackend network handover, P2P fallback to relay, and SRTP ROC recovery', () => {
-  const { ZrtcMediaBackend } = require('../native/engines/zcall/native-engine/backends/zrtc-media');
-  const {
-    COMMANDS,
-    P2P,
-    buildChangeAddressPacket,
-    buildP2pSignal,
-    unwrapPacket,
-  } = require('../native/engines/zcall/native-engine/zrtp-packet');
-  const { buildAudioRtpHeader } = require('../native/engines/zcall/native-engine/rtp');
-  const { protectRtp } = require('../native/engines/zcall/native-engine/srtp-aes');
-
-  // 1. Verify ChangeAddress (cmd 14) and P2P Signal (kind 5) wire packets
-  const changeAddrPkt = buildChangeAddressPacket({ uid: 123456, token: 0xdeadbeef, seq: 1, sessId: 'sess-xyz' });
-  const parsedChange = unwrapPacket(changeAddrPkt);
-  assert.equal(parsedChange.cmd, COMMANDS.CHANGE_ADDRESS);
-  assert.equal(parsedChange.subCmd, 1);
-  assert.equal(parsedChange.uid, 123456);
-  assert.equal(parsedChange.token, 0xdeadbeef);
-
-  const p2pStopPkt = buildP2pSignal({ role: 'caller', callId: 999, subCmd: 2, seq: 0 });
-  assert.equal(p2pStopPkt.length, 14);
-  assert.equal(p2pStopPkt[7], P2P.SIGNAL);
-  assert.equal(p2pStopPkt[9], 2);
-
-  // 2. Verify ZrtcMediaBackend SRTP sequence reset recovery & P2P-to-relay fallback
-  const receivedFrames = [];
-  const sentPackets = [];
-  const media = new ZrtcMediaBackend({
-    sendUdp: false,
-    audio: false,
-    onAudioPacket: (opus) => receivedFrames.push(opus),
-  });
-
-  media.onNegotiated({
-    sessId: '0123456789abcdef0123456789abcdef',
-    callId: 42,
-    role: 'caller',
-    localUid: 1001,
-    peerUid: 2002,
-    servers: [{ rtpaddr: '1.2.3.4:4200', rtcpaddr: '1.2.3.4:4200' }],
-    config: {},
-  });
-  media.active = true;
-  media.startedAt = Date.now() - 5000;
-  media.activeServer = { host: '1.2.3.4', port: 4200 };
-  media.serverToken = 0x11223344;
-  media._send = (pkt, dst, what) => sentPackets.push({ pkt, dst, what });
-
-  const makeSrtpAudio = (seq, roc = 0) => {
-    const hdr = buildAudioRtpHeader({ seq, ts: seq * 320, ssrc: 2002, twSeq: seq, level: 50 });
-    return protectRtp(hdr, Buffer.from([0xf8, 0xff, 0xfe]), media.srtpContext, seq, 2002, roc);
-  };
-
-  // Establish P2P path and receive packet at seq = 50000
-  media._p2pUp({ host: '192.168.1.50', port: 55000 });
-  assert.ok(media.p2pPath, 'P2P path must be active');
-  media._onAudio(makeSrtpAudio(50000, 0), true);
-  assert.equal(receivedFrames.length, 1);
-
-  // Twin duplicate packet arriving via relay must be deduplicated
-  media._onAudio(makeSrtpAudio(50000, 0), false);
-  assert.equal(receivedFrames.length, 1, 'Duplicate relay+P2P packet must be ignored');
-
-  // Simulate network change: local IP changes -> must stop P2P, notify peer via ReqForward subCmd 2, and send ChangeAddress
-  media.localIpSig = '192.168.1.10';
-  media._getLocalIpSig = () => '10.0.0.25';
-  media._checkNetworkAndAudio();
-  assert.equal(media.p2pPath, null, 'P2P path must be cleared on local network change');
-  assert.ok(
-    sentPackets.some((s) => s.what === 'ReqForward stopP2P'),
-    'Must send ReqForward subCmd 2 to instruct peer to switch audio to relay'
-  );
-  assert.ok(
-    sentPackets.some((s) => s.what.startsWith('ChangeAddress')),
-    'Must send ChangeAddress (cmd 14) to relay server'
-  );
-
-  // Simulate peer audio sequence reset backward from 50000 to 1000 (with roc = 0) after network switch
-  // Naive RocTracker.guess(1000) would guess roc = 1 (since 50000 - 1000 > 0x8000), which must recover to roc = 0!
-  media._onAudio(makeSrtpAudio(1000, 0), false);
-  media._onAudio(makeSrtpAudio(1001, 0), false);
-  assert.equal(receivedFrames.length, 3, 'Audio packets after backward sequence reset must decrypt and play');
-  assert.equal(media.counters.rxBad, 0, 'Must have zero SRTP auth failures after ROC fallback recovery');
-});
-
-test('ZrtcMediaBackend, EngineCore, ElectronCallUi, and call.js mic auto/manual mode wiring', () => {
-  const { EventEmitter } = require('events');
-  const vm = require('vm');
-  const { ZrtcMediaBackend } = require('../native/engines/zcall/native-engine/backends/zrtc-media');
-  const { EngineCore } = require('../native/engines/zcall/native-engine/engine-core');
-  const { ElectronCallUi } = require('../native/engines/zcall/native-engine/ui-client');
-
-  // 1. ZrtcMediaBackend sends [0x41, 1|0] on setMicAutoGain()
-  const writes = [];
-  const backend = new ZrtcMediaBackend({ audio: false });
-  backend.audio = { stdin: { write: (buf) => writes.push(Buffer.from(buf)) } };
-  backend.setMicAutoGain(true);
-  backend.setMicAutoGain(false);
-  assert.deepEqual(writes, [Buffer.from([0x41, 1]), Buffer.from([0x41, 0])]);
-
-  // 2. EngineCore + ElectronCallUi bidirectional micAutoGain / micVolume sync
-  const fakeSock = new EventEmitter();
-  const sentJson = [];
-  fakeSock.destroyed = false;
-  fakeSock.write = (chunk) => {
-    const str = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
-    for (const line of str.split('\n')) {
-      if (line.startsWith('{')) sentJson.push(JSON.parse(line));
-    }
-  };
-  const ui = Object.create(ElectronCallUi.prototype);
-  ui.log = () => {};
-  ui.cb = { hangup() {}, mute() {}, speaker() {}, videoFrame() {}, camera() {}, device() {}, screen() {} };
-  ui.state = { phase: 'connected', micVolume: 0, micAutoGain: true };
-  ui.sock = fakeSock;
-  ui.fallback = null;
-
-  const media = new EventEmitter();
-  const autoCalls = [];
-  media.setMicAutoGain = (on) => autoCalls.push(on);
-  media.setMicVolume = () => {};
-  new EngineCore({ emit: () => {}, media, log: () => {}, ui });
-
-  // Backend emits mic mode manual -> UI state updates
-  media.emit('micAutoGain', false);
-  assert.equal(ui.state.micAutoGain, false);
-  assert.equal(sentJson.at(-1).micAutoGain, false);
-
-  // UI toggles switch ON -> forwarded to media.setMicAutoGain(true)
-  ui._onAction({ action: 'micAutoGain', on: true });
-  assert.deepEqual(autoCalls, [true]);
-  assert.equal(ui.state.micAutoGain, true);
-
-  // 3. Locale dictionary completeness & call.js UI contract
-  const locale = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'plugins/zcall/ui/locale.json'), 'utf8')).messages;
-  for (const key of ['micAutoGain', 'micModeAuto', 'micModeManual']) {
-    assert.deepEqual(Object.keys(locale['zcall.' + key] || {}).sort(), ['en', 'vi'], `Missing vi/en for zcall.${key}`);
-  }
-
-  const callSrc = fs.readFileSync(path.join(__dirname, '..', 'plugins/zcall/ui/call.js'), 'utf8');
-  assert.match(callSrc, /micAutoModeShown\(false\)/, 'Dragging mic slider must flip UI to manual');
-  assert.match(callSrc, /act\('micAutoGain',\s*\{\s*on\s*\}\)/, 'Toggling auto switch must send micAutoGain action');
-  assert.match(callSrc, /micAutoModeShown\(state\.micAutoGain\)/, 'State updates must refresh badge & switch');
-  const i18nSrc = fs.readFileSync(path.join(__dirname, '..', 'plugins/zcall/ui/i18n.js'), 'utf8');
-  const uiDir = path.join(__dirname, '..', 'plugins/zcall/ui');
-  const i18nWin = { location: { href: new URL('call.html', 'file://' + uiDir + '/').href } };
-  vm.runInNewContext(i18nSrc, { window: i18nWin, URL, require, document: { documentElement: { lang: '' } } });
-  assert.equal(i18nWin.zcallI18n.t('micModeAuto'), 'Tự động');
-  assert.equal(i18nWin.zcallI18n.t('micModeManual'), 'Thủ công');
+  const result = spawnSync(binary, ['--version'], { encoding: 'utf8', timeout: 3000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^zcall \d+\.\d+\.\d+/);
 });

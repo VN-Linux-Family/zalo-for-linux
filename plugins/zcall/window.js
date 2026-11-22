@@ -1,46 +1,15 @@
 /**
  * plugins/zcall/window.js
  *
- * The call window. The engine (its own process) connects to a loopback
- * socket opened here, sends the call state and gets the user's clicks back;
- * the window is an always-on-top BrowserWindow with the desktop's title bar,
- * laid out as Zalo's macOS call window (ui/call.html, .css, .js; Zalo's own
- * icons, sounds and fonts from app/zcall-assets/). An incoming call shows
- * the notice of incoming.js (ui/incoming.*) first. The socket is passed to
- * the engine in ZCALL_UI_PORT / ZCALL_UI_TOKEN (inherited through the spawn);
- * the engine's first line is the token. Then one JSON object per line.
- * A video frame is the line below with bin set, then exactly that many raw
- * Annex-B bytes (an older engine may still send base64 in data).
+ * The call window. The Rust helper connects to the authenticated loopback
+ * socket opened here, sends call state and binary H.264 previews, and receives
+ * user actions/device requests. Zalo itself owns the helper process and the
+ * encrypted call-v2 Unix sockets. This plugin remains the Electron frontend
+ * during the transition; media capture, encoding and device discovery are Rust.
  *
- *   engine -> ui  {type:"state", phase, name, avatar, text, since, video, muted,
- *                  speakerOff, peerCamOff, peerMuted, peerSharing, cameraEncode?}
- *                 {type:"video", key, codec, src, bin}   then bin raw H.264 bytes
- *                 {type:"keyframe"}                  the phone needs a key frame
- *                 {type:"speaking", src, on}         group: member src talks (tile border, speaker layout)
- *                 {type:"close", text}
- *   ui -> engine  {action:"hangup"|"accept"|"reject"|"mute"|"speaker"|"camera", on?}
- *                 {action:"videoFrame", key, data, screen, w, h}   our camera or screen, H.264 Annex-B (base64)
- *                 {action:"device", kind:"mic"|"speaker", id}   PulseAudio source / sink ("" = default)
- *                 {action:"screen", on}               our screen replaces the camera
- *
- * phase: outgoing | incoming | connecting | connected | ended.
- *
- * Video: the camera is encoded with WebCodecs (H.264 baseline, software) at the
- * engine's cameraEncode: in a 1-1 call the rung of the server's ladder that the
- * engine picks from the phone's loss reports (send-rate.js: 360p 20 fps 500 kbps
- * at first, up to 720p 24 fps 1100 kbps), key frames at the start, when the
- * engine asks (the phone's PLI) and every keyMs (10 s); in a group call layer 0
- * of the SFU table. That exact size is cut from the camera's centre; the camera
- * is captured at 1280x720 when the size is above 640 px, else 640x360 (asking
- * the device for 480x240 stalled the preview). Without cameraEncode: 15 fps, at
- * most 640 px, a key frame every 2 s. With ZCALL_TEST_VIDEO=1 and no camera, a
- * moving test pattern is sent instead. Sharing the screen replaces the camera
- * (10 fps, at most 1280 px) and ignores cameraEncode.
- *
- * Devices: the ▲ on the micro pill (micro and speakers), on the camera pill,
- * or the gear (all of them) picks the device, also during a call. Microphones and speakers come from PipeWire (pactl), cameras from
- * Chromium; the choice is saved in <userData>/zcall-devices.json and sent to
- * the engine whenever it connects.
+ * The first line from the helper is ZCALL_UI_TOKEN. Control messages are
+ * JSON-lines. Video/local-preview frames use a {bin:N} header followed by N
+ * raw Annex-B bytes. The existing TCP protocol is retained unchanged.
  */
 
 'use strict';
@@ -49,7 +18,6 @@ const net = require('net');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
 const incoming = require('./incoming');
 const { pathToFileURL } = require('url');
 const { createStore } = require('../advanced-settings/store');
@@ -78,167 +46,73 @@ const ASSETS_DIR = (() => {
 })();
 
 let server = null;
+let serverReadyPromise = null;
 let client = null;
 let win = null;
 let winReady = false;
 let lastState = null;
 let closeTimer = null;
+let engineReconnectTimer = null;
+let rendererLoadedOnce = false;
 let videoMode = false;
 let compact = null; // the normal bounds while the window is compact
 let camStartOff = false; // "Trả lời không mở camera": the call window starts with the camera off
 let sharingScreen = false;
+let screenActionEpoch = 0;
+let screenActionPending = false;
+let screenActionStarted = false;
+let screenStopPending = false;
+let screenRequestId = null;
 let languageLocale = 'vi';
 let expandedAt = 0;
 
-// --- devices: { mic, speaker } PulseAudio names, camera { id, label }; '' / null = default ---
-let prefsFile = null;
-let prefs = null;
+// Device discovery and preferences are owned by the Rust engine. Requests use
+// the same authenticated loopback TCP connection as call state and video.
+const pendingEngineRequests = new Map();
+const queuedEngineActions = [];
+let engineRequestSequence = 0;
 
-function loadPrefs() {
-  if (prefs) return prefs;
-  prefs = { mic: '', speaker: '', camera: null, noMicBlock: false, noSpeakerBlock: false };
-  try {
-    prefsFile = path.join(require('electron').app.getPath('userData'), 'zcall-devices.json');
-    Object.assign(prefs, JSON.parse(fs.readFileSync(prefsFile, 'utf8')));
-  } catch (_) { /* first run */ }
-  return prefs;
-}
-
-function savePrefs() {
-  if (!prefsFile) return;
-  try { fs.writeFileSync(prefsFile, JSON.stringify(prefs, null, 2)); } catch (e) { console.error('[zcall-window] save devices:', e.message); }
-}
-
-function pactl(args) {
-  return new Promise((resolve) => {
-    execFile('pactl', args, { timeout: 3000 }, (err, out) => resolve(err ? '' : String(out)));
-  });
-}
-
-// Inputs without the monitors of outputs; outputs. Each { id, label }.
-async function listAudio(kind) {
-  const json = await pactl(['-f', 'json', 'list', kind]);
-  let list = [];
-  try {
-    const i = json.indexOf('[');
-    const parsed = JSON.parse(i >= 0 ? json.slice(i) : json);
-    list = parsed.map((d) => ({
-      id: d.name,
-      label: (d.description && d.description !== '(null)' ? d.description : d.name) || d.name,
-    }));
-  } catch (_) {
-    // pactl without -f json (PulseAudio < 16): names only.
-    list = (await pactl(['list', 'short', kind])).split('\n').map((l) => l.split('\t')[1]).filter(Boolean).map((n) => ({ id: n, label: n }));
+function send(message) {
+  if (client && !client.destroyed) {
+    try { client.write(JSON.stringify(message) + '\n'); return true; } catch (_) { /* reconnect below */ }
   }
-  // Not the monitors, nor the engine's own processed devices (zcall_ec_*: picking them would loop), nor remote network sinks (raop AirPlay), nor null labels.
-  return list.filter((d) => !d.id.endsWith('.monitor') && !d.id.startsWith('zcall_ec_') && !d.id.startsWith('raop_sink.') && d.label !== '(null)');
-}
-
-async function audioDevices() {
-  const [mics, speakers, defMic, defSpeaker] = await Promise.all([
-    listAudio('sources'), listAudio('sinks'), pactl(['get-default-source']), pactl(['get-default-sink']),
-  ]);
-  return { mics, speakers, defaultMic: defMic.trim(), defaultSpeaker: defSpeaker.trim(), prefs: loadPrefs() };
-}
-
-async function listVideo(sender) {
-  const win = (sender && !sender.isDestroyed() ? sender : null) ||
-              (require('electron').BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && !w.zcallWindow) || {}).webContents;
-  if (!win || win.isDestroyed()) return [];
-  try {
-    return await win.executeJavaScript(
-      `navigator.mediaDevices.enumerateDevices().then(ds => ds.filter(d => d.kind === 'videoinput').map((d, i) => ({ id: d.deviceId, name: d.label || ('Camera ' + (i + 1)), guid: d.deviceId })))`
-    );
-  } catch (_) { return []; }
-}
-
-async function getZaloDeviceList(sender) {
-  const d = await audioDevices();
-  const cams = await listVideo(sender);
-  const p = loadPrefs();
-
-  const otherAudInputDevice = d.mics.map((m) => ({ id: m.id, name: m.label, guid: m.id }));
-  const otherAudOutputDevice = d.speakers.map((s) => ({ id: s.id, name: s.label, guid: s.id }));
-  const otherVidDevice = cams;
-
-  const defaultAudInputDevice = p.mic
-    ? (otherAudInputDevice.find((m) => m.id === p.mic) || { id: p.mic, name: p.mic, guid: p.mic })
-    : (otherAudInputDevice.find((m) => m.id === d.defaultMic) || otherAudInputDevice[0] || null);
-
-  const defaultAudOutputDevice = p.speaker
-    ? (otherAudOutputDevice.find((s) => s.id === p.speaker) || { id: p.speaker, name: p.speaker, guid: p.speaker })
-    : (otherAudOutputDevice.find((s) => s.id === d.defaultSpeaker) || otherAudOutputDevice[0] || null);
-
-  const defaultVidDevice = cams.length
-    ? (cams.find((c) => p.camera && (c.id === p.camera.id || c.name === p.camera.label)) || cams[0])
-    : null;
-
-  return {
-    autoAudioInput: !p.mic,
-    autoAudioOutput: !p.speaker,
-    defaultAudInputDevice,
-    defaultAudOutputDevice,
-    defaultVidDevice,
-    otherAudInputDevice,
-    otherAudOutputDevice,
-    otherVidDevice,
-  };
-}
-
-function updateDevicesFromZalo(data) {
-  if (!data || typeof data !== 'object') return;
-  const p = loadPrefs();
-  if (data.autoAudioInput !== undefined) {
-    p.mic = data.autoAudioInput ? '' : (data.defaultAudInputDevice && data.defaultAudInputDevice.id ? String(data.defaultAudInputDevice.id) : '');
-  } else if (data.defaultAudInputDevice && data.defaultAudInputDevice.id) {
-    p.mic = String(data.defaultAudInputDevice.id);
-  }
-  if (data.autoAudioOutput !== undefined) {
-    p.speaker = data.autoAudioOutput ? '' : (data.defaultAudOutputDevice && data.defaultAudOutputDevice.id ? String(data.defaultAudOutputDevice.id) : '');
-  } else if (data.defaultAudOutputDevice && data.defaultAudOutputDevice.id) {
-    p.speaker = String(data.defaultAudOutputDevice.id);
-  }
-  if (data.defaultVidDevice && data.defaultVidDevice.id) {
-    p.camera = { id: String(data.defaultVidDevice.id), label: String(data.defaultVidDevice.name || '') };
-  }
-  savePrefs();
-  sendDevicePrefs();
-}
-
-function updateAdvancedOptionsFromZalo(data) {
-  if (!data || typeof data !== 'object') return;
-  const p = loadPrefs();
-  let changed = false;
-  if (data.receiveCallWhileNoMicrophoneDetected !== undefined) {
-    const val = data.receiveCallWhileNoMicrophoneDetected === false;
-    if (p.noMicBlock !== val) { p.noMicBlock = val; changed = true; }
-  }
-  if (data.receiveCallWhileNoSpeakerDetected !== undefined) {
-    const val = data.receiveCallWhileNoSpeakerDetected === false;
-    if (p.noSpeakerBlock !== val) { p.noSpeakerBlock = val; changed = true; }
-  }
-  if (changed) savePrefs();
-}
-
-async function shouldBlockIncoming() {
-  const p = loadPrefs();
-  if (p.noMicBlock || p.noSpeakerBlock) {
-    const d = await audioDevices();
-    if (p.noMicBlock && (!d.mics || d.mics.length === 0)) return true;
-    if (p.noSpeakerBlock && (!d.speakers || d.speakers.length === 0)) return true;
-  }
+  if (queuedEngineActions.length < 128) queuedEngineActions.push(message);
   return false;
 }
 
-function sendDevicePrefs() {
-  const p = loadPrefs();
-  if (p.mic) send({ action: 'device', kind: 'mic', id: p.mic });
-  if (p.speaker) send({ action: 'device', kind: 'speaker', id: p.speaker });
+function requestEngine(action) {
+  const requestId = 'zcall-ui-' + process.pid + '-' + (++engineRequestSequence);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingEngineRequests.delete(requestId);
+      const queuedIndex = queuedEngineActions.findIndex((message) => message.requestId === requestId);
+      if (queuedIndex >= 0) queuedEngineActions.splice(queuedIndex, 1);
+      reject(new Error('ZCall engine request timed out: ' + action.action));
+    }, 5000);
+    pendingEngineRequests.set(requestId, { resolve, reject, timer });
+    send({ ...action, requestId });
+  });
 }
 
-function send(msg) {
-  if (client && !client.destroyed) {
-    try { client.write(JSON.stringify(msg) + '\n'); } catch (_) { /* engine gone */ }
+function rejectPendingEngineRequests(error) {
+  for (const [requestId, pending] of pendingEngineRequests) {
+    clearTimeout(pending.timer);
+    pending.reject(error);
+    pendingEngineRequests.delete(requestId);
+  }
+}
+
+async function shouldBlockIncoming() {
+  try {
+    const devices = await requestEngine({ action: 'listDevices' });
+    const prefs = devices && devices.prefs || {};
+    return Boolean(
+      (prefs.noMicBlock && (!devices.mics || devices.mics.length === 0)) ||
+      (prefs.noSpeakerBlock && (!devices.speakers || devices.speakers.length === 0))
+    );
+  } catch (error) {
+    console.error('[zcall-window] device query:', error.message);
+    return false;
   }
 }
 
@@ -253,6 +127,7 @@ function ensureWindow() {
   clearTimeout(closeTimer);
   if (win && !win.isDestroyed()) return win;
   winReady = false;
+  rendererLoadedOnce = false;
   win = new BrowserWindow({
     width: VOICE_WIDTH,
     height: VOICE_HEIGHT,
@@ -276,10 +151,23 @@ function ensureWindow() {
   win.webContents.on('did-finish-load', () => {
     winReady = true;
     win.webContents.send('zcall-ui-language', languageLocale);
-    if (lastState) win.webContents.send('zcall-ui-state', lastState);
+    if (lastState) {
+      const state = rendererLoadedOnce && lastState.phase === 'connected'
+        ? { ...lastState, resume: true }
+        : lastState;
+      win.webContents.send('zcall-ui-state', state);
+    }
+    rendererLoadedOnce = true;
   });
   // Closing the window during a call ends it.
   win.on('close', () => {
+    // Invalidate a portal start that is still waiting for the compact job;
+    // the engine's hangup path owns cancellation once a worker was dispatched.
+    screenActionEpoch++;
+    screenActionPending = false;
+    screenActionStarted = false;
+    screenStopPending = false;
+    sharingScreen = false;
     if (lastState && lastState.phase !== 'ended') send({ action: 'hangup' });
     lastState = null;
   });
@@ -297,7 +185,7 @@ function ensureWindow() {
   win.on('focus', () => {
     clearTimeout(blurTimer);
   });
-  win.on('closed', () => { win = null; winReady = false; videoMode = false; compact = null; compacting = false; sharingScreen = false; clearTimeout(blurTimer); });
+  win.on('closed', () => { win = null; winReady = false; rendererLoadedOnce = false; videoMode = false; compact = null; compacting = false; sharingScreen = false; screenStopPending = false; clearTimeout(blurTimer); });
   // From a file, not a data: URL: WebCodecs (video) needs a secure context.
   win.loadFile(path.join(__dirname, 'ui', 'call.html'), {
     query: { assets: ASSETS_DIR, test: process.env.ZCALL_TEST_VIDEO === '1' ? '1' : '0' },
@@ -418,6 +306,13 @@ async function setCompact(on) {
 }
 
 async function onEngineMessage(m) {
+  if (m && m.requestId && pendingEngineRequests.has(m.requestId)) {
+    const pending = pendingEngineRequests.get(m.requestId);
+    pendingEngineRequests.delete(m.requestId);
+    clearTimeout(pending.timer);
+    pending.resolve(m.data);
+    return;
+  }
   if (m.type === 'state') {
     // Incoming: the notice in the screen's corner, not the call window.
     if (m.phase === 'incoming') {
@@ -435,9 +330,19 @@ async function onEngineMessage(m) {
       // Missed or declined before answering: nothing else to show.
       if (m.phase === 'ended') { lastState = null; camStartOff = false; return; }
     }
-    if (m.phase === 'outgoing' || m.phase === 'ended') { camStartOff = false; sharingScreen = false; }
-    const state = camStartOff ? { ...m, camStartOff: true } : m;
-    const first = !lastState || lastState.phase === 'ended' || lastState.phase === 'incoming';
+    if (m.phase === 'outgoing' || m.phase === 'ended') {
+      camStartOff = false; sharingScreen = false;
+      screenActionEpoch++; screenActionPending = false; screenActionStarted = false; screenStopPending = false; screenRequestId = null;
+    }
+    const previous = lastState;
+    const windowAlive = !!(win && !win.isDestroyed());
+    const resume = !windowAlive && previous && previous.phase === 'connected' && m.phase === 'connected';
+    const state = {
+      ...m,
+      ...(resume ? { resume: true } : {}),
+      ...(camStartOff ? { camStartOff: true } : {}),
+    };
+    const first = !windowAlive || !previous || previous.phase === 'ended' || previous.phase === 'incoming';
     const w = ensureWindow();
     pushState(state);
     w.setTitle('Zalo Call - ' + (m.name || 'Zalo'));
@@ -446,16 +351,76 @@ async function onEngineMessage(m) {
       w.show();
       w.focus();
     }
-  } else if (m.type === 'keyframe') {
-    if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-keyframe');
+  } else if (m.type === 'audioFault') {
+    if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-audio-fault', m.kind);
   } else if (m.type === 'speaking') {
     if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-speaking', m);
   } else if (m.type === 'micLevel') {
     if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-mic-level', m.level);
+  } else if (m.type === 'cameraError') {
+    if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-camera-error', { message: m.message });
+  } else if (m.type === 'screenSources') {
+    if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-screen-sources', m.windows || []);
+  } else if (m.type === 'screenSourceMode') {
+    if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-screen-source-mode', m.source || 'window');
+  } else if (m.type === 'screenCaptureAccepted') {
+    if (m.requestId && screenRequestId && m.requestId !== screenRequestId) return;
+    screenActionPending = false;
+    screenActionStarted = true;
+    console.info('[zcall-window] Rust accepted screen capture; compacting call window');
+    compactJob = compactJob.then(async () => {
+      if (screenRequestId !== m.requestId || screenStopPending) return;
+      if (!compact) await setCompact(true);
+      if (!compact) throw new Error('Could not compact the call window after Rust accepted screen capture');
+    }).catch((error) => {
+      console.error('[zcall-window] screen-share compact after Rust acceptance:', error.message);
+      send({ action: 'screen', on: false, requestId: m.requestId });
+      if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-screen-error', { message: error.message });
+    });
+  } else if (m.type === 'screenStarted') {
+    if (m.requestId && screenRequestId && m.requestId !== screenRequestId) return;
+    screenActionPending = false;
+    screenActionStarted = false;
+    screenStopPending = false;
+    sharingScreen = true;
+    if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-screen-started', m);
+  } else if (m.type === 'screenStopped') {
+    // Terminal notifications are tagged with the capture transaction that
+    // produced them. Ignore a delayed stop from the previous portal session.
+    if (m.requestId && screenRequestId && m.requestId !== screenRequestId) return;
+    // Legacy untagged stop events may race with a newer start. Tagged events
+    // are safe to apply only when their requestId matches the current attempt.
+    if (!m.requestId && (screenActionPending || screenActionStarted)) return;
+    screenStopPending = false;
+    screenActionEpoch++;
+    screenActionPending = false;
+    screenActionStarted = false;
+    sharingScreen = false;
+    screenRequestId = null;
+    if (win && !win.isDestroyed() && winReady) win.webContents.send('zcall-ui-screen-stopped');
+  } else if (m.type === 'screenError') {
+    if (m.requestId && screenRequestId && m.requestId !== screenRequestId) return;
+    const stoppedByUser = screenStopPending;
+    // Every terminal event clears the old transaction. A newer retry is only
+    // queued by Rust after the old worker has exited, so its own start remains
+    // authoritative and must not inherit these flags.
+    screenActionEpoch++;
+    screenActionPending = false;
+    screenActionStarted = false;
+    screenStopPending = false;
+    sharingScreen = false;
+    screenRequestId = null;
+    if (win && !win.isDestroyed() && winReady) {
+      if (stoppedByUser) win.webContents.send('zcall-ui-screen-stopped');
+      else win.webContents.send('zcall-ui-screen-error', { message: m.message });
+    }
   } else if (m.type === 'video') {
     if (!win || win.isDestroyed() || !winReady || !lastState || lastState.phase !== 'connected') return;
     enterVideoMode();
     win.webContents.send('zcall-ui-video', m);
+  } else if (m.type === 'localVideo') {
+    if (!win || win.isDestroyed() || !winReady || !lastState || lastState.phase !== 'connected') return;
+    win.webContents.send('zcall-ui-local-video', m);
   } else if (m.type === 'close') {
     camStartOff = false;
     if (incoming.isOpen()) incoming.close();
@@ -468,8 +433,8 @@ async function onEngineMessage(m) {
   }
 }
 
-// Control lines are JSON. A video frame is {type:'video', bin:N} plus the
-// next N bytes, which stay binary (setEncoding would turn them into text).
+// Control lines are JSON. Video and local-preview frames carry a {bin:N}
+// header followed by N raw bytes, preserving the existing binary socket framing.
 function readEngineMessages(state, chunk, token) {
   const piece = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
   state.buf = state.buf.length ? Buffer.concat([state.buf, piece]) : piece;
@@ -499,7 +464,7 @@ function readEngineMessages(state, chunk, token) {
     }
     let m;
     try { m = JSON.parse(line); } catch (_) { continue; }
-    if (m && m.type === 'video' && Number.isInteger(m.bin) && m.bin > 0 && m.bin <= 8 * 1024 * 1024) {
+    if (m && (m.type === 'video' || m.type === 'localVideo') && Number.isInteger(m.bin) && m.bin > 0 && m.bin <= 8 * 1024 * 1024) {
       state.pending = m;
       continue;
     }
@@ -517,7 +482,15 @@ function onConnection(sock) {
     if (r.authed) {
       if (client && client !== sock) client.destroy(); // engine restarted
       client = sock;
-      sendDevicePrefs();
+      clearTimeout(engineReconnectTimer);
+      engineReconnectTimer = null;
+      if (win && !win.isDestroyed() && winReady) {
+        win.webContents.send('zcall-ui-connection', { connected: true });
+      }
+      while (queuedEngineActions.length && client === sock && !sock.destroyed) {
+        const message = queuedEngineActions.shift();
+        try { sock.write(JSON.stringify(message) + '\n'); } catch (_) { queuedEngineActions.unshift(message); break; }
+      }
     }
     for (const m of r.messages) onEngineMessage(m);
   });
@@ -525,14 +498,28 @@ function onConnection(sock) {
   sock.on('close', () => {
     if (client !== sock) return;
     client = null;
-    // Engine died mid-call: do not leave a dead window around.
-    if (lastState) onEngineMessage({ type: 'close', statusCode: 'disconnected' });
+    rejectPendingEngineRequests(new Error('ZCall engine disconnected'));
+    if (win && !win.isDestroyed() && winReady) {
+      win.webContents.send('zcall-ui-connection', { connected: false });
+    }
+    // Keep the call window and latest call state during a transient helper/UI
+    // socket restart. The Rust transport retries and replays the current state.
+    clearTimeout(engineReconnectTimer);
+    if (lastState && lastState.phase !== 'ended') {
+      engineReconnectTimer = setTimeout(() => {
+        engineReconnectTimer = null;
+        if (!client && lastState) {
+          queuedEngineActions.length = 0;
+          onEngineMessage({ type: 'close', statusCode: 'disconnected' });
+        }
+      }, 10000);
+    }
   });
 }
 
 /** Opens the socket and exports ZCALL_UI_PORT / ZCALL_UI_TOKEN. Call before the engine starts. */
 function start() {
-  if (server) return;
+  if (server) return serverReadyPromise || Promise.resolve();
   const { ipcMain, app } = require('electron');
   const soundStore = createStore(app.getPath('userData'));
   const soundPages = ['call.html', 'incoming.html'].map((file) =>
@@ -545,67 +532,41 @@ function start() {
     }
     return soundStore.soundUrls();
   });
+  delete process.env.ZCALL_UI_PORT;
   process.env.ZCALL_UI_TOKEN = crypto.randomBytes(16).toString('hex');
   server = net.createServer(onConnection);
   server.on('error', (e) => console.error('[zcall-window]', e.message));
-  server.listen(0, '127.0.0.1', () => {
-    process.env.ZCALL_UI_PORT = String(server.address().port);
+  serverReadyPromise = new Promise((resolve, reject) => {
+    const listening = () => {
+      process.env.ZCALL_UI_PORT = String(server.address().port);
+      resolve();
+    };
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', listening);
+  }).catch((error) => {
+    server = null;
+    serverReadyPromise = null;
+    delete process.env.ZCALL_UI_PORT;
+    delete process.env.ZCALL_UI_TOKEN;
+    throw error;
   });
-  ipcMain.handle('zcall-ui-devices', () => audioDevices());
-  ipcMain.on('call-send-to-native', async (event, msg) => {
+  ipcMain.handle('zcall-ui-devices', () => requestEngine({ action: 'listDevices' }));
+  ipcMain.on('call-send-to-native', (event, msg) => {
     if (!msg || typeof msg !== 'object') return;
     if (msg.command === 'listDevice') {
       if (!msg.data) {
-        event.sender.send('call-response-listDevice', await getZaloDeviceList(event.sender));
+        requestEngine({ action: 'zaloListDevices' }).then((data) => {
+          if (event.sender && !event.sender.isDestroyed()) event.sender.send('call-response-listDevice', data);
+        }).catch((error) => console.error('[zcall-window] Zalo device list:', error.message));
       } else {
-        updateDevicesFromZalo(msg.data);
+        send({ action: 'zaloDeviceConfig', data: msg.data });
       }
     } else if (msg.command === 'advancedOptions') {
-      updateAdvancedOptionsFromZalo(msg.data);
+      send({ action: 'advancedOptions', data: msg.data || {} });
     } else if (msg.command === 'init' && msg.data) {
-      updateDevicesFromZalo(msg.data);
-      updateAdvancedOptionsFromZalo(msg.data);
+      send({ action: 'zaloDeviceConfig', data: msg.data });
+      send({ action: 'advancedOptions', data: msg.data });
     }
-  });
-  // On X11, enumerate running windows (excluding the call window itself) for the share menu.
-  ipcMain.handle('zcall-ui-x11-windows', async () => {
-    const isWayland = (process.env.XDG_SESSION_TYPE || '').trim().toLowerCase() === 'wayland';
-    if (isWayland) return null;
-    const { desktopCapturer } = require('electron');
-    const callWinId = win && !win.isDestroyed() && typeof win.getMediaSourceId === 'function' ? win.getMediaSourceId() : null;
-    const callTitle = win && !win.isDestroyed() ? win.getTitle() : '';
-    try {
-      const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
-      return sources.filter((s) => {
-        if (!s.id.startsWith('window:')) return false;
-        if (callWinId && s.id === callWinId) return false;
-        if (callTitle && s.name === callTitle) return false;
-        if (!s.name || !s.name.trim()) return false;
-        return true;
-      }).map((s) => ({ id: s.id, label: s.name }));
-    } catch (_) {
-      return [];
-    }
-  });
-  // The screen / window to share. With PipeWire capture (Wayland, see zcall.configure)
-  // this asks the desktop's portal, which lets the user pick one.
-  ipcMain.handle('zcall-ui-screen-source', async (_e, preferredId) => {
-    sharingScreen = true;
-    await compactJob; // out of full screen and compact before the portal's dialog opens
-    const { desktopCapturer } = require('electron');
-    if (typeof preferredId === 'string' && preferredId.startsWith('window:') && preferredId !== 'window:select') {
-      return preferredId;
-    }
-    if (preferredId === 'window:select') {
-      const callWinId = win && !win.isDestroyed() && typeof win.getMediaSourceId === 'function' ? win.getMediaSourceId() : null;
-      const callTitle = win && !win.isDestroyed() ? win.getTitle() : '';
-      const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
-      const s = sources.find((x) => x.id.startsWith('window:') && x.id !== callWinId && (!callTitle || x.name !== callTitle)) || sources[0];
-      return s ? s.id : 'window:0:0';
-    }
-    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
-    const s = sources.find((x) => x.id.startsWith('screen:')) || sources[0];
-    return s ? s.id : (preferredId || 'screen:0:0');
   });
   // Compact / expand, from the page. Picking the screen to share happens with
   // the window compact and focused: GNOME puts the portal's dialog right under
@@ -615,7 +576,9 @@ function start() {
     if (op === 'compact' || op === 'expand') {
       if (win.isMinimized()) win.restore();
       win.show();
-      compactJob = setCompact(op === 'compact').catch((e) => console.error('[zcall-window] compact:', e.message));
+      compactJob = compactJob
+        .then(() => setCompact(op === 'compact'))
+        .catch((e) => console.error('[zcall-window] compact:', e.message));
     } else if (op === 'fullscreen') { // toggle, video / group only
       if (videoMode && !compact && !compacting) win.setFullScreen(!win.isFullScreen());
     } else if (op === 'leave-fullscreen') {
@@ -629,15 +592,41 @@ function start() {
   });
   ipcMain.on('zcall-ui-action', (_e, action) => {
     if (!action || typeof action.action !== 'string') return;
-    if (action.action === 'videoFrame') { send(action); return; } // hot path
-    if (action.action === 'screen') sharingScreen = !!action.on;
-    if (action.action === 'device') {
-      const p = loadPrefs();
-      if (action.kind === 'camera') { p.camera = action.id ? { id: String(action.id), label: String(action.label || '') } : null; savePrefs(); return; }
-      if (action.kind !== 'mic' && action.kind !== 'speaker') return;
-      p[action.kind] = typeof action.id === 'string' ? action.id : '';
-      savePrefs();
-      send({ action: 'device', kind: action.kind, id: p[action.kind] });
+    if (action.action === 'screen') {
+      if (action.on) {
+        // Ignore duplicate renderer IPC while the chooser, PipeWire stream,
+        // or an established share is already active.
+        if (screenActionPending || screenActionStarted || sharingScreen) return;
+        const epoch = ++screenActionEpoch;
+        action.requestId = String(epoch);
+        screenRequestId = action.requestId;
+        screenStopPending = false;
+        screenActionPending = true;
+        // Rust owns call validation, backend selection and capture startup.
+        // The window is compacted only after Rust acknowledges the worker spawn.
+        if (!client || client.destroyed) {
+          screenActionPending = false;
+          screenActionStarted = false;
+          console.error('[zcall-window] screen-share startup: ZCall engine disconnected');
+          if (win && !win.isDestroyed() && winReady) {
+            win.webContents.send('zcall-ui-screen-error', { message: 'ZCall engine disconnected' });
+          }
+          return;
+        }
+        console.info('[zcall-window] forwarding screen capture request to Rust');
+        send(action);
+      } else {
+        // Stop is sent to Rust even while startup is pending. The authenticated
+        // TCP stream preserves ordering, and Rust owns cancellation/cleanup.
+        screenActionEpoch++;
+        action.requestId = screenRequestId || String(cancelEpoch);
+        screenActionPending = false;
+        screenActionStarted = false;
+        screenStopPending = true;
+        // TCP preserves action order: Rust receives stop after the in-flight
+        // start and owns cancellation/terminal state for that request.
+        send(action);
+      }
       return;
     }
     if (lastState && (action.action === 'mute' || action.action === 'speaker')) {
@@ -646,6 +635,7 @@ function start() {
     }
     send(action);
   });
+  return serverReadyPromise;
 }
 
 function setLocale(locale) {
@@ -659,8 +649,15 @@ function setLocale(locale) {
 function stop() {
   if (win && !win.isDestroyed()) win.destroy();
   incoming.close();
+  rejectPendingEngineRequests(new Error('ZCall frontend stopped'));
+  clearTimeout(engineReconnectTimer);
+  engineReconnectTimer = null;
+  queuedEngineActions.length = 0;
   if (server) server.close();
   server = null;
+  serverReadyPromise = null;
+  delete process.env.ZCALL_UI_PORT;
+  delete process.env.ZCALL_UI_TOKEN;
 }
 
 module.exports = { start, stop, setLocale, readEngineMessages };

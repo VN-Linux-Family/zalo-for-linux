@@ -1,0 +1,31 @@
+[package]
+name = "zcall"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+license.workspace = true
+[[bin]]
+name = "zcall"
+path = "src/main.rs"
+
+[dependencies]
+bytemuck = "1.25.2"
+signal-hook = "0.3.18"
+libc = "0.2"
+nix = { version = "0.31.3", default-features = false, features = ["net"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+hex = "0.4"
+openh264 = "0.9.10"
+ashpd = { version = "0.14.1", default-features = false, features = ["tokio", "screencast"] }
+pipewire = "0.10.1"
+tokio = { version = "1", features = ["rt", "time"] }
+futures-util = "0.3"
+
+v4l = "0.14"
+xcb = { version = "1.7.1", features = ["shm", "xfixes"] }
+
+[build-dependencies]
+cc = "1.0"

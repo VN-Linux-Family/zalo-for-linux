@@ -11,9 +11,12 @@ members = [
     "native/addons/zfile",
     "native/addons/db-cross-v4",
     "native/engines/zocr",
-    "native/engines/zcall-audio",
+    "native/engines/zcall",
 ]
 resolver = "2"
+
+[workspace.package]
+license = "BSD-3-Clause"
 
 [profile.release]
 opt-level = 3

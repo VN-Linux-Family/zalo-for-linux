@@ -1,30 +1,29 @@
 /**
  * patch-zcall-native.js
  *
- * Runs Zalo's calls on the native Linux engine (zcall-native/).
+ * Runs Zalo's calls on the standalone native Linux Rust engine.
  *
  * Zalo's main process starts a call helper (ZaloCall.exe on Windows,
  * ZaloHelper.app on macOS) and talks to it over two local channels carrying
  * AES-encrypted JSON: named pipes on Windows, unix sockets on macOS. On Linux
  * this patch makes it
- *   - spawn native/engines/zcall/native-engine/zcall-native.js (resolved
- *     by plugins/zcall into ZCALL_ENGINE_JS) on Zalo's own Electron
- *     (ELECTRON_RUN_AS_NODE) using the unix sockets;
- *   - await plugins/zcall's global.__zcallPrepare() first (system packages).
- * Transport crypto, message handling and renderer IPC are untouched; Windows
- * and macOS keep their branches.
+ *   - spawn the standalone Rust executable at ../native/zcall/zcall,
+ *     resolved relative to this patched main-dist/main.js file;
+ *   - deploy the standalone Rust executable under app/native/zcall.
+ * Zalo continues to own helper startup, process lifecycle and encrypted
+ * call-v2 socket transport. The plugin's existing authenticated loopback TCP
+ * socket remains the UI protocol. Windows and macOS keep their branches.
  *
  * Also fixes two bugs of the non-Windows path that the helper exposes:
  * makeCall racing the init message, and a send queue that stalls after the
  * first message.
  */
 
-const { execSync } = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { ROOT, APP_MAIN_DIST, ZCALL_DIR, resolvePrebuiltBinary } = require('../utils/paths');
+const { ROOT, APP_DIR, APP_MAIN_DIST, ZCALL_DIR, resolvePrebuiltBinary } = require('../utils/paths');
 const MAIN_JS = path.join(APP_MAIN_DIST, 'main.js');
 
 // [what, from, to]: `from` is a string or a RegExp on Zalo's minified
@@ -45,19 +44,10 @@ function getSteps(content) {
       '$4=$1?"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv":(process.env.TMPDIR||"/tmp").replace(/\\/+$/,"")+"/socketzalorecv2021"'],
     ['engine path on Linux',
       /:\(([$\w]+)=[$\w]+\(\)\?[$\w]+\.join\(__dirname,"..","native","qt-call-cap-mac","ZaloHelper\.app"\)/,
-      ':("linux"===process.platform?$1=process.env.ZCALL_ENGINE_JS||"":($1=u()?o.join(__dirname,"..","native","qt-call-cap-mac","ZaloHelper.app")'],
+      ':("linux"===process.platform?$1=o.join(__dirname,"..","native","zcall","zcall"):($1=u()?o.join(__dirname,"..","native","qt-call-cap-mac","ZaloHelper.app")'],
     ['engine path on Linux (close)',
       /([$\w]+=[$\w]+\.join\([$\w]+,"Contents","MacOS","ZaloCall"\)\)),([$\w]+)\}\(\);/,
       '$1),$2}();'],
-    // plugins/zcall checks the system packages (and tells the user) first.
-    ['await __zcallPrepare',
-      /\}\(\);([$\w]+)\(([$\w]+),([$\w]+)\)\.then\(\(([$\w]+)=>\{if\(([$\w]+)&&!\4\)return ([$\w]+=!1)/,
-      '}();("linux"===process.platform&&global.__zcallPrepare?global.__zcallPrepare().then((()=>$1($2,$3))):$1($2,$3)).then(($4=>{if($5&&!$4)return $6'],
-    ['spawn the engine',
-      /([$\w]+)=([$\w]+)\(([$\w]+),\[([$\w]+),([$\w]+)\]\),\1\.stdout\.setEncoding\("utf8"\)/,
-      ';"linux"===process.platform?' +
-      '$1=$2(process.execPath,[$3,$4,$5],{env:Object.assign({},process.env,{ELECTRON_RUN_AS_NODE:"1"})}):' +
-      '$1=$2($3,[$4,$5]),$1.stdout.setEncoding("utf8")'],
     // A failed or ended engine must not leave "started" set, or no call
     // would start it again until Zalo restarts.
     ['restart after the engine ends',
@@ -93,30 +83,43 @@ function foundIn(content, from) {
  return ok;
 }
 
-function deployZcallAudio() {
- const rootBinary = path.join(ROOT, 'target', 'release', 'zcall-audio');
- const sourceBinary = resolvePrebuiltBinary('zcall-audio', rootBinary);
- const destDir = path.join(ZCALL_DIR, 'native-engine');
+function deployZcallBinary() {
+ const rootBinary = path.join(ROOT, 'target', 'release', 'zcall');
+ const localBinary = path.join(ZCALL_DIR, 'target', 'release', 'zcall');
+ const fallbackBinary = fs.existsSync(rootBinary) ? rootBinary : localBinary;
+ const sourceBinary = resolvePrebuiltBinary('zcall', fallbackBinary);
 
- if (fs.existsSync(sourceBinary)) {
-  fs.copyFileSync(sourceBinary, path.join(destDir, 'zcall-audio'));
-  fs.chmodSync(path.join(destDir, 'zcall-audio'), 0o755);
-  logger.success('Deployed native zcall-audio engine to zcall native-engine/zcall-audio');
-  return true;
+ const appCallDir = path.join(APP_DIR, 'native', 'zcall');
+ fs.ensureDirSync(appCallDir);
+ const targetBin = path.join(appCallDir, 'zcall');
+
+ if (!fs.existsSync(sourceBinary)) {
+  throw new Error('Missing pre-built Rust zcall binary at: ' + sourceBinary + '. Build it with npm run build:native -- zcall.');
  }
- logger.dim('Pre-built zcall-audio binary not found; audio engine will fall back to python3 audio-io.py');
- return false;
+ const stat = fs.statSync(sourceBinary);
+ if (!stat.isFile()) throw new Error('Rust zcall binary is not a regular file: ' + sourceBinary);
+ if (sourceBinary !== targetBin) fs.copyFileSync(sourceBinary, targetBin);
+ fs.chmodSync(targetBin, 0o755);
+ const deployed = fs.statSync(targetBin);
+ if (!deployed.isFile() || (deployed.mode & 0o111) === 0) {
+  throw new Error('Deployed Rust zcall binary is not executable: ' + targetBin);
+ }
+ logger.success('Deployed native Rust zcall engine to ' + path.relative(ROOT, targetBin));
+ return targetBin;
 }
 
 async function main(mainJs = MAIN_JS) {
- deployZcallAudio();
+ const deployedBinary = deployZcallBinary();
  if (!fs.existsSync(mainJs)) {
   throw new Error('native call patch: main.js not found');
  }
  let content = fs.readFileSync(mainJs, 'utf8');
- if (content.includes('ZCALL_ENGINE_JS')) {
-  logger.dim('native call patch already applied');
-  return true;
+ const relativeBinaryMarker = 'o.join(__dirname,"..","native","zcall","zcall")';
+ if (content.includes(relativeBinaryMarker)) {
+  const cleaned = content.replace(/,process\.emit\("zcall-engine-start",[$\w]+\)/, '');
+  if (cleaned !== content) fs.writeFileSync(mainJs, cleaned, 'utf8');
+  logger.dim('native Rust call patch already applied');
+  return deployedBinary;
  }
  const steps = getSteps(content);
  const missing = [];
@@ -129,10 +132,10 @@ async function main(mainJs = MAIN_JS) {
   throw new Error('native call patch not applied, Zalo changed: ' + missing.join('; '));
  }
  fs.writeFileSync(mainJs, content, 'utf8');
- logger.success('native call patch applied');
- return true;
+ logger.success('native Rust call patch applied');
+ return deployedBinary;
 }
 
 if (require.main === module) main(process.argv[2]);
 
-module.exports = { main, getSteps };
+module.exports = { main, getSteps, deployZcallBinary };

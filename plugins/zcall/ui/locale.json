@@ -325,6 +325,10 @@
     "zcall.unknownCaller": {
       "vi": "Ai đó",
       "en": "Someone"
+    },
+    "zcall.reconnecting": {
+      "vi": "Đang kết nối lại…",
+      "en": "Reconnecting…"
     }
   }
 }

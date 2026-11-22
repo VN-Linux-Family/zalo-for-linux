@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const logger = require('./utils/logger');
-const { APP_DIR, APP_MAIN_DIST } = require('./utils/paths');
+const { APP_DIR } = require('./utils/paths');
 
 const PATCHES = [
   'patch-zalo-language-bridge',
@@ -77,11 +77,6 @@ async function main() {
   runPatch('extract-zcall-assets', [], true);
   runPatch('extract-screenshot-assets', [], true);
 
-  // Without it Zalo would look for ZaloCall.exe / ZaloHelper.app: no calls at all.
-  const mainJs = path.join(APP_MAIN_DIST, 'main.js');
-  if (!fs.existsSync(mainJs) || !fs.readFileSync(mainJs, 'utf8').includes('ZCALL_ENGINE_JS')) {
-    throw new Error('native call patch missing from app/main-dist/main.js');
-  }
 
   logger.success('All platform patches applied successfully');
 }
