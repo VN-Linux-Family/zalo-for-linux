@@ -14,6 +14,7 @@ void zcall_pw_capture_free(zcall_pw_capture *capture);
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <dlfcn.h>
 
 #include <pipewire/pipewire.h>
 #include <pipewire/main-loop.h>
@@ -30,11 +31,96 @@ void zcall_pw_capture_free(zcall_pw_capture *capture);
 #include <spa/utils/type.h>
 #include <spa/utils/defs.h>
 
+#define ZCALL_PIPEWIRE_FUNCTIONS(X) \
+    X(pw_init) \
+    X(pw_main_loop_new) \
+    X(pw_main_loop_get_loop) \
+    X(pw_main_loop_destroy) \
+    X(pw_context_new) \
+    X(pw_context_connect_fd) \
+    X(pw_context_destroy) \
+    X(pw_core_get_registry) \
+    X(pw_core_disconnect) \
+    X(pw_proxy_destroy) \
+    X(pw_stream_state_as_string) \
+    X(pw_stream_dequeue_buffer) \
+    X(pw_stream_queue_buffer) \
+    X(pw_stream_add_listener) \
+    X(pw_properties_new) \
+    X(pw_stream_new) \
+    X(pw_stream_connect) \
+    X(pw_stream_disconnect) \
+    X(pw_stream_destroy)
+
+struct zcall_pipewire_api {
+#define ZCALL_DECLARE_PIPEWIRE_FUNCTION(name) __typeof__(&name) name;
+    ZCALL_PIPEWIRE_FUNCTIONS(ZCALL_DECLARE_PIPEWIRE_FUNCTION)
+#undef ZCALL_DECLARE_PIPEWIRE_FUNCTION
+};
+
+static struct zcall_pipewire_api pipewire_api;
+static void *pipewire_library;
+static char pipewire_load_error[512];
 static pthread_once_t pipewire_init_once = PTHREAD_ONCE_INIT;
+
+_Static_assert(sizeof(pipewire_api.pw_init) == sizeof(void *),
+               "POSIX dlsym function pointer size mismatch");
+
+static int load_pipewire_api(void)
+{
+    pipewire_library = dlopen("libpipewire-0.3.so.0", RTLD_NOW | RTLD_LOCAL);
+    if (pipewire_library == NULL) {
+        const char *detail = dlerror();
+        snprintf(pipewire_load_error, sizeof(pipewire_load_error),
+                 "Load PipeWire runtime (libpipewire-0.3.so.0): %s",
+                 detail != NULL ? detail : "unknown dlopen error");
+        return -1;
+    }
+
+#define ZCALL_LOAD_PIPEWIRE_FUNCTION(name)                                      \
+    do {                                                                        \
+        void *symbol = dlsym(pipewire_library, #name);                           \
+        if (symbol == NULL) {                                                   \
+            const char *detail = dlerror();                                    \
+            snprintf(pipewire_load_error, sizeof(pipewire_load_error),         \
+                     "Resolve PipeWire symbol %s: %s", #name,                 \
+                     detail != NULL ? detail : "symbol not found");            \
+            dlclose(pipewire_library);                                         \
+            pipewire_library = NULL;                                           \
+            return -1;                                                         \
+        }                                                                       \
+        memcpy(&pipewire_api.name, &symbol, sizeof(symbol));                    \
+    } while (0);
+
+    ZCALL_PIPEWIRE_FUNCTIONS(ZCALL_LOAD_PIPEWIRE_FUNCTION);
+#undef ZCALL_LOAD_PIPEWIRE_FUNCTION
+    return 0;
+}
+
+#define pw_init pipewire_api.pw_init
+#define pw_main_loop_new pipewire_api.pw_main_loop_new
+#define pw_main_loop_get_loop pipewire_api.pw_main_loop_get_loop
+#define pw_main_loop_destroy pipewire_api.pw_main_loop_destroy
+#define pw_context_new pipewire_api.pw_context_new
+#define pw_context_connect_fd pipewire_api.pw_context_connect_fd
+#define pw_context_destroy pipewire_api.pw_context_destroy
+#define pw_core_get_registry pipewire_api.pw_core_get_registry
+#define pw_core_disconnect pipewire_api.pw_core_disconnect
+#define pw_proxy_destroy pipewire_api.pw_proxy_destroy
+#define pw_stream_state_as_string pipewire_api.pw_stream_state_as_string
+#define pw_stream_dequeue_buffer pipewire_api.pw_stream_dequeue_buffer
+#define pw_stream_queue_buffer pipewire_api.pw_stream_queue_buffer
+#define pw_stream_add_listener pipewire_api.pw_stream_add_listener
+#define pw_properties_new pipewire_api.pw_properties_new
+#define pw_stream_new pipewire_api.pw_stream_new
+#define pw_stream_connect pipewire_api.pw_stream_connect
+#define pw_stream_disconnect pipewire_api.pw_stream_disconnect
+#define pw_stream_destroy pipewire_api.pw_stream_destroy
 
 static void initialize_pipewire(void)
 {
-    pw_init(NULL, NULL);
+    if (load_pipewire_api() == 0)
+        pw_init(NULL, NULL);
 }
 
 struct zcall_pw_capture {
@@ -203,6 +289,13 @@ zcall_pw_capture *zcall_pw_capture_new(int remote_fd, uint32_t node_id,
     capture->on_frame = on_frame;
 
     pthread_once(&pipewire_init_once, initialize_pipewire);
+    if (pipewire_library == NULL) {
+        snprintf(error, error_size, "%s",
+                 pipewire_load_error[0] != '\0'
+                     ? pipewire_load_error
+                     : "PipeWire runtime is unavailable");
+        goto fail_fd;
+    }
     capture->main_loop = pw_main_loop_new(NULL);
     if (capture->main_loop == NULL) {
         snprintf(error, error_size, "Create PipeWire main loop: %s", strerror(errno));

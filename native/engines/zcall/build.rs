@@ -10,9 +10,7 @@ fn main() {
         "libpipewire-0.3 development files are required (pkg-config libpipewire-0.3)"
     );
     let mut pipewire_build = cc::Build::new();
-    pipewire_build
-        .file("src/screen/pipewire.c")
-        .warnings(false);
+    pipewire_build.file("src/screen/pipewire.c").warnings(false);
     for flag in String::from_utf8_lossy(&pipewire_cflags.stdout).split_whitespace() {
         if let Some(include) = flag.strip_prefix("-I") {
             pipewire_build.include(include);
@@ -21,7 +19,7 @@ fn main() {
         }
     }
     pipewire_build.compile("zcall_pipewire");
-    println!("cargo:rustc-link-lib=pipewire-0.3");
+    println!("cargo:rustc-link-lib=dl");
 
     println!("cargo:rustc-link-lib=opus");
     println!("cargo:rustc-link-lib=pulse-simple");
