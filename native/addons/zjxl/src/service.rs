@@ -5,8 +5,8 @@ use napi::bindgen_prelude::{Buffer, Result};
 use crate::{
     image::{decode, dimensions, encode_jpeg, encode_jxl, err, resize},
     types::{
-        BitmapToJxlOptions, DecompressMultiOptions, DecompressMultiOutput, DecompressTask,
-        JxlInfo, JxlToJpegOptions, LocalPathOptions, LocalPathOutput, ResizeJxlOptions,
+        BitmapToJxlOptions, DecompressMultiOptions, DecompressMultiOutput, DecompressTask, JxlInfo,
+        JxlToJpegOptions, LocalPathOptions, LocalPathOutput, ResizeJxlOptions,
     },
 };
 
@@ -14,7 +14,7 @@ pub fn get_info(buffer: &[u8]) -> Result<JxlInfo> {
     dimensions(buffer)
 }
 
-pub fn to_jpeg(options: JxlToJpegOptions) -> Result<Buffer> {
+pub fn to_jpeg(options: &JxlToJpegOptions) -> Result<Buffer> {
     let pixels = resize(
         decode(&options.buffer)?,
         options.output_width.unwrap_or(-1),
@@ -23,18 +23,30 @@ pub fn to_jpeg(options: JxlToJpegOptions) -> Result<Buffer> {
     Ok(encode_jpeg(&pixels, options.quality.unwrap_or(0.95))?.into())
 }
 
-pub fn bitmap_to_jxl(options: BitmapToJxlOptions) -> Result<Buffer> {
+pub fn bitmap_to_jxl(options: &BitmapToJxlOptions) -> Result<Buffer> {
     Ok(encode_jxl(&options.buffer, options.width, options.height)?.into())
 }
 
-pub fn resize_jxl(options: ResizeJxlOptions) -> Result<Buffer> {
-    let pixels = resize(decode(&options.buffer)?, options.width as i32, options.height as i32)?;
+fn dims(width: u32, height: u32) -> Result<(i32, i32)> {
+    let w = i32::try_from(width).map_err(|_| err("JXL dimensions exceed i32::MAX"))?;
+    let h = i32::try_from(height).map_err(|_| err("JXL dimensions exceed i32::MAX"))?;
+    Ok((w, h))
+}
+
+pub fn resize_jxl(options: &ResizeJxlOptions) -> Result<Buffer> {
+    let (width, height) = dims(options.width, options.height)?;
+    let pixels = resize(decode(&options.buffer)?, width, height)?;
     Ok(encode_jxl(&pixels.data, pixels.width, pixels.height)?.into())
 }
 
 pub fn to_jpeg_from_local_path(options: LocalPathOptions) -> Result<LocalPathOutput> {
-    let data = fs::read(&options.local_path).map_err(|e| err(format!("cannot read localPath: {e}")))?;
-    let pixels = resize(decode(&data)?, options.max_width.unwrap_or(-1), options.max_height.unwrap_or(-1))?;
+    let data =
+        fs::read(&options.local_path).map_err(|e| err(format!("cannot read localPath: {e}")))?;
+    let pixels = resize(
+        decode(&data)?,
+        options.max_width.unwrap_or(-1),
+        options.max_height.unwrap_or(-1),
+    )?;
     let quality = options.quality.unwrap_or(0.95);
     let jpeg = encode_jpeg(&pixels, quality)?;
     if let Some(path) = &options.output_path {
@@ -62,18 +74,26 @@ pub fn to_jpeg_from_local_path(options: LocalPathOptions) -> Result<LocalPathOut
 pub fn decompress_multi(options: DecompressMultiOptions) -> Result<Vec<DecompressMultiOutput>> {
     let source = match (options.buffer, options.local_path) {
         (Some(buffer), _) => buffer.to_vec(),
-        (None, Some(path)) => fs::read(path).map_err(|e| err(format!("cannot read localPath: {e}")))?,
+        (None, Some(path)) => {
+            fs::read(path).map_err(|e| err(format!("cannot read localPath: {e}")))?
+        }
         (None, None) => return Err(err("buffer or localPath is required")),
     };
     let quality = options.quality.unwrap_or(0.95);
-    let tasks = options.tasks.unwrap_or_else(|| vec![DecompressTask::default()]);
+    let tasks = options
+        .tasks
+        .unwrap_or_else(|| vec![DecompressTask::default()]);
     tasks
         .into_iter()
         .map(|task| decompress_task(&source, task, quality))
         .collect()
 }
 
-fn decompress_task(source: &[u8], task: DecompressTask, quality: f64) -> Result<DecompressMultiOutput> {
+fn decompress_task(
+    source: &[u8],
+    task: DecompressTask,
+    quality: f64,
+) -> Result<DecompressMultiOutput> {
     let pixels = resize(
         decode(source)?,
         task.width.or(task.max_width).unwrap_or(-1),
@@ -91,4 +111,20 @@ fn decompress_task(source: &[u8], task: DecompressTask, quality: f64) -> Result<
         width: pixels.width,
         height: pixels.height,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dims;
+
+    #[test]
+    fn dims_accepts_normal_sizes() {
+        assert_eq!(dims(640, 480).unwrap(), (640, 480));
+    }
+
+    #[test]
+    fn dims_rejects_overflow_instead_of_panicking() {
+        assert!(dims(u32::MAX, 1).is_err());
+        assert!(dims(1, u32::MAX).is_err());
+    }
 }

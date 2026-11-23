@@ -1,3 +1,4 @@
+use crate::engine::Engine;
 use anyhow::{ensure, Context, Result};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -6,9 +7,8 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
-use crate::{config::Config, engine::Engine};
 
 #[derive(Clone, Debug)]
 pub struct Cpu {
@@ -19,41 +19,33 @@ pub struct Cpu {
 }
 impl Cpu {
     pub fn discover() -> Result<Self> {
-        let mut mask: libc::cpu_set_t = unsafe { std::mem::zeroed() };
-        ensure!(unsafe
-        {
-            libc::sched_getaffinity(0, std::mem::size_of_val(&mask), &mut
-            mask)
-        } == 0, "sched_getaffinity: {}", std::io::Error::last_os_error());
-        let allowed: Vec<_> =
-            (0..libc::CPU_SETSIZE as
-                                usize).filter(|&i|
-                        unsafe { libc::CPU_ISSET(i, &mask) }).collect();
+        let mask = rustix::thread::sched_getaffinity(None)
+            .map_err(|e| anyhow::anyhow!("sched_getaffinity: {e}"))?;
+        let allowed: Vec<_> = (0..rustix::thread::CpuSet::MAX_CPU)
+            .filter(|&i| mask.is_set(i))
+            .collect();
         ensure!(!allowed.is_empty(), "empty CPU affinity mask");
         let mut cores = BTreeMap::new();
         for &cpu in &allowed {
             let prefix = format!("/sys/devices/system/cpu/cpu{cpu}/topology");
-            let package =
-                fs::read_to_string(format!("{prefix}/physical_package_id")).unwrap_or_else(|_|
-                        "0".into());
+            let package = fs::read_to_string(format!("{prefix}/physical_package_id"))
+                .unwrap_or_else(|_| "0".into());
             let core =
-                fs::read_to_string(format!("{prefix}/core_id")).unwrap_or_else(|_|
-                        cpu.to_string());
-            cores.entry((package.trim().to_string(),
-                        core.trim().to_string())).or_insert(cpu);
+                fs::read_to_string(format!("{prefix}/core_id")).unwrap_or_else(|_| cpu.to_string());
+            cores
+                .entry((package.trim().to_string(), core.trim().to_string()))
+                .or_insert(cpu);
         }
         Ok(Self {
-                physical: cores.len(),
-                logical: allowed.len(),
-                representatives: cores.into_values().collect(),
-                allowed,
-            })
+            physical: cores.len(),
+            logical: allowed.len(),
+            representatives: cores.into_values().collect(),
+            allowed,
+        })
     }
     pub fn gate(skip: bool) -> Result<()> {
-
         #[cfg(target_arch = "x86_64")]
-        if !std::is_x86_feature_detected!("avx2") ||
-                !std::is_x86_feature_detected!("fma") {
+        if !std::is_x86_feature_detected!("avx2") || !std::is_x86_feature_detected!("fma") {
             if !skip {
                 anyhow::bail!("CPU requires AVX2 and FMA; set ZOCR_SKIP_CPU_GATE=1 to override");
             }
@@ -62,75 +54,78 @@ impl Cpu {
         #[cfg(target_arch = "aarch64")]
         {
             let _ = skip;
-            ensure!(std::arch::is_aarch64_feature_detected!("neon"),
-            "CPU requires NEON");
+            ensure!(
+                std::arch::is_aarch64_feature_detected!("neon"),
+                "CPU requires NEON"
+            );
         }
         Ok(())
     }
     pub fn apply_affinity(&self, setting: &str) -> Result<()> {
-        if setting == "off" { return Ok(()); }
-        let cpus =
-            if setting == "auto" || setting == "on" {
-                self.representatives.clone()
-            } else {
-                setting.split(',').map(|s|
-                                s.trim().parse::<usize>().context("affinity must be auto, off, or comma-separated CPU indices")).collect::<Result<Vec<_>>>()?
-            };
+        if setting == "off" {
+            return Ok(());
+        }
+        let cpus = if setting == "auto" || setting == "on" {
+            self.representatives.clone()
+        } else {
+            setting
+                .split(',')
+                .map(|s| {
+                    s.trim()
+                        .parse::<usize>()
+                        .context("affinity must be auto, off, or comma-separated CPU indices")
+                })
+                .collect::<Result<Vec<_>>>()?
+        };
         ensure!(!cpus.is_empty(), "empty requested affinity");
         let allowed: BTreeSet<_> = self.allowed.iter().copied().collect();
-        let mut mask: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+        let mut mask = rustix::thread::CpuSet::new();
         for cpu in cpus {
-            ensure!(allowed.contains(&cpu),
-            "CPU {cpu} is outside process cpuset");
-            unsafe { libc::CPU_SET(cpu, &mut mask); }
+            ensure!(
+                allowed.contains(&cpu),
+                "CPU {cpu} is outside process cpuset"
+            );
+            mask.set(cpu);
         }
-        ensure!(unsafe
-        { libc::sched_setaffinity(0, std::mem::size_of_val(&mask), &mask) } ==
-        0, "sched_setaffinity: {}", std::io::Error::last_os_error());
+        rustix::thread::sched_setaffinity(None, &mask)
+            .map_err(|e| anyhow::anyhow!("sched_setaffinity: {e}"))?;
         Ok(())
     }
 }
 pub fn lifecycle() -> Result<Arc<AtomicBool>> {
-    let parent = unsafe { libc::getppid() };
+    let parent = rustix::process::getppid();
     let stop = Arc::new(AtomicBool::new(false));
-    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+    for signal in [
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGHUP,
+    ] {
         signal_hook::flag::register(signal, stop.clone())?;
     }
-    ensure!(unsafe
-    { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM, 0, 0, 0) } == 0,
-    "PR_SET_PDEATHSIG failed");
-    if unsafe { libc::getppid() } != parent || parent == 1 {
+    rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM))
+        .map_err(|_| anyhow::anyhow!("PR_SET_PDEATHSIG failed"))?;
+    if rustix::process::getppid() != parent || parent.is_none_or(rustix::process::Pid::is_init) {
         stop.store(true, Ordering::Relaxed);
     }
     Ok(stop)
 }
-pub fn maintenance(engine: Arc<std::sync::Mutex<Engine>>, cfg: &Config,
-    stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
-    let trim = cfg.trim_interval;
-    let runtime =
-        engine.lock().expect("engine mutex poisoned at startup").runtime();
-    std::thread::spawn(
-
-        move ||
-            {
-                let mut last_trim = Instant::now();
-                while !stop.load(Ordering::Relaxed) {
-                    std::thread::sleep(Duration::from_millis(50));
-                    let released =
-                        engine.try_lock().is_ok_and(|mut engine|
-                                engine.release_idle());
-                    // glibc keeps freed arenas mapped; hand them back to the
-                    // OS right after the models go away.
-                    if released ||
-                            trim.is_some_and(|d| last_trim.elapsed() >= d) {
-
-                        #[cfg(target_env = "gnu")]
-                        unsafe { libc::malloc_trim(0); }
-                        last_trim = Instant::now();
-                    }
-                }
-                runtime.cancel_active();
-            })
+pub fn maintenance(
+    engine: Arc<std::sync::Mutex<Engine>>,
+    stop: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    let runtime = engine
+        .lock()
+        .expect("engine mutex poisoned at startup")
+        .runtime();
+    std::thread::spawn(move || {
+        while !stop.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(50));
+            let _ = engine
+                .try_lock()
+                .is_ok_and(|mut engine| engine.release_idle());
+        }
+        runtime.cancel_active();
+    })
 }
 #[derive(Clone, Copy)]
 pub struct Resources {
@@ -138,12 +133,33 @@ pub struct Resources {
     pub peak_rss_kib: i64,
 }
 pub fn resources() -> Resources {
-    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage); }
+    let usage = nix::sys::resource::getrusage(nix::sys::resource::UsageWho::RUSAGE_SELF)
+        .expect("getrusage(RUSAGE_SELF)");
+    let user = usage.user_time();
+    let system = usage.system_time();
     Resources {
-        cpu_micros: ((usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) as u64) *
-                1_000_000 +
-            (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) as u64,
-        peak_rss_kib: usage.ru_maxrss as i64,
+        cpu_micros: ((user.tv_sec() + system.tv_sec()) as u64) * 1_000_000
+            + (user.tv_usec() + system.tv_usec()) as u64,
+        peak_rss_kib: usage.max_rss() as i64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_discover_reports_cpus() {
+        let cpu = Cpu::discover().expect("sched_getaffinity succeeds");
+        assert!(cpu.logical >= 1, "at least one CPU in the affinity mask");
+        assert!(!cpu.allowed.is_empty(), "affinity mask is not empty");
+        assert!(cpu.physical >= 1);
+    }
+
+    #[test]
+    fn resources_reports_non_negative_usage() {
+        let usage = resources();
+        assert!(usage.cpu_micros < u64::MAX);
+        assert!(usage.peak_rss_kib >= 0);
     }
 }

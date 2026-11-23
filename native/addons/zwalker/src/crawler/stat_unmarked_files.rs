@@ -14,7 +14,7 @@ pub struct StatOutcome {
     pub size: u64,
     pub tracking: HashMap<String, FolderBasicInfo>,
     /// tracking-glob -> per-age-bucket aggregate. The bucket vector has
-    /// `thresholds.len() + 1` entries: [ < t0, [t0,t1), [t1,t2), … , >= t_last ].
+    /// `thresholds.len() + 1` entries: [ < t0, [t0,t1), [t1,t2), … , >= `t_last` ].
     pub tracking_atime: HashMap<String, Vec<FolderBasicInfo>>,
 }
 

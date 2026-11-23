@@ -10,8 +10,12 @@ impl fmt::Display for SegmentError {
 impl std::error::Error for SegmentError {}
 
 pub fn build(shape: &[i64], widths: &[u32]) -> Result<([i64; 2], Vec<i32>), SegmentError> {
-    if shape.len() != 4 || !(1..=16).contains(&shape[0]) || shape[1] != 3
-        || shape[2] != 48 || !(8..=4096).contains(&shape[3]) || shape[3] % 8 != 0
+    if shape.len() != 4
+        || !(1..=16).contains(&shape[0])
+        || shape[1] != 3
+        || shape[2] != 48
+        || !(8..=4096).contains(&shape[3])
+        || shape[3] % 8 != 0
         || widths.len() != shape[0] as usize
         || widths.iter().any(|&w| w == 0 || w > shape[3] as u32)
     {
@@ -24,5 +28,11 @@ pub fn build(shape: &[i64], widths: &[u32]) -> Result<([i64; 2], Vec<i32>), Segm
         let valid = width.div_ceil(8) as usize;
         data[i * steps..i * steps + valid].fill(0);
     }
-    Ok(([shape[0], steps as i64], data))
+    Ok((
+        [
+            shape[0],
+            i64::try_from(steps).expect("width is bounded to 4096, so steps fit in i64"),
+        ],
+        data,
+    ))
 }

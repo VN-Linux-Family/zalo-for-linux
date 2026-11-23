@@ -2,7 +2,7 @@
 name = "zocr-host"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.92"
 build = "build.rs"
 
 [dependencies]
@@ -14,12 +14,14 @@ sha2 = "0.10"
 hex = "0.4"
 zeroize = "1"
 subtle = "2.6"
-libc = "0.2"
+nix = { version = "0.31", features = ["resource", "time"] }
+rustix = { version = "1", features = ["event", "fs", "linux_5_11", "net", "pipe", "process", "rand", "stdio", "thread", "time"] }
 signal-hook = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "tiff"] }
-ort-sys = { version = "=2.0.0-rc.13", default-features = false, features = ["disable-linking"] }
-libloading = "0.8"
+ort = { version = "2.0.0-rc.15", default-features = false, features = ["load-dynamic", "api-30"] }
 clipper2-rust = "1"
 
+[lints]
+workspace = true

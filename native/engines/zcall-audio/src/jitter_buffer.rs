@@ -80,8 +80,7 @@ impl JitterBuffer {
             if let Some(cur_ssrc) = self.current_ssrc {
                 if cur_ssrc != ssrc {
                     eprintln!(
-                        "[audio-io] info: stream ssrc changed ({} -> {}), resetting jitter buffer",
-                        cur_ssrc, ssrc
+                        "[audio-io] info: stream ssrc changed ({cur_ssrc} -> {ssrc}), resetting jitter buffer"
                     );
                     self.queue.clear();
                     self.carry_pcm.clear();
@@ -110,8 +109,7 @@ impl JitterBuffer {
                 if diff > 500 {
                     // Peer RTP sequence reset backward (e.g. after network handover)
                     eprintln!(
-                        "[audio-io] info: sequence reset detected (prev={}, new={}), flushing jitter buffer",
-                        next, idx
+                        "[audio-io] info: sequence reset detected (prev={next}, new={idx}), flushing jitter buffer"
                     );
                     self.queue.clear();
                     self.carry_pcm.clear();
@@ -128,8 +126,7 @@ impl JitterBuffer {
             } else if (idx - next) > 500 {
                 // Large forward sequence jump across network switch
                 eprintln!(
-                    "[audio-io] info: forward sequence jump detected (prev={}, new={}), flushing jitter buffer",
-                    next, idx
+                    "[audio-io] info: forward sequence jump detected (prev={next}, new={idx}), flushing jitter buffer"
                 );
                 self.queue.clear();
                 self.carry_pcm.clear();
@@ -170,7 +167,7 @@ impl JitterBuffer {
         }
     }
 
-    /// Decode next frame into out_pcm (320 samples = 20 ms).
+    /// Decode next frame into `out_pcm` (320 samples = 20 ms).
     /// Returns true if valid frame, carry frame, FEC frame, or PLC generated.
     pub fn pop_frame(&mut self, out_pcm: &mut [i16]) -> bool {
         // 1. Drain leftover samples from multi-frame (40ms/60ms) Opus packets first
@@ -227,8 +224,7 @@ impl JitterBuffer {
                     let gap = first - cur;
                     if gap > 10 || (gap > 1 && self.queue.len() >= self.min_target) {
                         eprintln!(
-                            "[audio-io] warn: sequence gap detected (expected {}, got {}), resyncing",
-                            cur, first
+                            "[audio-io] warn: sequence gap detected (expected {cur}, got {first}), resyncing"
                         );
                         self.next_idx = Some(first);
                         self.consecutive_plc = 0;
@@ -243,11 +239,15 @@ impl JitterBuffer {
         if let Some(payload) = self.queue.remove(&cur_idx) {
             self.consecutive_plc = 0;
             self.stats.played_frames += 1;
-            match self.decoder.decode(&payload, &mut self.decode_scratch, false) {
+            match self
+                .decoder
+                .decode(&payload, &mut self.decode_scratch, false)
+            {
                 Ok(n) if n >= out_pcm.len() => {
                     out_pcm.copy_from_slice(&self.decode_scratch[..out_pcm.len()]);
                     if n > out_pcm.len() {
-                        self.carry_pcm.extend(&self.decode_scratch[out_pcm.len()..n]);
+                        self.carry_pcm
+                            .extend(&self.decode_scratch[out_pcm.len()..n]);
                     }
                 }
                 _ => {
@@ -294,6 +294,11 @@ impl JitterBuffer {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::cast_possible_wrap,
+        clippy::cast_precision_loss,
+        reason = "test helpers: SAMPLE_RATE/CHANNELS are small audio constants"
+    )]
     use super::*;
     use crate::opus_codec::OpusEncoder;
     use crate::protocol::{CHANNELS, FRAME_SAMPLES, SAMPLE_RATE};
@@ -301,7 +306,7 @@ mod tests {
     fn generate_sine_frame(freq: f32, phase: &mut f32) -> Vec<i16> {
         let mut pcm = vec![0i16; FRAME_SAMPLES];
         let step = 2.0 * std::f32::consts::PI * freq / SAMPLE_RATE as f32;
-        for s in pcm.iter_mut() {
+        for s in &mut pcm {
             *s = (phase.sin() * 15000.0) as i16;
             *phase = (*phase + step) % (2.0 * std::f32::consts::PI);
         }

@@ -10,7 +10,13 @@ authors = ["ngxccc", "Việt Nam Linux Family"]
 name = "zcall-audio"
 path = "src/main.rs"
 
+[dependencies]
+bytemuck = "1"
+
 
 
 [build-dependencies]
-cc = "1.0"
+cc = "1.11"
+
+[lints]
+workspace = true

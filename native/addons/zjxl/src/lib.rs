@@ -4,15 +4,25 @@ mod types;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use types::*;
+use types::{
+    BitmapToJxlOptions, DecompressMultiOptions, DecompressMultiOutput, GetJxlInfoOptions, JxlInfo,
+    JxlToJpegOptions, LocalPathOptions, LocalPathOutput, ResizeJxlLimitOptions, ResizeJxlOptions,
+};
 
 #[napi(js_name = "moduleReady")]
 pub fn module_ready() -> bool {
     true
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi(js_name = "getJxlInfo")]
-pub fn get_jxl_info(input: Either<GetJxlInfoOptions, Buffer>, callback: Option<JsFunction>) -> Result<Option<JxlInfo>> {
+pub fn get_jxl_info(
+    input: Either<GetJxlInfoOptions, Buffer>,
+    callback: Option<JsFunction>,
+) -> Result<Option<JxlInfo>> {
     let buf = match &input {
         Either::A(opts) => &opts.buffer,
         Either::B(buf) => buf,
@@ -37,9 +47,16 @@ pub fn get_jxl_info(input: Either<GetJxlInfoOptions, Buffer>, callback: Option<J
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi(js_name = "jxlToJpeg")]
-pub fn jxl_to_jpeg(options: JxlToJpegOptions, callback: Option<JsFunction>) -> Result<Option<Buffer>> {
-    match service::to_jpeg(options) {
+pub fn jxl_to_jpeg(
+    options: JxlToJpegOptions,
+    callback: Option<JsFunction>,
+) -> Result<Option<Buffer>> {
+    match service::to_jpeg(&options) {
         Ok(buf) => {
             if let Some(cb) = callback {
                 let _: () = cb.call3(Null, buf, 1)?;
@@ -59,9 +76,16 @@ pub fn jxl_to_jpeg(options: JxlToJpegOptions, callback: Option<JsFunction>) -> R
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi(js_name = "bitmapToJxl")]
-pub fn bitmap_to_jxl(options: BitmapToJxlOptions, callback: Option<JsFunction>) -> Result<Option<Buffer>> {
-    match service::bitmap_to_jxl(options) {
+pub fn bitmap_to_jxl(
+    options: BitmapToJxlOptions,
+    callback: Option<JsFunction>,
+) -> Result<Option<Buffer>> {
+    match service::bitmap_to_jxl(&options) {
         Ok(buf) => {
             if let Some(cb) = callback {
                 let _: () = cb.call3(Null, buf, 1)?;
@@ -81,9 +105,16 @@ pub fn bitmap_to_jxl(options: BitmapToJxlOptions, callback: Option<JsFunction>) 
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi(js_name = "resizeJxl")]
-pub fn resize_jxl(options: ResizeJxlOptions, callback: Option<JsFunction>) -> Result<Option<Buffer>> {
-    match service::resize_jxl(options) {
+pub fn resize_jxl(
+    options: ResizeJxlOptions,
+    callback: Option<JsFunction>,
+) -> Result<Option<Buffer>> {
+    match service::resize_jxl(&options) {
         Ok(buf) => {
             if let Some(cb) = callback {
                 let _: () = cb.call3(Null, buf, 1)?;
@@ -104,7 +135,10 @@ pub fn resize_jxl(options: ResizeJxlOptions, callback: Option<JsFunction>) -> Re
 }
 
 #[napi(js_name = "resizeJxlLimit")]
-pub fn resize_jxl_limit(options: ResizeJxlLimitOptions, callback: Option<JsFunction>) -> Result<Option<Buffer>> {
+pub fn resize_jxl_limit(
+    options: ResizeJxlLimitOptions,
+    callback: Option<JsFunction>,
+) -> Result<Option<Buffer>> {
     let resize_opts = ResizeJxlOptions {
         buffer: options.buffer,
         width: options.width,
@@ -112,7 +146,7 @@ pub fn resize_jxl_limit(options: ResizeJxlLimitOptions, callback: Option<JsFunct
         max_threads: options.max_threads,
         api_version: options.api_version,
     };
-    match service::resize_jxl(resize_opts) {
+    match service::resize_jxl(&resize_opts) {
         Ok(buf) => {
             if let Some(cb) = callback {
                 let _: () = cb.call3(Null, buf, 1)?;
@@ -133,7 +167,10 @@ pub fn resize_jxl_limit(options: ResizeJxlLimitOptions, callback: Option<JsFunct
 }
 
 #[napi(js_name = "jxlToJpegFromLocalPath")]
-pub fn jxl_to_jpeg_from_local_path(options: LocalPathOptions, callback: Option<JsFunction>) -> Result<Option<LocalPathOutput>> {
+pub fn jxl_to_jpeg_from_local_path(
+    options: LocalPathOptions,
+    callback: Option<JsFunction>,
+) -> Result<Option<LocalPathOutput>> {
     match service::to_jpeg_from_local_path(options) {
         Ok(res) => {
             if let Some(cb) = callback {
@@ -155,7 +192,10 @@ pub fn jxl_to_jpeg_from_local_path(options: LocalPathOptions, callback: Option<J
 }
 
 #[napi(js_name = "jxlDecompressMulti")]
-pub fn jxl_decompress_multi(options: DecompressMultiOptions, callback: Option<JsFunction>) -> Result<Option<Vec<DecompressMultiOutput>>> {
+pub fn jxl_decompress_multi(
+    options: DecompressMultiOptions,
+    callback: Option<JsFunction>,
+) -> Result<Option<Vec<DecompressMultiOutput>>> {
     match service::decompress_multi(options) {
         Ok(res) => {
             if let Some(cb) = callback {

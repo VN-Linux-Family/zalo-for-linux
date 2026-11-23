@@ -1,7 +1,9 @@
+#![allow(unsafe_code, reason = "libpulse-simple/libopus FFI")]
+
 //! zcall-audio: Native Linux low-latency audio engine for Zalo calls.
 //!
 //! Replaces python3 audio-io.py + parec + pacat subprocess pipeline with a single,
-//! real-time native binary using PulseAudio Simple API and libopus directly.
+//! real-time native binary using `PulseAudio` Simple API and libopus directly.
 
 mod apm;
 mod audio_backend;
@@ -25,8 +27,15 @@ use jitter_buffer::JitterBuffer;
 use level::compute_rfc6464_level;
 use leveler::MicLeveler;
 use opus_codec::OpusEncoder;
-use protocol::*;
+use protocol::{
+    CHANNELS, CMD_IN_AUTO_GAIN, CMD_IN_DEVICE, CMD_IN_FRAME, CMD_IN_MUTE, CMD_IN_SPEAKER,
+    CMD_IN_VOLUME, CMD_OUT_LEVEL, FRAME_BYTES, FRAME_SAMPLES, SAMPLE_RATE,
+};
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "CLI flag configuration struct"
+)]
 struct Config {
     mic_device: Option<String>,
     speaker_device: Option<String>,
@@ -97,10 +106,8 @@ fn parse_args() -> Config {
                     i += 1;
                 }
             }
-            "--max-delay" => {
-                if i + 1 < args.len() && !args[i + 1].starts_with("--") {
-                    i += 1;
-                }
+            "--max-delay" if i + 1 < args.len() && !args[i + 1].starts_with("--") => {
+                i += 1;
             }
             _ => {}
         }
@@ -149,7 +156,7 @@ impl VolumeBackend for SystemVolumeBackend {
             .unwrap_or("@DEFAULT_SOURCE@");
         let output = std::process::Command::new("pactl")
             .env("LC_ALL", "C")
-            .args(&["get-source-volume", source_name])
+            .args(["get-source-volume", source_name])
             .output();
         if let Ok(out) = output {
             if out.status.success() {
@@ -180,10 +187,10 @@ impl VolumeBackend for SystemVolumeBackend {
         let source_name = source
             .filter(|s| !s.is_empty())
             .unwrap_or("@DEFAULT_SOURCE@");
-        let raw = (65536.0 * (pct as f64) / 100.0).round() as u32;
+        let raw = (65536.0 * f64::from(pct) / 100.0).round() as u32;
         if let Ok(status) = std::process::Command::new("pactl")
             .env("LC_ALL", "C")
-            .args(&["set-source-volume", source_name, &raw.to_string()])
+            .args(["set-source-volume", source_name, &raw.to_string()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -202,7 +209,7 @@ impl VolumeBackend for SystemVolumeBackend {
             .unwrap_or("@DEFAULT_SOURCE@");
         if let Ok(status) = std::process::Command::new("pactl")
             .env("LC_ALL", "C")
-            .args(&["set-source-mute", source_name, if mute { "1" } else { "0" }])
+            .args(["set-source-mute", source_name, if mute { "1" } else { "0" }])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -240,7 +247,7 @@ pub fn apply_soft_limiter(samples: &mut [i16]) {
     const HEADROOM: f32 = 18000.0; // 20000 + 18000 * (1 - 1/3) = 32000
 
     for s in samples.iter_mut() {
-        let val = *s as f32;
+        let val = f32::from(*s);
         let abs_val = val.abs();
         if abs_val > THRESHOLD {
             let sign = if val > 0.0 { 1.0 } else { -1.0 };
@@ -251,9 +258,10 @@ pub fn apply_soft_limiter(samples: &mut [i16]) {
     }
 }
 
-/// ClipGuard monitors raw captured PCM samples for near-clipping (>= 28500),
+/// `ClipGuard` monitors raw captured PCM samples for near-clipping (>= 28500),
 /// sustained hot speech (> -12 dBFS), and sustained quiet near-end speech (< -28 dBFS),
 /// adjusting hardware source volume bidirectionally (35%..100%) and syncing DE changes.
+#[allow(clippy::struct_excessive_bools, reason = "runtime guard state flags")]
 pub struct ClipGuard {
     device: Option<String>,
     current_vol: Arc<AtomicU8>,
@@ -281,8 +289,10 @@ pub struct ClipGuard {
 
 impl ClipGuard {
     pub fn new(device: Option<String>, current_vol: Arc<AtomicU8>) -> Self {
-        let enabled = env::var("ZCALL_MIC_AGC").map(|v| v != "0").unwrap_or(true);
-        let past = std::time::Instant::now() - std::time::Duration::from_secs(10);
+        let enabled = env::var("ZCALL_MIC_AGC").map_or(true, |v| v != "0");
+        let past_vol = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(10))
+            .unwrap_or_else(std::time::Instant::now);
         let backend: Arc<dyn VolumeBackend> = if cfg!(test) {
             Arc::new(NullVolumeBackend)
         } else {
@@ -299,12 +309,12 @@ impl ClipGuard {
             os_muted: false,
             last_resolved_default: None,
             backend,
-            last_os_sync: past,
-            last_vol_write: Arc::new(Mutex::new(past)),
+            last_os_sync: past_vol,
+            last_vol_write: Arc::new(Mutex::new(past_vol)),
             clipped_frames_in_window: 0,
             window_frame_count: 0,
             last_step: std::time::Instant::now(),
-            last_clip: past,
+            last_clip: past_vol,
             levels: [-70.0; 250],
             level_idx: 0,
             level_count: 0,
@@ -314,6 +324,7 @@ impl ClipGuard {
         }
     }
 
+    #[must_use]
     pub fn with_controls(
         mut self,
         far_active: Option<Arc<AtomicBool>>,
@@ -326,6 +337,7 @@ impl ClipGuard {
         self
     }
 
+    #[must_use]
     pub fn with_backend(mut self, backend: Arc<dyn VolumeBackend>, apply_os: bool) -> Self {
         self.backend = backend;
         self.apply_os = apply_os;
@@ -354,8 +366,7 @@ impl ClipGuard {
                 if let Some(ref prev_resolved) = self.last_resolved_default {
                     if prev_resolved != resolved {
                         eprintln!(
-                            "[audio-io] info: default microphone changed ({} -> {})",
-                            prev_resolved, resolved
+                            "[audio-io] info: default microphone changed ({prev_resolved} -> {resolved})"
                         );
                         default_changed = true;
                     }
@@ -376,7 +387,7 @@ impl ClipGuard {
         let actual = state.pct.min(100);
         let prev = self.current_vol.swap(actual, Ordering::Relaxed);
         if prev != actual {
-            eprintln!("[audio-io] mic volume: {}%", actual);
+            eprintln!("[audio-io] mic volume: {actual}%");
         }
 
         if self.enabled && !self.manual.load(Ordering::Relaxed) && !default_changed {
@@ -401,27 +412,26 @@ impl ClipGuard {
 
     fn apply_step(&mut self, new_vol: u8) {
         if self.apply_os {
-            if !self.backend.set_source_volume(self.device.as_deref(), new_vol) {
-                eprintln!(
-                    "[audio-io] warn: failed to auto-adjust mic volume to {}%",
-                    new_vol
-                );
+            if !self
+                .backend
+                .set_source_volume(self.device.as_deref(), new_vol)
+            {
+                eprintln!("[audio-io] warn: failed to auto-adjust mic volume to {new_vol}%");
                 self.last_step = std::time::Instant::now();
                 return;
             }
             let actual = self
                 .backend
                 .get_source_state(self.device.as_deref())
-                .map(|s| s.pct.min(100))
-                .unwrap_or(new_vol);
+                .map_or(new_vol, |s| s.pct.min(100));
             if let Ok(mut ts) = self.last_vol_write.lock() {
                 *ts = std::time::Instant::now();
             }
             self.current_vol.store(actual, Ordering::Relaxed);
-            eprintln!("[audio-io] mic volume: {}%", actual);
+            eprintln!("[audio-io] mic volume: {actual}%");
         } else {
             self.current_vol.store(new_vol, Ordering::Relaxed);
-            eprintln!("[audio-io] mic volume: {}%", new_vol);
+            eprintln!("[audio-io] mic volume: {new_vol}%");
         }
         self.last_step = std::time::Instant::now();
     }
@@ -442,7 +452,7 @@ impl ClipGuard {
         if self.level_count < self.levels.len() {
             self.level_count += 1;
         }
-        if self.level_count >= 20 && (self.level_idx % 10 == 0 || self.level_count == 20) {
+        if self.level_count >= 20 && (self.level_idx.is_multiple_of(10) || self.level_count == 20) {
             let mut sorted = self.levels[..self.level_count].to_vec();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             self.noise_db = sorted[self.level_count / 10];
@@ -455,7 +465,9 @@ impl ClipGuard {
             self.window_frame_count = 0;
             self.quiet_speech_frames = 0;
             self.hot_speech_frames = 0;
-            self.last_step = std::time::Instant::now() - std::time::Duration::from_secs(2);
+            self.last_step = std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(2))
+                .unwrap_or_else(std::time::Instant::now);
         }
         self.was_manual = is_manual;
         let agc_active = self.enabled && !is_manual;
@@ -482,8 +494,7 @@ impl ClipGuard {
         let far_is_talking = self
             .far_active
             .as_ref()
-            .map(|f| f.load(Ordering::Relaxed))
-            .unwrap_or(false);
+            .is_some_and(|f| f.load(Ordering::Relaxed));
         if far_is_talking {
             return;
         }
@@ -502,18 +513,14 @@ impl ClipGuard {
                 self.hot_speech_frames = 0;
             }
             return;
-        } else {
-            self.hot_speech_frames = self.hot_speech_frames.saturating_sub(1);
         }
+        self.hot_speech_frames = self.hot_speech_frames.saturating_sub(1);
 
         if self.os_muted {
             return;
         }
 
-        if self.level_count >= 20
-            && level_db > -58.0
-            && level_db > self.noise_db + 9.0
-        {
+        if self.level_count >= 20 && level_db > -58.0 && level_db > self.noise_db + 9.0 {
             if level_db < -28.0 {
                 self.quiet_speech_frames = self.quiet_speech_frames.saturating_add(1);
             } else if level_db >= -24.0 {
@@ -542,37 +549,32 @@ fn init_mic_volume_for_device(
     agc_enabled: bool,
     boost_floor: bool,
 ) -> u8 {
-    match backend.get_source_state(device) {
-        Some(state) => {
-            let initial_mic_vol = state.pct;
-            if agc_enabled && initial_mic_vol > 80 {
-                if backend.set_source_volume(device, 70) {
-                    backend
-                        .get_source_state(device)
-                        .map(|s| s.pct.min(100))
-                        .unwrap_or(70)
-                } else {
-                    eprintln!("[audio-io] warn: could not set initial mic volume to 70%");
-                    initial_mic_vol.min(100)
-                }
-            } else if agc_enabled && boost_floor && initial_mic_vol < 20 {
-                if backend.set_source_volume(device, 50) {
-                    backend
-                        .get_source_state(device)
-                        .map(|s| s.pct.min(100))
-                        .unwrap_or(50)
-                } else {
-                    eprintln!("[audio-io] warn: could not boost muted/low mic volume to 50%");
-                    initial_mic_vol.min(100)
-                }
+    if let Some(state) = backend.get_source_state(device) {
+        let initial_mic_vol = state.pct;
+        if agc_enabled && initial_mic_vol > 80 {
+            if backend.set_source_volume(device, 70) {
+                backend
+                    .get_source_state(device)
+                    .map_or(70, |s| s.pct.min(100))
             } else {
+                eprintln!("[audio-io] warn: could not set initial mic volume to 70%");
                 initial_mic_vol.min(100)
             }
+        } else if agc_enabled && boost_floor && initial_mic_vol < 20 {
+            if backend.set_source_volume(device, 50) {
+                backend
+                    .get_source_state(device)
+                    .map_or(50, |s| s.pct.min(100))
+            } else {
+                eprintln!("[audio-io] warn: could not boost muted/low mic volume to 50%");
+                initial_mic_vol.min(100)
+            }
+        } else {
+            initial_mic_vol.min(100)
         }
-        None => {
-            eprintln!("[audio-io] warn: could not query initial mic volume");
-            100
-        }
+    } else {
+        eprintln!("[audio-io] warn: could not query initial mic volume");
+        100
     }
 }
 
@@ -580,34 +582,30 @@ fn probe_hardware(speaker: Option<&str>, mic: Option<&str>) {
     let sink_name = speaker.unwrap_or("@DEFAULT_SINK@");
     let source_name = mic.unwrap_or("@DEFAULT_SOURCE@");
     eprintln!(
-        "[audio-io] hw: audio backend=PulseAudio/PipeWire, stream_rate={}Hz, channels={}",
-        SAMPLE_RATE, CHANNELS
+        "[audio-io] hw: audio backend=PulseAudio/PipeWire, stream_rate={SAMPLE_RATE}Hz, channels={CHANNELS}"
     );
-    eprintln!(
-        "[audio-io] hw: target speaker='{}', mic='{}'",
-        sink_name, source_name
-    );
+    eprintln!("[audio-io] hw: target speaker='{sink_name}', mic='{source_name}'");
 
     // Detect Bluetooth sinks/sources
     if let Ok(out) = std::process::Command::new("pactl")
-        .args(&["list", "sinks", "short"])
+        .args(["list", "sinks", "short"])
         .output()
     {
         let text = String::from_utf8_lossy(&out.stdout);
         for line in text.lines() {
             if line.contains("bluez") {
-                eprintln!("[audio-io] hw: detected bluetooth sink: {}", line);
+                eprintln!("[audio-io] hw: detected bluetooth sink: {line}");
             }
         }
     }
     if let Ok(out) = std::process::Command::new("pactl")
-        .args(&["list", "sources", "short"])
+        .args(["list", "sources", "short"])
         .output()
     {
         let text = String::from_utf8_lossy(&out.stdout);
         for line in text.lines() {
             if line.contains("bluez") {
-                eprintln!("[audio-io] hw: detected bluetooth source: {}", line);
+                eprintln!("[audio-io] hw: detected bluetooth source: {line}");
                 if line.contains("8000Hz") || line.contains("16000Hz") {
                     eprintln!(
                         "[audio-io] hw: note: bluetooth headset using HFP profile (narrowband/wideband speech)"
@@ -618,20 +616,35 @@ fn probe_hardware(speaker: Option<&str>, mic: Option<&str>) {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "single protocol pipeline, splitting hurts readability"
+)]
+#[allow(
+    clippy::cast_possible_wrap,
+    reason = "audio constants SAMPLE_RATE/CHANNELS/FRAME_SAMPLES are bounded far below integer limits"
+)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "metrics/percent; precision below 2^52 is irrelevant"
+)]
 fn main() {
     let config = parse_args();
     eprintln!(
         "[audio-io] Starting native zcall-audio engine (bitrate: {} bps, group: {})",
         config.bitrate_bps, config.is_group
     );
-    probe_hardware(config.speaker_device.as_deref(), config.mic_device.as_deref());
+    probe_hardware(
+        config.speaker_device.as_deref(),
+        config.mic_device.as_deref(),
+    );
 
     let is_muted = Arc::new(AtomicBool::new(false));
     let speaker_off = Arc::new(AtomicBool::new(false));
     let far_active = Arc::new(AtomicBool::new(false));
     let manual_mic_vol = Arc::new(AtomicBool::new(false));
-    let agc_enabled = env::var("ZCALL_MIC_AGC").map(|v| v != "0").unwrap_or(true);
-    let leveler_enabled = env::var("ZCALL_MIC_GAIN").map(|v| v != "0").unwrap_or(true);
+    let agc_enabled = env::var("ZCALL_MIC_AGC").map_or(true, |v| v != "0");
+    let leveler_enabled = env::var("ZCALL_MIC_GAIN").map_or(true, |v| v != "0");
 
     let vol_backend: Arc<dyn VolumeBackend> = if config.test_tone {
         Arc::new(NullVolumeBackend)
@@ -640,19 +653,30 @@ fn main() {
     };
 
     let active_mic: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(config.mic_device.clone()));
+    #[allow(
+        clippy::type_complexity,
+        reason = "switch channel: device name plus ack sender"
+    )]
     let mic_switch: Arc<Mutex<Option<(Option<String>, std::sync::mpsc::SyncSender<bool>)>>> =
         Arc::new(Mutex::new(None));
     let last_vol_write: Arc<Mutex<std::time::Instant>> = Arc::new(Mutex::new(
-        std::time::Instant::now() - std::time::Duration::from_secs(10),
+        std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(10))
+            .unwrap_or_else(std::time::Instant::now),
     ));
 
     let mic_volume_val = if config.test_tone {
         100
     } else {
-        init_mic_volume_for_device(vol_backend.as_ref(), config.mic_device.as_deref(), agc_enabled, false)
+        init_mic_volume_for_device(
+            vol_backend.as_ref(),
+            config.mic_device.as_deref(),
+            agc_enabled,
+            false,
+        )
     };
     let mic_volume = Arc::new(AtomicU8::new(mic_volume_val));
-    eprintln!("[audio-io] mic volume: {}%", mic_volume_val);
+    eprintln!("[audio-io] mic volume: {mic_volume_val}%");
     eprintln!(
         "[audio-io] mic mode: {}",
         if agc_enabled { "auto" } else { "manual" }
@@ -672,22 +696,22 @@ fn main() {
     ) {
         Ok(a) => {
             eprintln!(
-                "[audio-io] Embedded WebRTC AudioProcessing enabled (AEC: {}, NS: {}, HPF: {})",
-                aec_on, ns_on, hpf_on
-            );
-            Some(Arc::new(a))
+                    "[audio-io] Embedded WebRTC AudioProcessing enabled (AEC: {aec_on}, NS: {ns_on}, HPF: {hpf_on})"
+                );
+            Some(Arc::new(Mutex::new(a)))
         }
         Err(e) => {
             eprintln!(
-                "[audio-io] warning: WebRTC APM unavailable ({}); continuing without embedded AEC",
-                e
+                "[audio-io] warning: WebRTC APM unavailable ({e}); continuing without embedded AEC"
             );
             None
         }
     };
 
     if let (Some(a), Some(d)) = (&apm_instance, config.min_delay_ms) {
-        a.set_delay_ms(d);
+        a.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_delay_ms(d);
     }
 
     // 1. Microphone capture thread
@@ -713,7 +737,7 @@ fn main() {
                     Some(r)
                 }
                 Err(e) => {
-                    eprintln!("[audio-io] fault: mic: {}", e);
+                    eprintln!("[audio-io] fault: mic: {e}");
                     return;
                 }
             }
@@ -722,12 +746,12 @@ fn main() {
         let mut encoder = match OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, bitrate) {
             Ok(enc) => enc,
             Err(e) => {
-                eprintln!("[audio-io] fault: mic: opus encoder init failed: {}", e);
+                eprintln!("[audio-io] fault: mic: opus encoder init failed: {e}");
                 return;
             }
         };
 
-        let mut pcm_raw = vec![0u8; FRAME_BYTES];
+        let mut pcm = vec![0i16; FRAME_SAMPLES];
         let mut opus_buf = vec![0u8; 1024];
         let mut stdout = io::stdout();
 
@@ -752,12 +776,10 @@ fn main() {
                         let _ = reply_tx.send(true);
                     } else if new_dev
                         .as_deref()
-                        .map(|d| cap_vol_backend.get_source_state(Some(d)).is_none())
-                        .unwrap_or(false)
+                        .is_some_and(|d| cap_vol_backend.get_source_state(Some(d)).is_none())
                     {
                         eprintln!(
-                            "[audio-io] warn: mic switch rejected (unknown source: {:?})",
-                            new_dev
+                            "[audio-io] warn: mic switch rejected (unknown source: {new_dev:?})"
                         );
                         let _ = reply_tx.send(false);
                     } else {
@@ -770,7 +792,7 @@ fn main() {
                                 let _ = reply_tx.send(true);
                             }
                             Err(e) => {
-                                eprintln!("[audio-io] warn: mic switch failed: {}", e);
+                                eprintln!("[audio-io] warn: mic switch failed: {e}");
                                 let _ = reply_tx.send(false);
                             }
                         }
@@ -779,24 +801,20 @@ fn main() {
             }
             if tone_mode {
                 // Generate 440 Hz test tone
-                let samples_ptr = pcm_raw.as_mut_ptr() as *mut i16;
-                for j in 0..FRAME_SAMPLES {
-                    let val = (tone_phase.sin() * 10000.0) as i16;
-                    unsafe { *samples_ptr.add(j) = val };
+                for sample in &mut pcm {
+                    *sample = (tone_phase.sin() * 10000.0) as i16;
                     tone_phase = (tone_phase + tone_step) % (2.0 * std::f32::consts::PI);
                 }
                 thread::sleep(std::time::Duration::from_millis(20));
             } else if let Some(rec) = &mut recorder {
-                if let Err(e) = rec.read(&mut pcm_raw) {
-                    eprintln!("[audio-io] fault: mic read: {}", e);
+                if let Err(e) = rec.read(bytemuck::cast_slice_mut::<i16, u8>(&mut pcm)) {
+                    eprintln!("[audio-io] fault: mic read: {e}");
                     break;
                 }
             }
 
             let muted = mic_muted.load(Ordering::Relaxed);
-            let samples = unsafe {
-                std::slice::from_raw_parts_mut(pcm_raw.as_mut_ptr() as *mut i16, FRAME_SAMPLES)
-            };
+            let samples = pcm.as_mut_slice();
 
             if !tone_mode && guard.sync_os_volume() {
                 if let Ok(new_rec) = PulseRecorder::new(None) {
@@ -804,9 +822,14 @@ fn main() {
                     cap_vol_backend.normalize_own_stream();
                     leveler = MicLeveler::new(Some(Arc::clone(&leveler_far_active)));
                     let should_cap = agc_enabled && !guard_manual.load(Ordering::Relaxed);
-                    let nv = init_mic_volume_for_device(cap_vol_backend.as_ref(), None, should_cap, false);
+                    let nv = init_mic_volume_for_device(
+                        cap_vol_backend.as_ref(),
+                        None,
+                        should_cap,
+                        false,
+                    );
                     guard.current_vol.store(nv, Ordering::Relaxed);
-                    eprintln!("[audio-io] mic volume: {}%", nv);
+                    eprintln!("[audio-io] mic volume: {nv}%");
                 }
             }
 
@@ -819,7 +842,9 @@ fn main() {
                     // ClipGuard must inspect raw capture samples before WebRTC APM / leveler.
                     guard.feed(samples);
                     if let Some(apm) = &mic_apm {
-                        apm.process_capture(samples);
+                        apm.lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .process_capture(samples);
                     }
                     if leveler_enabled {
                         leveler.process(samples);
@@ -847,7 +872,7 @@ fn main() {
                     }
                 }
                 Err(e) => {
-                    eprintln!("[audio-io] Opus encode error: {}", e);
+                    eprintln!("[audio-io] Opus encode error: {e}");
                 }
             }
         }
@@ -860,8 +885,7 @@ fn main() {
     let playout_apm = apm_instance.as_ref().map(Arc::clone);
     let target_frames = config
         .min_delay_ms
-        .map(|d| (d / 20).clamp(2, 4) as usize)
-        .unwrap_or(3);
+        .map_or(3, |d| (d / 20).clamp(2, 4) as usize);
     let playout_jb = Arc::new(Mutex::new(
         match JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10) {
             Ok(mut jb) => {
@@ -869,10 +893,7 @@ fn main() {
                 jb
             }
             Err(e) => {
-                eprintln!(
-                    "[audio-io] fault: speaker: jitter buffer init failed: {}",
-                    e
-                );
+                eprintln!("[audio-io] fault: speaker: jitter buffer init failed: {e}");
                 return;
             }
         },
@@ -887,7 +908,7 @@ fn main() {
         let mut player = match PulsePlayer::new(speaker_dev.as_deref()) {
             Ok(p) => Some(p),
             Err(e) => {
-                eprintln!("[audio-io] fault: speaker: {}", e);
+                eprintln!("[audio-io] fault: speaker: {e}");
                 None
             }
         };
@@ -895,7 +916,9 @@ fn main() {
         let mut pcm_out = vec![0i16; FRAME_SAMPLES];
         let silence = vec![0u8; FRAME_BYTES];
         let tick = std::time::Duration::from_millis(20);
-        let mut last_far_speech = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let mut last_far_speech = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .unwrap_or_else(std::time::Instant::now);
         let mut last_diag = std::time::Instant::now();
         let mut last_reopen_attempt = std::time::Instant::now();
         let mut write_block_accum_ms = 0u64;
@@ -917,7 +940,9 @@ fn main() {
                 }
             }
 
-            if player.is_none() && last_reopen_attempt.elapsed() >= std::time::Duration::from_millis(500) {
+            if player.is_none()
+                && last_reopen_attempt.elapsed() >= std::time::Duration::from_millis(500)
+            {
                 last_reopen_attempt = std::time::Instant::now();
                 if let Ok(p) = PulsePlayer::new(speaker_dev.as_deref()) {
                     eprintln!("[audio-io] info: speaker stream recovered");
@@ -945,19 +970,19 @@ fn main() {
                     };
                     if has_frame {
                         if let Some(apm) = &playout_apm {
-                            apm.process_render(&pcm_out);
+                            apm.lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .process_render(&pcm_out);
                         }
 
-                        let sum_sq: i64 = pcm_out.iter().map(|&v| (v as i64) * (v as i64)).sum();
+                        let sum_sq: i64 =
+                            pcm_out.iter().map(|&v| i64::from(v) * i64::from(v)).sum();
                         let mean_sq = sum_sq / FRAME_SAMPLES as i64;
                         if mean_sq > 100_000 {
                             last_far_speech = std::time::Instant::now();
                             playout_far_active.store(true, Ordering::Relaxed);
                         }
-                        let bytes_len = FRAME_SAMPLES * 2;
-                        let pcm_bytes = unsafe {
-                            std::slice::from_raw_parts(pcm_out.as_ptr() as *const u8, bytes_len)
-                        };
+                        let pcm_bytes = bytemuck::cast_slice::<i16, u8>(&pcm_out);
                         let t0 = std::time::Instant::now();
                         let r = ply.write(pcm_bytes);
                         write_elapsed = t0.elapsed().as_millis() as u64;
@@ -989,7 +1014,7 @@ fn main() {
                         }
                     }
                     Err(e) => {
-                        eprintln!("[audio-io] warn: speaker write failed ({}), re-opening stream", e);
+                        eprintln!("[audio-io] warn: speaker write failed ({e}), re-opening stream");
                         player = None;
                         last_reopen_attempt = std::time::Instant::now();
                     }
@@ -1008,11 +1033,14 @@ fn main() {
                     let q_len = jb.queue_len();
                     let target = jb.min_target();
                     let avg_write = if write_block_count > 0 {
-                        write_block_accum_ms / (write_block_count as u64)
+                        write_block_accum_ms / u64::from(write_block_count)
                     } else {
                         0
                     };
-                    let pa_lat = player.as_ref().and_then(|p| p.latency_ms()).unwrap_or(0);
+                    let pa_lat = player
+                        .as_ref()
+                        .and_then(audio_backend::PulsePlayer::latency_ms)
+                        .unwrap_or(0);
                     let cur_mic_vol = playout_mic_vol.load(Ordering::Relaxed);
                     eprintln!(
                         "[audio-io] diag: playout [rx={} play={} q={}/{} plc={} late_drop={} under={} write_block={}ms pa_lat={}ms] mic [vol={}%]",
@@ -1034,7 +1062,10 @@ fn main() {
             if !write_ok || non_blocking_streak > 6 {
                 let elapsed = loop_start.elapsed();
                 if elapsed < tick {
-                    thread::sleep(tick - elapsed);
+                    thread::sleep(
+                        tick.checked_sub(elapsed)
+                            .unwrap_or(std::time::Duration::ZERO),
+                    );
                 }
             }
         }
@@ -1100,16 +1131,15 @@ fn main() {
                 if !config.test_tone && vol_backend.set_source_volume(dev.as_deref(), pct) {
                     let actual = vol_backend
                         .get_source_state(dev.as_deref())
-                        .map(|s| s.pct.min(100))
-                        .unwrap_or(pct);
+                        .map_or(pct, |s| s.pct.min(100));
                     mic_volume.store(actual, Ordering::Relaxed);
-                    eprintln!("[audio-io] mic volume: {}%", actual);
+                    eprintln!("[audio-io] mic volume: {actual}%");
                 } else {
                     if !config.test_tone {
-                        eprintln!("[audio-io] warn: failed to set mic volume to {}%", pct);
+                        eprintln!("[audio-io] warn: failed to set mic volume to {pct}%");
                     }
                     mic_volume.store(pct, Ordering::Relaxed);
-                    eprintln!("[audio-io] mic volume: {}%", pct);
+                    eprintln!("[audio-io] mic volume: {pct}%");
                 }
                 if !prev_manual {
                     eprintln!("[audio-io] mic mode: manual");
@@ -1136,11 +1166,10 @@ fn main() {
                     } else {
                         vol_backend
                             .get_source_state(dev.as_deref())
-                            .map(|s| s.pct.min(100))
-                            .unwrap_or_else(|| mic_volume.load(Ordering::Relaxed))
+                            .map_or_else(|| mic_volume.load(Ordering::Relaxed), |s| s.pct.min(100))
                     };
                     mic_volume.store(synced, Ordering::Relaxed);
-                    eprintln!("[audio-io] mic volume: {}%", synced);
+                    eprintln!("[audio-io] mic volume: {synced}%");
                 }
                 eprintln!(
                     "[audio-io] mic mode: {}",
@@ -1163,10 +1192,7 @@ fn main() {
                 } else {
                     "speaker"
                 };
-                eprintln!(
-                    "[audio-io] Requested {} device change to: {}",
-                    kind_str, name
-                );
+                eprintln!("[audio-io] Requested {kind_str} device change to: {name}");
                 if hdr[0] == b'i' {
                     let new_dev = if name.is_empty() {
                         None
@@ -1183,7 +1209,7 @@ fn main() {
                     if switched {
                         manual_mic_vol.store(false, Ordering::Relaxed);
                         if let Ok(mut am) = active_mic.lock() {
-                            *am = new_dev.clone();
+                            (*am).clone_from(&new_dev);
                         }
                         let new_vol = if config.test_tone {
                             100
@@ -1199,13 +1225,15 @@ fn main() {
                             )
                         };
                         mic_volume.store(new_vol, Ordering::Relaxed);
-                        eprintln!("[audio-io] mic volume: {}%", new_vol);
+                        eprintln!("[audio-io] mic volume: {new_vol}%");
                         eprintln!(
                             "[audio-io] mic mode: {}",
                             if agc_enabled { "auto" } else { "manual" }
                         );
                     } else {
-                        eprintln!("[audio-io] warn: keeping previous microphone after switch failure");
+                        eprintln!(
+                            "[audio-io] warn: keeping previous microphone after switch failure"
+                        );
                     }
                 } else if hdr[0] == b'o' {
                     let new_dev = if name.is_empty() {
@@ -1234,6 +1262,15 @@ fn main() {
 mod tests {
     use super::*;
 
+    fn past(d: std::time::Duration) -> std::time::Instant {
+        loop {
+            if let Some(instant) = std::time::Instant::now().checked_sub(d) {
+                return instant;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn test_soft_limiter_linear_region() {
         let mut samples = vec![0i16, 1000, -1000, 15000, -20000, 20000];
@@ -1249,8 +1286,7 @@ mod tests {
         for &s in &samples {
             assert!(
                 s.abs() <= 32000,
-                "Compressed sample must not exceed 32000, got {}",
-                s
+                "Compressed sample must not exceed 32000, got {s}"
             );
             assert!(
                 s.abs() > 20000,
@@ -1268,7 +1304,7 @@ mod tests {
         let vol = Arc::new(AtomicU8::new(100));
         let mut guard = ClipGuard::new(None, Arc::clone(&vol));
         // Artificially reset last_step to 1 second ago so it can step
-        guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(1000);
+        guard.last_step = past(std::time::Duration::from_millis(1000));
 
         // Feed 10 frames with clipping (30000)
         let clipped_frame = vec![30500i16; 320];
@@ -1281,14 +1317,14 @@ mod tests {
 
         // Test floor limit at 35%
         vol.store(42, Ordering::Relaxed);
-        guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(1000);
+        guard.last_step = past(std::time::Duration::from_millis(1000));
         for _ in 0..10 {
             guard.feed(&clipped_frame);
         }
         assert_eq!(vol.load(Ordering::Relaxed), 35);
 
         // Feed again, must not go below 35
-        guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(1000);
+        guard.last_step = past(std::time::Duration::from_millis(1000));
         for _ in 0..10 {
             guard.feed(&clipped_frame);
         }
@@ -1300,16 +1336,13 @@ mod tests {
         let vol = Arc::new(AtomicU8::new(40));
         let far_active = Arc::new(AtomicBool::new(false));
         let manual = Arc::new(AtomicBool::new(false));
-        let mut guard = ClipGuard::new(None, Arc::clone(&vol))
-            .with_controls(
-                Some(Arc::clone(&far_active)),
-                Arc::clone(&manual),
-                Arc::new(Mutex::new(
-                    std::time::Instant::now() - std::time::Duration::from_secs(10),
-                )),
-            );
+        let mut guard = ClipGuard::new(None, Arc::clone(&vol)).with_controls(
+            Some(Arc::clone(&far_active)),
+            Arc::clone(&manual),
+            Arc::new(Mutex::new(past(std::time::Duration::from_secs(10)))),
+        );
         guard.enabled = true;
-        guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(2000);
+        guard.last_step = past(std::time::Duration::from_millis(2000));
 
         // Learn quiet noise floor (~ -64 dBFS -> amplitude ~ 20)
         let noise = vec![20i16; 320];
@@ -1334,7 +1367,7 @@ mod tests {
 
         // Manual slider lock stops further auto-adjustments
         manual.store(true, Ordering::Relaxed);
-        guard.last_step = std::time::Instant::now() - std::time::Duration::from_millis(2000);
+        guard.last_step = past(std::time::Duration::from_millis(2000));
         for _ in 0..15 {
             guard.feed(&quiet_speech);
         }
@@ -1358,7 +1391,7 @@ mod tests {
                 state: Mutex::new(MockVolState {
                     pct,
                     muted,
-                    resolved_name: resolved_name.map(|s| s.to_string()),
+                    resolved_name: resolved_name.map(std::string::ToString::to_string),
                     normalized_calls: 0,
                 }),
             }
@@ -1393,13 +1426,22 @@ mod tests {
     #[test]
     fn test_init_mic_volume_caps_above_80_and_boosts_below_20() {
         let hot_backend = MockVolumeBackend::new(100, false, Some("alsa_input"));
-        assert_eq!(init_mic_volume_for_device(&hot_backend, None, true, false), 70);
+        assert_eq!(
+            init_mic_volume_for_device(&hot_backend, None, true, false),
+            70
+        );
         assert_eq!(hot_backend.state.lock().unwrap().pct, 70);
 
         let zero_backend = MockVolumeBackend::new(0, false, Some("alsa_input"));
         // Startup leaves 0% untouched unless boost_floor=true (explicit Auto re-enable)
-        assert_eq!(init_mic_volume_for_device(&zero_backend, None, true, false), 0);
-        assert_eq!(init_mic_volume_for_device(&zero_backend, None, true, true), 50);
+        assert_eq!(
+            init_mic_volume_for_device(&zero_backend, None, true, false),
+            0
+        );
+        assert_eq!(
+            init_mic_volume_for_device(&zero_backend, None, true, true),
+            50
+        );
         assert_eq!(zero_backend.state.lock().unwrap().pct, 50);
     }
 
@@ -1408,9 +1450,9 @@ mod tests {
         let backend = Arc::new(MockVolumeBackend::new(0, false, Some("alsa_input.1")));
         let vol = Arc::new(AtomicU8::new(0));
         let manual = Arc::new(AtomicBool::new(true));
-        let past = std::time::Instant::now() - std::time::Duration::from_secs(10);
+        let past_vol = past(std::time::Duration::from_secs(10));
         let mut guard = ClipGuard::new(None, Arc::clone(&vol))
-            .with_controls(None, Arc::clone(&manual), Arc::new(Mutex::new(past)))
+            .with_controls(None, Arc::clone(&manual), Arc::new(Mutex::new(past_vol)))
             .with_backend(Arc::clone(&backend) as Arc<dyn VolumeBackend>, true);
 
         // Initial sync establishes baseline resolved default
@@ -1423,7 +1465,7 @@ mod tests {
             st.pct = 100;
             st.resolved_name = Some("bluez_input.2".to_string());
         }
-        guard.last_os_sync = std::time::Instant::now() - std::time::Duration::from_secs(2);
+        guard.last_os_sync = past(std::time::Duration::from_secs(2));
         assert!(guard.sync_os_volume());
         assert_eq!(vol.load(Ordering::Relaxed), 100);
     }
@@ -1434,16 +1476,16 @@ mod tests {
         let vol = Arc::new(AtomicU8::new(40));
         let far_active = Arc::new(AtomicBool::new(false));
         let manual = Arc::new(AtomicBool::new(false));
-        let past = std::time::Instant::now() - std::time::Duration::from_secs(10);
+        let past_vol = past(std::time::Duration::from_secs(10));
         let mut guard = ClipGuard::new(None, Arc::clone(&vol))
             .with_controls(
                 Some(far_active),
                 Arc::clone(&manual),
-                Arc::new(Mutex::new(past)),
+                Arc::new(Mutex::new(past_vol)),
             )
             .with_backend(Arc::clone(&backend) as Arc<dyn VolumeBackend>, true);
         guard.enabled = true;
-        guard.last_step = past;
+        guard.last_step = past_vol;
 
         assert!(!guard.sync_os_volume());
         assert!(guard.os_muted);
@@ -1465,11 +1507,14 @@ mod tests {
     fn test_soft_clip_28500_and_hot_speech_step_down() {
         let vol = Arc::new(AtomicU8::new(80));
         let manual = Arc::new(AtomicBool::new(false));
-        let past = std::time::Instant::now() - std::time::Duration::from_secs(10);
-        let mut guard = ClipGuard::new(None, Arc::clone(&vol))
-            .with_controls(None, Arc::clone(&manual), Arc::new(Mutex::new(past)));
+        let past_vol = past(std::time::Duration::from_secs(10));
+        let mut guard = ClipGuard::new(None, Arc::clone(&vol)).with_controls(
+            None,
+            Arc::clone(&manual),
+            Arc::new(Mutex::new(past_vol)),
+        );
         guard.enabled = true;
-        guard.last_step = past;
+        guard.last_step = past_vol;
 
         // Soft-clipping ADC below 30000 (>= 28500) must step down by 10%
         let soft_clipped = vec![28800i16; 320];
@@ -1479,7 +1524,7 @@ mod tests {
         assert_eq!(vol.load(Ordering::Relaxed), 70);
 
         // Sustained hot speech (> -12 dBFS, e.g. amplitude 10000 ~ -10.3 dBFS) steps down by 5%
-        guard.last_step = std::time::Instant::now() - std::time::Duration::from_secs(2);
+        guard.last_step = past(std::time::Duration::from_secs(2));
         let hot_speech = vec![10000i16; 320];
         for _ in 0..16 {
             guard.feed(&hot_speech);

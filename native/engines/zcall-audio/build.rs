@@ -11,10 +11,9 @@ fn main() {
         .compile("zcall_pulse_vol");
 
     let has_webrtc = std::process::Command::new("pkg-config")
-        .args(&["--exists", "webrtc-audio-processing-1"])
+        .args(["--exists", "webrtc-audio-processing-1"])
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+        .is_ok_and(|s| s.success());
 
     let mut build = cc::Build::new();
     build
