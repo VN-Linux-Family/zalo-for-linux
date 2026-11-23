@@ -76,7 +76,9 @@ impl TcpUiTransport {
         let token = token.to_owned();
         thread::Builder::new()
             .name("zcall-ui-connection".into())
-            .spawn(move || reconnect_loop(port, token, outbound_rx, incoming_tx, manager_state))?;
+            .spawn(move || {
+                reconnect_loop(port, &token, &outbound_rx, &incoming_tx, &manager_state);
+            })?;
         Ok(Self {
             outbound,
             action_rx: Mutex::new(action_rx),
@@ -97,7 +99,7 @@ impl TcpUiTransport {
         let (action_tx, action_rx) = sync_channel(OUTBOUND_QUEUE);
         thread::Builder::new()
             .name("zcall-ui-writer".into())
-            .spawn(move || writer_loop(stream, action_rx))?;
+            .spawn(move || writer_loop(stream, &action_rx))?;
 
         let (incoming_tx, incoming_rx) = std::sync::mpsc::channel();
         thread::Builder::new()
@@ -109,7 +111,7 @@ impl TcpUiTransport {
                     line.clear();
                     match reader.read_until(b'\n', &mut line) {
                         Ok(0) | Err(_) => break,
-                        Ok(size) if size > MAX_CONTROL_LINE => continue,
+                        Ok(size) if size > MAX_CONTROL_LINE => {}
                         Ok(_) => {
                             if let Ok(action) = serde_json::from_slice::<UiAction>(&line) {
                                 if incoming_tx.send(action).is_err() {
@@ -129,12 +131,73 @@ impl TcpUiTransport {
     }
 }
 
+fn connect_ui_stream(
+    address: SocketAddrV4,
+    port: u16,
+    token: &str,
+    incoming: &SyncSender<UiAction>,
+    logged_connect_failure: &mut bool,
+) -> Option<(TcpStream, Arc<AtomicBool>)> {
+    let mut stream = match TcpStream::connect_timeout(&address.into(), Duration::from_millis(500)) {
+        Ok(stream) => stream,
+        Err(error) => {
+            if !*logged_connect_failure {
+                crate::zcall_log!(
+                    "[zcall-rust] waiting for call UI listener on 127.0.0.1:{port}: {error}"
+                );
+                *logged_connect_failure = true;
+            }
+            thread::sleep(Duration::from_millis(200));
+            return None;
+        }
+    };
+
+    if let Err(error) = stream
+        .set_nodelay(true)
+        .and_then(|()| stream.set_write_timeout(Some(Duration::from_millis(500))))
+        .and_then(|()| stream.write_all(token.as_bytes()))
+        .and_then(|()| stream.write_all(b"\n"))
+    {
+        crate::zcall_log!("[zcall-rust] call UI authentication write failed: {error}");
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        thread::sleep(Duration::from_millis(200));
+        return None;
+    }
+
+    let reader_stream = match stream.try_clone() {
+        Ok(stream) => stream,
+        Err(error) => {
+            crate::zcall_log!("[zcall-rust] call UI reader clone failed: {error}");
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            thread::sleep(Duration::from_millis(200));
+            return None;
+        }
+    };
+    let disconnected = Arc::new(AtomicBool::new(false));
+    let reader_disconnected = disconnected.clone();
+    let reader_incoming = incoming.clone();
+    let reader = thread::Builder::new()
+        .name("zcall-ui-reconnect-reader".into())
+        .spawn(move || {
+            reader_loop(reader_stream, &reader_incoming);
+            reader_disconnected.store(true, Ordering::Release);
+        });
+    if let Err(error) = reader {
+        crate::zcall_log!("[zcall-rust] call UI reader start failed: {error}");
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        thread::sleep(Duration::from_millis(200));
+        return None;
+    }
+    *logged_connect_failure = false;
+    Some((stream, disconnected))
+}
+
 fn reconnect_loop(
     port: u16,
-    token: String,
-    receiver: Receiver<OutboundMessage>,
-    incoming: SyncSender<UiAction>,
-    last_state: Arc<Mutex<Option<Value>>>,
+    token: &str,
+    receiver: &Receiver<OutboundMessage>,
+    incoming: &SyncSender<UiAction>,
+    last_state: &Arc<Mutex<Option<Value>>>,
 ) {
     let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
     let mut pending = VecDeque::new();
@@ -154,59 +217,12 @@ fn reconnect_loop(
             }
         }
 
-        let mut stream =
-            match TcpStream::connect_timeout(&address.into(), Duration::from_millis(500)) {
-                Ok(stream) => stream,
-                Err(error) => {
-                    if !logged_connect_failure {
-                        crate::zcall_log!(
-                        "[zcall-rust] waiting for call UI listener on 127.0.0.1:{port}: {error}"
-                    );
-                        logged_connect_failure = true;
-                    }
-                    thread::sleep(Duration::from_millis(200));
-                    continue;
-                }
-            };
-
-        if let Err(error) = stream
-            .set_nodelay(true)
-            .and_then(|()| stream.set_write_timeout(Some(Duration::from_millis(500))))
-            .and_then(|()| stream.write_all(token.as_bytes()))
-            .and_then(|()| stream.write_all(b"\n"))
-        {
-            crate::zcall_log!("[zcall-rust] call UI authentication write failed: {error}");
-            let _ = stream.shutdown(std::net::Shutdown::Both);
-            thread::sleep(Duration::from_millis(200));
+        let Some((mut stream, disconnected)) =
+            connect_ui_stream(address, port, token, incoming, &mut logged_connect_failure)
+        else {
             continue;
-        }
-
-        let reader_stream = match stream.try_clone() {
-            Ok(stream) => stream,
-            Err(error) => {
-                crate::zcall_log!("[zcall-rust] call UI reader clone failed: {error}");
-                let _ = stream.shutdown(std::net::Shutdown::Both);
-                thread::sleep(Duration::from_millis(200));
-                continue;
-            }
         };
-        let disconnected = Arc::new(AtomicBool::new(false));
-        let reader_disconnected = disconnected.clone();
-        let reader_incoming = incoming.clone();
-        let reader = thread::Builder::new()
-            .name("zcall-ui-reconnect-reader".into())
-            .spawn(move || {
-                reader_loop(reader_stream, reader_incoming);
-                reader_disconnected.store(true, Ordering::Release);
-            });
-        if let Err(error) = reader {
-            crate::zcall_log!("[zcall-rust] call UI reader start failed: {error}");
-            let _ = stream.shutdown(std::net::Shutdown::Both);
-            thread::sleep(Duration::from_millis(200));
-            continue;
-        }
 
-        logged_connect_failure = false;
         if let Some(state) = last_state.lock().ok().and_then(|state| state.clone()) {
             enqueue_pending(&mut pending, OutboundMessage::Json(state));
         }
@@ -286,14 +302,14 @@ fn enqueue_pending(pending: &mut VecDeque<OutboundMessage>, message: OutboundMes
     }
 }
 
-fn reader_loop(stream: TcpStream, incoming: SyncSender<UiAction>) {
+fn reader_loop(stream: TcpStream, incoming: &SyncSender<UiAction>) {
     let mut reader = BufReader::new(stream);
     let mut line = Vec::new();
     loop {
         line.clear();
         match reader.read_until(b'\n', &mut line) {
             Ok(0) | Err(_) => break,
-            Ok(size) if size > MAX_CONTROL_LINE => continue,
+            Ok(size) if size > MAX_CONTROL_LINE => {}
             Ok(_) => {
                 if let Ok(action) = serde_json::from_slice::<UiAction>(&line) {
                     if incoming.send(action).is_err() {
@@ -306,7 +322,7 @@ fn reader_loop(stream: TcpStream, incoming: SyncSender<UiAction>) {
 }
 
 #[cfg(test)]
-fn writer_loop(mut stream: TcpStream, receiver: Receiver<OutboundMessage>) {
+fn writer_loop(mut stream: TcpStream, receiver: &Receiver<OutboundMessage>) {
     while let Ok(message) = receiver.recv() {
         let result = match message {
             OutboundMessage::Json(value) => write_json_line(&mut stream, &value),

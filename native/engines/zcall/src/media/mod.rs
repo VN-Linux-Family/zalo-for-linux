@@ -39,12 +39,206 @@ use crate::protocol::rtp::{
     build_audio_rtp_header, build_group_audio_rtp_header, build_group_video_rtp_header,
     parse_rfc6464_audio_level,
 };
+
 use crate::protocol::zrtp::{
     build_change_address_packet, build_end_call_packet, build_init_zrtp_packet, build_ping_packet,
     build_req_forward_packet, build_zavi_ping_packet, msg_types, p2p, parse_server_reply,
     wrap_media_packet,
 };
+
 use crate::video::{packetize_frame, VideoAssembler, VideoFrame, VIDEO_PT_INTER, VIDEO_PT_KEY};
+
+const GROUP_SRTP_PROFILE_DISCOVERY_LIMIT: u8 = 4;
+
+struct PlayoutWriteContext<'a> {
+    player: &'a mut Option<PulsePlayer>,
+    apm: Option<&'a Apm>,
+    far_active: &'a AtomicBool,
+    last_far_speech: &'a mut Instant,
+    speaker_fault_reported: &'a mut bool,
+    media_events: &'a Mutex<VecDeque<GroupMediaEvent>>,
+    last_reopen: &'a mut Instant,
+    write_block_ms: &'a mut u64,
+    write_count: &'a mut u32,
+    max_write_ms: &'a mut u64,
+    non_blocking_streak: &'a mut u32,
+}
+
+impl PlayoutWriteContext<'_> {
+    fn write_frame(
+        &mut self,
+        pcm_out: &[i16; FRAME_SAMPLES],
+        silence: &[u8],
+        has_frame: bool,
+        muted: bool,
+    ) -> bool {
+        let Some(output) = self.player.as_mut() else {
+            return false;
+        };
+        let started = Instant::now();
+        let result = if muted || !has_frame {
+            if !muted {
+                self.far_active.store(false, Ordering::Relaxed);
+            }
+            output.write(silence)
+        } else {
+            if let Some(apm) = self.apm {
+                apm.process_render(pcm_out);
+            }
+            let sum_sq: i64 = pcm_out
+                .iter()
+                .map(|&sample| i64::from(sample) * i64::from(sample))
+                .sum();
+            let mean_sq = sum_sq / i64::try_from(FRAME_SAMPLES).unwrap_or(i64::MAX);
+            if mean_sq > 100_000 {
+                *self.last_far_speech = Instant::now();
+                self.far_active.store(true, Ordering::Relaxed);
+            }
+            output.write(bytemuck::cast_slice(pcm_out))
+        };
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        match result {
+            Ok(()) => {
+                *self.write_block_ms += elapsed_ms;
+                *self.write_count = self.write_count.saturating_add(1);
+                *self.max_write_ms = (*self.max_write_ms).max(elapsed_ms);
+                if elapsed_ms == 0 {
+                    *self.non_blocking_streak = self.non_blocking_streak.saturating_add(1);
+                } else {
+                    *self.non_blocking_streak = 0;
+                }
+                true
+            }
+            Err(error) => {
+                crate::zcall_log!("[zcall-rust] Pulse playback write failed; reopening: {error}");
+                if !*self.speaker_fault_reported {
+                    if let Ok(mut events) = self.media_events.lock() {
+                        events.push_back(GroupMediaEvent::AudioFault("speaker".into()));
+                    }
+                    *self.speaker_fault_reported = true;
+                }
+                *self.player = None;
+                *self.last_reopen = Instant::now();
+                false
+            }
+        }
+    }
+}
+
+fn log_playout_diagnostics(
+    last_diag: &mut Instant,
+    jitter_buffer: Option<&Arc<Mutex<JitterBuffer>>>,
+    player: Option<&PulsePlayer>,
+    mic_volume: u8,
+    write_block_ms: &mut u64,
+    write_count: &mut u32,
+    max_write_ms: &mut u64,
+) {
+    if last_diag.elapsed() < Duration::from_secs(5) {
+        return;
+    }
+    let jitter_diag = jitter_buffer
+        .and_then(|jitter| {
+            jitter.lock().ok().map(|jitter| {
+                let stats = jitter.stats();
+                format!(
+                    "rx={} play={} q={}/{} plc={} late_drop={} under={}",
+                    stats.rx_packets,
+                    stats.played_frames,
+                    jitter.queue_len(),
+                    jitter.min_target(),
+                    stats.plc_frames,
+                    stats.late_dropped,
+                    stats.underrun_count
+                )
+            })
+        })
+        .unwrap_or_else(|| "group mixer".into());
+    let average_write = if *write_count > 0 {
+        *write_block_ms / u64::from(*write_count)
+    } else {
+        0
+    };
+    let latency = player.and_then(PulsePlayer::latency_ms).unwrap_or_default();
+    crate::zcall_log!(
+        "[zcall-rust] playout: [{jitter_diag} write={}ms max={}ms pa_lat={}ms] mic={}% ",
+        average_write,
+        *max_write_ms,
+        latency,
+        mic_volume
+    );
+    *last_diag = Instant::now();
+    *write_block_ms = 0;
+    *write_count = 0;
+    *max_write_ms = 0;
+}
+
+fn open_playback_device(
+    speaker_device: Option<&str>,
+    media_events: &Mutex<VecDeque<GroupMediaEvent>>,
+    speaker_fault_reported: &mut bool,
+) -> Option<PulsePlayer> {
+    match PulsePlayer::new(speaker_device) {
+        Ok(player) => Some(player),
+        Err(error) => {
+            crate::zcall_log!("[zcall-rust] Pulse playback open failed: {error}");
+            if !*speaker_fault_reported {
+                if let Ok(mut events) = media_events.lock() {
+                    events.push_back(GroupMediaEvent::AudioFault("speaker".into()));
+                }
+                *speaker_fault_reported = true;
+            }
+            None
+        }
+    }
+}
+
+fn reopen_playback_if_needed(
+    player: &mut Option<PulsePlayer>,
+    speaker_device: Option<&str>,
+    last_reopen: &mut Instant,
+    non_blocking_streak: &mut u32,
+) {
+    if player.is_none() && last_reopen.elapsed() >= Duration::from_millis(500) {
+        *last_reopen = Instant::now();
+        if let Ok(reopened) = PulsePlayer::new(speaker_device) {
+            crate::zcall_log!("[zcall-rust] Pulse playback stream recovered");
+            *player = Some(reopened);
+            *non_blocking_streak = 0;
+        }
+    }
+}
+
+fn playout_has_frame(
+    params: &Mutex<Option<MediaSessionParams>>,
+    jitter_buffer: Option<&Arc<Mutex<JitterBuffer>>>,
+    group_audio: &Mutex<GroupAudioMixer>,
+    pcm_out: &mut [i16; FRAME_SAMPLES],
+) -> bool {
+    let is_group = params
+        .lock()
+        .ok()
+        .and_then(|params| {
+            params
+                .as_ref()
+                .map(|params| params.kind == MediaKind::Group)
+        })
+        .unwrap_or(false);
+    if is_group {
+        group_audio
+            .lock()
+            .is_ok_and(|mut mixer| mixer.mix_frame(pcm_out) > 0)
+    } else {
+        jitter_buffer
+            .and_then(|jitter| {
+                jitter
+                    .lock()
+                    .ok()
+                    .map(|mut jitter| jitter.pop_frame(pcm_out))
+            })
+            .unwrap_or(false)
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 fn spawn_playout_worker(
@@ -90,147 +284,56 @@ fn spawn_playout_worker(
                 let loop_start = Instant::now();
                 let generation = device_generation.load(Ordering::Acquire);
                 if generation != active_generation {
-                    speaker_device = devices
-                        .lock()
-                        .map_or(None, |devices| devices.1.clone());
-                    player = match PulsePlayer::new(speaker_device.as_deref()) {
-                        Ok(player) => Some(player),
-                        Err(error) => {
-                            crate::zcall_log!("[zcall-rust] Pulse playback open failed: {error}");
-                            if !speaker_fault_reported {
-                                if let Ok(mut events) = media_events.lock() {
-                                    events.push_back(GroupMediaEvent::AudioFault("speaker".into()));
-                                }
-                                speaker_fault_reported = true;
-                            }
-                            None
-                        }
-                    };
+                    speaker_device = devices.lock().map_or(None, |devices| devices.1.clone());
+                    player = open_playback_device(
+                        speaker_device.as_deref(),
+                        &media_events,
+                        &mut speaker_fault_reported,
+                    );
                     active_generation = generation;
                     non_blocking_streak = 0;
                     last_reopen = Instant::now();
                 }
 
-                if player.is_none() && last_reopen.elapsed() >= Duration::from_millis(500) {
-                    last_reopen = Instant::now();
-                    if let Ok(reopened) = PulsePlayer::new(speaker_device.as_deref()) {
-                        crate::zcall_log!("[zcall-rust] Pulse playback stream recovered");
-                        player = Some(reopened);
-                        non_blocking_streak = 0;
-                    }
-                }
+                reopen_playback_if_needed(
+                    &mut player,
+                    speaker_device.as_deref(),
+                    &mut last_reopen,
+                    &mut non_blocking_streak,
+                );
 
-                let is_group = params
-                    .lock()
-                    .ok()
-                    .and_then(|params| params.as_ref().map(|params| params.is_group))
-                    .unwrap_or(false);
-                let has_frame = if is_group {
-                    group_audio
-                        .lock()
-                        .is_ok_and(|mut mixer| mixer.mix_frame(&mut pcm_out) > 0)
-                } else {
-                    jitter_buffer
-                        .as_ref()
-                        .and_then(|jitter| jitter.lock().ok().map(|mut jitter| jitter.pop_frame(&mut pcm_out)))
-                        .unwrap_or(false)
-                };
+                let has_frame =
+                    playout_has_frame(&params, jitter_buffer.as_ref(), &group_audio, &mut pcm_out);
 
                 let muted = speaker_off.load(Ordering::Relaxed);
-                let mut write_ok = false;
-                if let Some(output) = player.as_mut() {
-                    let started = Instant::now();
-                    let result = if muted || !has_frame {
-                        if !muted {
-                            far_active.store(false, Ordering::Relaxed);
-                        }
-                        output.write(&silence)
-                    } else {
-                        if let Some(apm) = apm.as_ref() {
-                            apm.process_render(&pcm_out);
-                        }
-
-                        let sum_sq: i64 = pcm_out
-                            .iter()
-                            .map(|&sample| i64::from(sample) * i64::from(sample))
-                            .sum();
-                        let mean_sq = sum_sq / FRAME_SAMPLES as i64;
-                        if mean_sq > 100_000 {
-                            last_far_speech = Instant::now();
-                            far_active.store(true, Ordering::Relaxed);
-                        }
-                        let bytes = bytemuck::cast_slice(&pcm_out);
-                        output.write(bytes)
-                    };
-                    let elapsed_ms = started.elapsed().as_millis() as u64;
-                    match result {
-                        Ok(()) => {
-                            write_ok = true;
-                            write_block_ms += elapsed_ms;
-                            write_count = write_count.saturating_add(1);
-                            max_write_ms = max_write_ms.max(elapsed_ms);
-                            if elapsed_ms == 0 {
-                                non_blocking_streak = non_blocking_streak.saturating_add(1);
-                            } else {
-                                non_blocking_streak = 0;
-                            }
-                        }
-                        Err(error) => {
-                            crate::zcall_log!("[zcall-rust] Pulse playback write failed; reopening: {error}");
-                            if !speaker_fault_reported {
-                                if let Ok(mut events) = media_events.lock() {
-                                    events.push_back(GroupMediaEvent::AudioFault("speaker".into()));
-                                }
-                                speaker_fault_reported = true;
-                            }
-                            player = None;
-                            last_reopen = Instant::now();
-                        }
-                    }
+                let write_ok = PlayoutWriteContext {
+                    player: &mut player,
+                    apm: apm.as_deref(),
+                    far_active: &far_active,
+                    last_far_speech: &mut last_far_speech,
+                    speaker_fault_reported: &mut speaker_fault_reported,
+                    media_events: &media_events,
+                    last_reopen: &mut last_reopen,
+                    write_block_ms: &mut write_block_ms,
+                    write_count: &mut write_count,
+                    max_write_ms: &mut max_write_ms,
+                    non_blocking_streak: &mut non_blocking_streak,
                 }
+                .write_frame(&pcm_out, &silence, has_frame, muted);
 
                 if last_far_speech.elapsed() >= Duration::from_millis(300) {
                     far_active.store(false, Ordering::Relaxed);
                 }
 
-                if last_diag.elapsed() >= Duration::from_secs(5) {
-                    let jitter_diag = jitter_buffer
-                        .as_ref()
-                        .and_then(|jitter| jitter.lock().ok().map(|jitter| {
-                            let stats = jitter.stats();
-                            format!(
-                                "rx={} play={} q={}/{} plc={} late_drop={} under={}",
-                                stats.rx_packets,
-                                stats.played_frames,
-                                jitter.queue_len(),
-                                jitter.min_target(),
-                                stats.plc_frames,
-                                stats.late_dropped,
-                                stats.underrun_count
-                            )
-                        }))
-                        .unwrap_or_else(|| "group mixer".into());
-                    let average_write = if write_count > 0 {
-                        write_block_ms / u64::from(write_count)
-                    } else {
-                        0
-                    };
-                    let latency = player
-                        .as_ref()
-                        .and_then(PulsePlayer::latency_ms)
-                        .unwrap_or_default();
-                    crate::zcall_log!(
-                        "[zcall-rust] playout: [{jitter_diag} write={}ms max={}ms pa_lat={}ms] mic={}%",
-                        average_write,
-                        max_write_ms,
-                        latency,
-                        mic_volume.load(Ordering::Relaxed).min(100)
-                    );
-                    last_diag = Instant::now();
-                    write_block_ms = 0;
-                    write_count = 0;
-                    max_write_ms = 0;
-                }
+                log_playout_diagnostics(
+                    &mut last_diag,
+                    jitter_buffer.as_ref(),
+                    player.as_ref(),
+                    mic_volume.load(Ordering::Relaxed).min(100),
+                    &mut write_block_ms,
+                    &mut write_count,
+                    &mut max_write_ms,
+                );
 
                 // pa_simple_write follows the device's hardware clock. Sleep only
                 // when no device is available or a virtual sink returns immediately.
@@ -240,7 +343,6 @@ fn spawn_playout_worker(
                         thread::sleep(tick.checked_sub(elapsed).unwrap());
                     }
                 }
-
             }
         });
 }
@@ -258,86 +360,157 @@ fn ring_ping_interval_from(value: Option<&str>) -> Duration {
     Duration::from_millis(millis)
 }
 
+fn handle_group_share_incoming(
+    share_state: &Arc<Mutex<Option<GroupSharePeer>>>,
+    events: &Arc<Mutex<VecDeque<GroupMediaEvent>>>,
+    active: &Arc<AtomicBool>,
+    packet: &[u8],
+    from: SocketAddr,
+) -> bool {
+    let server = share_state
+        .lock()
+        .ok()
+        .and_then(|peer| peer.as_ref().map(|peer| peer.server));
+    if server != Some(from) {
+        return false;
+    }
+    if let Some(reply) = parse_server_reply(packet) {
+        if reply.cmd == crate::protocol::zrtp::commands::END_CALL {
+            let is_share = share_state
+                .lock()
+                .ok()
+                .and_then(|peer| peer.as_ref().map(|peer| peer.uid == reply.uid))
+                .unwrap_or(false);
+            if is_share {
+                if let Ok(mut queue) = events.lock() {
+                    queue.push_back(GroupMediaEvent::ShareFailed(
+                        "group share peer ended by the SFU".into(),
+                    ));
+                }
+                active.store(false, Ordering::Release);
+            }
+        } else if matches!(
+            reply.cmd,
+            crate::protocol::zrtp::commands::INIT_CALL_CALLER
+                | crate::protocol::zrtp::commands::INIT_CALL_CALLEE
+        ) {
+            if let Ok(mut guard) = share_state.lock() {
+                if let Some(peer) = guard.as_mut() {
+                    if peer.uid != reply.uid || peer.token != 0 {
+                        return true;
+                    }
+                    if reply.result == Some(0) && reply.server_token.is_some_and(|token| token != 0)
+                    {
+                        peer.token = reply.server_token.unwrap_or(0);
+                        peer.started_at = Some(Instant::now());
+                        peer.last_ping =
+                            Instant::now().checked_sub(Duration::from_secs(6)).unwrap();
+                        if let Ok(mut queue) = events.lock() {
+                            queue.push_back(GroupMediaEvent::ShareReady);
+                        }
+                    } else {
+                        if let Ok(mut queue) = events.lock() {
+                            queue.push_back(GroupMediaEvent::ShareFailed(format!(
+                                "share InitZRTP refused: {:?}",
+                                reply.result
+                            )));
+                        }
+                        peer.active.store(false, Ordering::Release);
+                    }
+                }
+            }
+        }
+    } else if packet.first() == Some(&msg_types::VIDEO_FEC) && packet.len() > 5 {
+        let target_uid = share_state
+            .lock()
+            .ok()
+            .and_then(|peer| peer.as_ref().map(|peer| peer.uid));
+        if target_uid.is_some_and(|uid| rtcp_requests_keyframe(&packet[5..], uid)) {
+            if let Ok(mut queue) = events.lock() {
+                queue.push_back(GroupMediaEvent::ShareKeyframeRequested);
+            }
+        }
+    }
+    true
+}
+
+fn collect_group_share_outbound(
+    share_state: &Arc<Mutex<Option<GroupSharePeer>>>,
+    events: &Arc<Mutex<VecDeque<GroupMediaEvent>>>,
+    init_packet: &[u8],
+    init_tries: &mut u8,
+    last_init: &mut Instant,
+) -> Vec<(Vec<u8>, SocketAddr)> {
+    let mut outbound = Vec::new();
+    if let Ok(mut guard) = share_state.lock() {
+        if let Some(peer) = guard.as_mut() {
+            if peer.token == 0 && last_init.elapsed() >= Duration::from_secs(1) {
+                if *init_tries >= 3 {
+                    if let Ok(mut queue) = events.lock() {
+                        queue.push_back(GroupMediaEvent::ShareFailed(
+                            "group share peer received no InitZRTP response".into(),
+                        ));
+                    }
+                    peer.active.store(false, Ordering::Release);
+                } else {
+                    *init_tries += 1;
+                    *last_init = Instant::now();
+                    outbound.push((init_packet.to_vec(), peer.server));
+                }
+            } else if peer.token != 0 && peer.last_ping.elapsed() >= Duration::from_secs(6) {
+                let ping = build_share_zavi_ping_packet(
+                    peer.uid,
+                    peer.token,
+                    peer.control_seq,
+                    &peer.sess_id,
+                );
+                peer.control_seq = peer.control_seq.wrapping_add(1);
+                outbound.push((ping, peer.server));
+                if peer.width > 0 && peer.height > 0 {
+                    let layer = GroupVideoLayer {
+                        id: 0,
+                        bitrate_kbps: peer.max_shr_screen_br,
+                        width: peer.width,
+                        height: peer.height,
+                    };
+                    let config = build_group_video_quality_config(
+                        peer.uid,
+                        peer.token,
+                        peer.control_seq,
+                        &[layer],
+                    );
+                    peer.control_seq = peer.control_seq.wrapping_add(1);
+                    outbound.push((config, peer.server));
+                }
+                peer.last_ping = Instant::now();
+            }
+            for _ in 0..8 {
+                let Some(packet) = peer.queue.pop_front() else {
+                    break;
+                };
+                outbound.push((packet, peer.server));
+            }
+        }
+    }
+    outbound
+}
+
 fn group_share_worker(
-    socket: Arc<UdpSocket>,
-    share_state: Arc<Mutex<Option<GroupSharePeer>>>,
-    events: Arc<Mutex<VecDeque<GroupMediaEvent>>>,
-    running: Arc<AtomicBool>,
-    active: Arc<AtomicBool>,
-    init_packet: Vec<u8>,
+    socket: &Arc<UdpSocket>,
+    share_state: &Arc<Mutex<Option<GroupSharePeer>>>,
+    events: &Arc<Mutex<VecDeque<GroupMediaEvent>>>,
+    running: &Arc<AtomicBool>,
+    active: &Arc<AtomicBool>,
+    init_packet: &[u8],
 ) {
     let mut init_tries = 1u8;
     let mut last_init = Instant::now();
     let mut buf = [0u8; 4096];
-
     while running.load(Ordering::Acquire) && active.load(Ordering::Acquire) {
         match socket.recv_from(&mut buf) {
             Ok((len, from)) if len > 0 => {
-                let server = share_state
-                    .lock()
-                    .ok()
-                    .and_then(|peer| peer.as_ref().map(|peer| peer.server));
-                if server != Some(from) {
+                if !handle_group_share_incoming(share_state, events, active, &buf[..len], from) {
                     continue;
-                }
-                let packet = &buf[..len];
-                if let Some(reply) = parse_server_reply(packet) {
-                    if reply.cmd == crate::protocol::zrtp::commands::END_CALL {
-                        let is_share = share_state
-                            .lock()
-                            .ok()
-                            .and_then(|peer| peer.as_ref().map(|peer| peer.uid == reply.uid))
-                            .unwrap_or(false);
-                        if is_share {
-                            if let Ok(mut queue) = events.lock() {
-                                queue.push_back(GroupMediaEvent::ShareFailed(
-                                    "group share peer ended by the SFU".into(),
-                                ));
-                            }
-                            active.store(false, Ordering::Release);
-                        }
-                    } else if matches!(
-                        reply.cmd,
-                        crate::protocol::zrtp::commands::INIT_CALL_CALLER
-                            | crate::protocol::zrtp::commands::INIT_CALL_CALLEE
-                    ) {
-                        if let Ok(mut guard) = share_state.lock() {
-                            if let Some(peer) = guard.as_mut() {
-                                if peer.uid != reply.uid || peer.token != 0 {
-                                    continue;
-                                }
-                                if reply.result == Some(0)
-                                    && reply.server_token.is_some_and(|token| token != 0)
-                                {
-                                    peer.token = reply.server_token.unwrap_or(0);
-                                    peer.started_at = Some(Instant::now());
-                                    peer.last_ping =
-                                        Instant::now().checked_sub(Duration::from_secs(6)).unwrap();
-                                    if let Ok(mut queue) = events.lock() {
-                                        queue.push_back(GroupMediaEvent::ShareReady);
-                                    }
-                                } else {
-                                    if let Ok(mut queue) = events.lock() {
-                                        queue.push_back(GroupMediaEvent::ShareFailed(format!(
-                                            "share InitZRTP refused: {:?}",
-                                            reply.result
-                                        )));
-                                    }
-                                    peer.active.store(false, Ordering::Release);
-                                }
-                            }
-                        }
-                    }
-                } else if packet[0] == msg_types::VIDEO_FEC && packet.len() > 5 {
-                    let target_uid = share_state
-                        .lock()
-                        .ok()
-                        .and_then(|peer| peer.as_ref().map(|peer| peer.uid));
-                    if target_uid.is_some_and(|uid| rtcp_requests_keyframe(&packet[5..], uid)) {
-                        if let Ok(mut queue) = events.lock() {
-                            queue.push_back(GroupMediaEvent::ShareKeyframeRequested);
-                        }
-                    }
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -352,59 +525,13 @@ fn group_share_worker(
             }
             _ => {}
         }
-
-        let mut outbound = Vec::<(Vec<u8>, SocketAddr)>::new();
-        if let Ok(mut guard) = share_state.lock() {
-            if let Some(peer) = guard.as_mut() {
-                if peer.token == 0 && last_init.elapsed() >= Duration::from_secs(1) {
-                    if init_tries >= 3 {
-                        if let Ok(mut queue) = events.lock() {
-                            queue.push_back(GroupMediaEvent::ShareFailed(
-                                "group share peer received no InitZRTP response".into(),
-                            ));
-                        }
-                        peer.active.store(false, Ordering::Release);
-                    } else {
-                        init_tries += 1;
-                        last_init = Instant::now();
-                        outbound.push((init_packet.clone(), peer.server));
-                    }
-                } else if peer.token != 0 && peer.last_ping.elapsed() >= Duration::from_secs(6) {
-                    let ping = build_share_zavi_ping_packet(
-                        peer.uid,
-                        peer.token,
-                        peer.control_seq,
-                        &peer.sess_id,
-                    );
-                    peer.control_seq = peer.control_seq.wrapping_add(1);
-                    outbound.push((ping, peer.server));
-                    if peer.width > 0 && peer.height > 0 {
-                        let layer = GroupVideoLayer {
-                            id: 0,
-                            bitrate_kbps: peer.max_shr_screen_br,
-                            width: peer.width,
-                            height: peer.height,
-                        };
-                        let config = build_group_video_quality_config(
-                            peer.uid,
-                            peer.token,
-                            peer.control_seq,
-                            &[layer],
-                        );
-                        peer.control_seq = peer.control_seq.wrapping_add(1);
-                        outbound.push((config, peer.server));
-                    }
-                    peer.last_ping = Instant::now();
-                }
-                for _ in 0..8 {
-                    let Some(packet) = peer.queue.pop_front() else {
-                        break;
-                    };
-                    outbound.push((packet, peer.server));
-                }
-            }
-        }
-        for (packet, server) in outbound {
+        for (packet, server) in collect_group_share_outbound(
+            share_state,
+            events,
+            init_packet,
+            &mut init_tries,
+            &mut last_init,
+        ) {
             let _ = socket.send_to(&packet, server);
         }
         thread::sleep(Duration::from_millis(1));
@@ -744,7 +871,7 @@ fn stop_p2p_path(
     if notify_peer {
         for seq in 0..3u32 {
             if let Some(peer) = old_path {
-                let signal = p2p::signal(!params.is_caller, params.call_id, 2, seq);
+                let signal = p2p::signal(params.role == MediaRole::Callee, params.call_id, 2, seq);
                 let _ = socket.send_to(&signal, peer);
             }
             if let Some((server, token)) = selected_server {
@@ -771,7 +898,7 @@ fn send_change_address(
     let ping = build_ping_packet(params.uid, token, sequence, &params.sess_id);
     let _ = socket.send_to(&ping, server);
 
-    if !params.is_group {
+    if params.kind != MediaKind::Group {
         let request = build_req_forward_packet(params.uid, token, 0, 8, &[4, 0, 0, 0, 0, 0, 0, 0]);
         let _ = socket.send_to(&request, server);
     }
@@ -962,6 +1089,2132 @@ impl MemberSpeakingTracker {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaRole {
+    Caller,
+    Callee,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaKind {
+    OneToOne,
+    Group,
+}
+
+fn spawn_p2p_bind_worker(
+    bind_params: Option<MediaSessionParams>,
+    bind_socket: Arc<UdpSocket>,
+    bind_running: Arc<AtomicBool>,
+    bind_path: Arc<Mutex<Option<SocketAddr>>>,
+    bind_enabled: Arc<AtomicBool>,
+    bind_seq: Arc<AtomicU16>,
+) {
+    let Some(bind_params) = bind_params.filter(|params| !params.p2p_candidates.is_empty()) else {
+        return;
+    };
+    thread::Builder::new()
+        .name("zcall-p2p-bind".into())
+        .spawn(move || {
+            let mut attempt_started = Instant::now();
+            let mut last_send = Instant::now()
+                .checked_sub(Duration::from_millis(100))
+                .unwrap();
+            let mut was_enabled = false;
+            while bind_running.load(Ordering::Relaxed) {
+                let path_is_up = bind_path.lock().is_ok_and(|path| path.is_some());
+                let enabled = bind_enabled.load(Ordering::Acquire);
+                if !enabled {
+                    was_enabled = false;
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                if !was_enabled {
+                    // P2P_BIND_GIVE_UP_MS = 15 s. Explicit subCmd 3
+                    // or a fresh start signal begins another bind window.
+                    attempt_started = Instant::now();
+                    last_send = Instant::now()
+                        .checked_sub(Duration::from_millis(100))
+                        .unwrap();
+                    was_enabled = true;
+                }
+                if path_is_up {
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                if attempt_started.elapsed() >= Duration::from_secs(15) {
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                let interval = if attempt_started.elapsed() < Duration::from_secs(1) {
+                    Duration::from_millis(100)
+                } else {
+                    Duration::from_millis(400)
+                };
+                if last_send.elapsed() >= interval {
+                    last_send = Instant::now();
+                    let sequence = bind_seq.fetch_add(1, Ordering::Relaxed);
+                    for (index, candidate) in bind_params.p2p_candidates.iter().enumerate() {
+                        let packet = p2p::bind(
+                            bind_params.role == MediaRole::Callee,
+                            bind_params.call_id,
+                            sequence,
+                            index as u32,
+                        );
+                        let _ = bind_socket.send_to(&packet, candidate);
+                    }
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+        })
+        .ok();
+}
+
+#[derive(Default)]
+struct AudioAuthDiagnostics {
+    reported: bool,
+    failed_reported: bool,
+}
+
+#[derive(Default)]
+struct VideoAuthDiagnostics {
+    reported: bool,
+    failed_reported: bool,
+    frame_reported: bool,
+}
+
+#[derive(Clone, Copy)]
+struct AudioRtpSource {
+    from: SocketAddr,
+    direct: bool,
+}
+
+#[derive(Clone, Copy)]
+struct VideoRtpDeliveryContext {
+    source: AudioRtpSource,
+    is_group: bool,
+    is_share: bool,
+    payload_type: u8,
+    marker: bool,
+}
+
+struct DecodedVideoRtp {
+    sequence: u16,
+    ssrc: u32,
+    roc: u32,
+    payload: Vec<u8>,
+}
+
+struct VideoRtpDecode {
+    packet: Option<DecodedVideoRtp>,
+    fallback_key_used: bool,
+    auth_profile: (usize, usize),
+}
+
+struct AudioTransmitResources {
+    tx_running: Arc<AtomicBool>,
+    tx_audio_packets: Arc<AtomicU64>,
+    tx_socket: Arc<UdpSocket>,
+    tx_keys: Arc<Mutex<Option<SrtpKeys>>>,
+    tx_params: Arc<Mutex<Option<MediaSessionParams>>>,
+    tx_selected: Arc<Mutex<Option<(SocketAddr, u32)>>>,
+    tx_muted: Arc<AtomicBool>,
+    tx_twcc: Arc<AtomicU16>,
+    tx_devices: Arc<Mutex<(Option<String>, Option<String>)>>,
+    tx_device_generation: Arc<AtomicU64>,
+    tx_rtcp: Arc<Mutex<Option<RtcpFeedback>>>,
+    tx_p2p_path: Arc<Mutex<Option<SocketAddr>>>,
+    tx_rate: Arc<Mutex<Option<SendRateController>>>,
+    tx_last_video: Arc<AtomicU64>,
+    tx_pending_profile: Arc<Mutex<Option<VideoProfile>>>,
+    tx_apm: Option<Arc<Apm>>,
+    tx_far_active: Arc<AtomicBool>,
+    tx_mic_volume: Arc<AtomicU8>,
+    tx_mic_volume_dirty: Arc<AtomicBool>,
+    tx_mic_manual: Arc<AtomicBool>,
+    tx_pending_mic_volume: Arc<Mutex<Option<u8>>>,
+    tx_mic_level: Arc<AtomicU8>,
+    tx_mic_level_dirty: Arc<AtomicBool>,
+    tx_audio_enabled: Arc<AtomicBool>,
+    tx_media_events: Arc<Mutex<VecDeque<GroupMediaEvent>>>,
+    last_ping: Arc<Mutex<Instant>>,
+    tx_group_plan: Arc<Mutex<Option<GroupVideoPlan>>>,
+    tx_group_wanted: Arc<Mutex<HashMap<u32, u8>>>,
+    tx_group_control_seq: Arc<AtomicU32>,
+}
+
+struct AudioTransmitWorker {
+    resources: AudioTransmitResources,
+    recorder: Option<PulseRecorder>,
+    mic_fault_reported: bool,
+    clip_guard: ClipGuard,
+    guard_device: Option<String>,
+    leveler: MicLeveler,
+    mic_gain_enabled: bool,
+    last_volume_reported: u8,
+    active_device_generation: u64,
+    last_mic_reopen: Instant,
+    last_level_at: Instant,
+    encoder: Option<OpusEncoder>,
+    opus_buf: Vec<u8>,
+    pcm_buf: Vec<u8>,
+    seq: u16,
+    audio_roc: u32,
+    ts: u32,
+    ping_seq: u32,
+    last_twcc: Instant,
+    last_report: Instant,
+    audio_packets: u32,
+    audio_octets: u32,
+}
+
+impl AudioTransmitWorker {
+    fn new(resources: AudioTransmitResources) -> Self {
+        let initial_microphone = resources
+            .tx_devices
+            .lock()
+            .map_or(None, |devices| devices.0.clone());
+        let mut clip_guard =
+            ClipGuard::new(initial_microphone.clone(), resources.tx_mic_volume.clone())
+                .with_controls(
+                    Some(resources.tx_far_active.clone()),
+                    resources.tx_mic_manual.clone(),
+                );
+        clip_guard.initialize_device();
+        let leveler = MicLeveler::new(Some(resources.tx_far_active.clone()));
+        let mic_gain_enabled = std::env::var("ZCALL_MIC_GAIN").map_or(true, |value| value != "0");
+        let last_volume_reported = resources.tx_mic_volume.load(Ordering::Relaxed);
+        let encoder = match OpusEncoder::new(SAMPLE_RATE.cast_signed(), 1, 32000) {
+            Ok(encoder) => Some(encoder),
+            Err(err) => {
+                crate::zcall_log!("[zcall-rust] Opus encoder unavailable: {err}");
+                None
+            }
+        };
+        Self {
+            resources,
+            recorder: None,
+            mic_fault_reported: false,
+            clip_guard,
+            guard_device: initial_microphone,
+            leveler,
+            mic_gain_enabled,
+            last_volume_reported,
+            active_device_generation: u64::MAX,
+            last_mic_reopen: Instant::now().checked_sub(Duration::from_secs(1)).unwrap(),
+            last_level_at: Instant::now()
+                .checked_sub(Duration::from_millis(100))
+                .unwrap(),
+            encoder,
+            opus_buf: vec![0u8; 1024],
+            pcm_buf: vec![0u8; FRAME_BYTES],
+            seq: 0,
+            audio_roc: 0,
+            ts: 0,
+            ping_seq: 0,
+            last_twcc: Instant::now(),
+            last_report: Instant::now(),
+            audio_packets: 0,
+            audio_octets: 0,
+        }
+    }
+
+    fn run(mut self) {
+        while self.resources.tx_running.load(Ordering::Relaxed) {
+            self.apply_pending_mic_volume();
+
+            self.refresh_microphone();
+
+            if let Some((pcm_s16, level)) = self.capture_pcm_frame() {
+                self.encode_and_send_audio(&pcm_s16, level);
+            }
+
+            // Zalo's send-side bandwidth estimator depends on regular
+            // transport-wide feedback. Audio RTCP carries TWCC + SR + SDES;
+            // video RTCP carries RR + SDES when we have received video.
+            self.send_twcc_feedback();
+            self.send_periodic_rtcp_reports();
+
+            // Send 6-second keepalive ping
+            self.send_keepalive();
+        }
+    }
+
+    fn apply_pending_mic_volume(&mut self) {
+        if let Ok(mut pending) = self.resources.tx_pending_mic_volume.lock() {
+            if let Some(percent) = pending.take() {
+                if percent > 0 {
+                    let _ = set_source_mute(self.guard_device.as_deref(), false);
+                    pulse_normalize_own_stream();
+                }
+                self.clip_guard.mark_manual_write();
+                if set_source_volume(self.guard_device.as_deref(), percent).is_ok() {
+                    let actual = get_source_volume(self.guard_device.as_deref())
+                        .map_or(percent, |value| value.min(100));
+                    self.resources
+                        .tx_mic_volume
+                        .store(actual, Ordering::Relaxed);
+                    crate::zcall_log!("[zcall-rust] mic volume: {actual}%");
+                } else {
+                    self.resources
+                        .tx_mic_volume
+                        .store(percent, Ordering::Relaxed);
+                    crate::zcall_log!("[zcall-rust] warning: failed to apply manual mic volume");
+                }
+                self.last_volume_reported = self.resources.tx_mic_volume.load(Ordering::Relaxed);
+                self.resources
+                    .tx_mic_volume_dirty
+                    .store(true, Ordering::Release);
+            }
+        }
+    }
+
+    fn refresh_microphone(&mut self) {
+        let device_generation = self.resources.tx_device_generation.load(Ordering::Acquire);
+        if device_generation != self.active_device_generation {
+            let microphone = self
+                .resources
+                .tx_devices
+                .lock()
+                .map_or(None, |devices| devices.0.clone());
+            let audio_enabled = self.resources.tx_audio_enabled.load(Ordering::Acquire);
+            let switch_result = if audio_enabled {
+                PulseRecorder::new(microphone.as_deref()).map(Some)
+            } else if pulse_get_source_info(microphone.as_deref()).is_some() {
+                Ok(None)
+            } else {
+                Err("selected microphone source could not be resolved".to_owned())
+            };
+
+            match switch_result {
+                Ok(new_recorder) => {
+                    self.recorder = new_recorder;
+                    if audio_enabled {
+                        // The capture stream must exist before normalizing its
+                        // source-output volume/mute state in PulseAudio/PipeWire.
+                        pulse_normalize_own_stream();
+                    }
+                    if microphone != self.guard_device {
+                        self.clip_guard.set_device(microphone.clone());
+                        self.clip_guard.initialize_device();
+                        self.guard_device = microphone;
+                        self.resources.tx_mic_manual.store(false, Ordering::Release);
+                        self.leveler = MicLeveler::new(Some(self.resources.tx_far_active.clone()));
+                        self.last_volume_reported =
+                            self.resources.tx_mic_volume.load(Ordering::Relaxed);
+                        self.resources
+                            .tx_mic_volume_dirty
+                            .store(true, Ordering::Release);
+                    }
+                    self.mic_fault_reported = false;
+                }
+                Err(error) => {
+                    crate::zcall_log!(
+                        "[zcall-rust] microphone switch rejected; keeping previous device: {error}"
+                    );
+                    // Roll back the requested selection as well as retaining the
+                    // previous recorder and ClipGuard target.
+                    if let Ok(mut devices) = self.resources.tx_devices.lock() {
+                        devices.0.clone_from(&self.guard_device);
+                    }
+                    if !self.mic_fault_reported {
+                        if let Ok(mut events) = self.resources.tx_media_events.lock() {
+                            events.push_back(GroupMediaEvent::AudioFault("mic".into()));
+                        }
+                        self.mic_fault_reported = true;
+                    }
+                }
+            }
+            self.active_device_generation = device_generation;
+            self.last_mic_reopen = Instant::now();
+        }
+        if self.recorder.is_none()
+            && self.resources.tx_audio_enabled.load(Ordering::Acquire)
+            && self.last_mic_reopen.elapsed() >= Duration::from_millis(500)
+        {
+            self.last_mic_reopen = Instant::now();
+            let microphone = self
+                .resources
+                .tx_devices
+                .lock()
+                .map_or(None, |devices| devices.0.clone());
+            match PulseRecorder::new(microphone.as_deref()) {
+                Ok(reopened) => {
+                    crate::zcall_log!("[zcall-rust] Pulse microphone stream recovered");
+                    self.recorder = Some(reopened);
+                    pulse_normalize_own_stream();
+                }
+                Err(error) => {
+                    if !self.mic_fault_reported {
+                        if let Ok(mut events) = self.resources.tx_media_events.lock() {
+                            events.push_back(GroupMediaEvent::AudioFault("mic".into()));
+                        }
+                        self.mic_fault_reported = true;
+                    }
+                    crate::zcall_log!("[zcall-rust] Pulse microphone reopen failed: {error}");
+                }
+            }
+        }
+        if self.clip_guard.sync_os_volume() {
+            if let Ok(reopened) = PulseRecorder::new(None) {
+                self.recorder = Some(reopened);
+                pulse_normalize_own_stream();
+                self.clip_guard.initialize_device();
+                self.leveler = MicLeveler::new(Some(self.resources.tx_far_active.clone()));
+                self.last_volume_reported = self.resources.tx_mic_volume.load(Ordering::Relaxed);
+                self.resources
+                    .tx_mic_volume_dirty
+                    .store(true, Ordering::Release);
+            }
+        }
+    }
+
+    fn send_twcc_feedback(&mut self) {
+        if self.last_twcc.elapsed() >= Duration::from_millis(50) {
+            self.last_twcc = Instant::now();
+            let selected = *self.resources.tx_selected.lock().unwrap();
+            if let Some((server, token)) = selected {
+                let reports = self
+                    .resources
+                    .tx_rtcp
+                    .lock()
+                    .ok()
+                    .and_then(|mut feedback| feedback.as_mut().map(RtcpFeedback::twcc_packets))
+                    .unwrap_or_default();
+                for report in reports {
+                    let packet = wrap_media_packet(msg_types::AUDIO_FEC, token, &report);
+                    let _ = self.resources.tx_socket.send_to(&packet, server);
+                    if let Some(peer) = self
+                        .resources
+                        .tx_p2p_path
+                        .lock()
+                        .ok()
+                        .and_then(|path| *path)
+                    {
+                        if let Some(params) = self
+                            .resources
+                            .tx_params
+                            .lock()
+                            .ok()
+                            .and_then(|params| params.clone())
+                        {
+                            let direct = p2p::wrap(
+                                params.role == MediaRole::Callee,
+                                params.call_id,
+                                p2p::AUDIO_RTCP,
+                                &report,
+                            );
+                            let _ = self.resources.tx_socket.send_to(&direct, peer);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn send_periodic_rtcp_reports(&mut self) {
+        if self.last_report.elapsed() >= Duration::from_secs(1) {
+            self.last_report = Instant::now();
+            let selected = *self.resources.tx_selected.lock().unwrap();
+            if let Some((server, token)) = selected {
+                let reports = self.resources.tx_rtcp.lock().ok().and_then(|mut feedback| {
+                    let feedback = feedback.as_mut()?;
+                    let now = unix_now_ms();
+                    let downlink_loss = feedback.downlink_audio_loss();
+                    let audio =
+                        feedback.audio_report(now, self.ts, self.audio_packets, self.audio_octets);
+                    let video = feedback.video_report(now);
+                    Some((audio, video, downlink_loss))
+                });
+                if let Some((audio_report, video_report, downlink_loss)) = reports {
+                    let now = unix_now_ms();
+                    let sending_video = now
+                        .saturating_sub(self.resources.tx_last_video.load(Ordering::Relaxed))
+                        < 1_500;
+                    let changed = self
+                        .resources
+                        .tx_rate
+                        .lock()
+                        .ok()
+                        .and_then(|mut controller| {
+                            controller.as_mut().and_then(|controller| {
+                                controller.tick(now, sending_video, downlink_loss)
+                            })
+                        });
+                    if let Some(profile) = changed {
+                        if let Ok(mut pending) = self.resources.tx_pending_profile.lock() {
+                            *pending = Some(profile);
+                        }
+                    }
+                    let packet = wrap_media_packet(msg_types::AUDIO_FEC, token, &audio_report);
+                    let _ = self.resources.tx_socket.send_to(&packet, server);
+                    if let Some(peer) = self
+                        .resources
+                        .tx_p2p_path
+                        .lock()
+                        .ok()
+                        .and_then(|path| *path)
+                    {
+                        if let Some(params) = self
+                            .resources
+                            .tx_params
+                            .lock()
+                            .ok()
+                            .and_then(|params| params.clone())
+                        {
+                            let direct = p2p::wrap(
+                                params.role == MediaRole::Callee,
+                                params.call_id,
+                                p2p::AUDIO_RTCP,
+                                &audio_report,
+                            );
+                            let _ = self.resources.tx_socket.send_to(&direct, peer);
+                        }
+                    }
+                    if let Some(video_report) = video_report {
+                        let packet = wrap_media_packet(msg_types::VIDEO_FEC, token, &video_report);
+                        let _ = self.resources.tx_socket.send_to(&packet, server);
+                        if let Some(peer) = self
+                            .resources
+                            .tx_p2p_path
+                            .lock()
+                            .ok()
+                            .and_then(|path| *path)
+                        {
+                            if let Some(params) = self
+                                .resources
+                                .tx_params
+                                .lock()
+                                .ok()
+                                .and_then(|params| params.clone())
+                            {
+                                let direct = p2p::wrap(
+                                    params.role == MediaRole::Callee,
+                                    params.call_id,
+                                    p2p::VIDEO_RTCP,
+                                    &video_report,
+                                );
+                                let _ = self.resources.tx_socket.send_to(&direct, peer);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn send_keepalive(&mut self) {
+        if self.resources.last_ping.lock().unwrap().elapsed() >= Duration::from_secs(6) {
+            *self.resources.last_ping.lock().unwrap() = Instant::now();
+            let (server_opt, p_opt) = {
+                let s = *self.resources.tx_selected.lock().unwrap();
+                let p = self.resources.tx_params.lock().unwrap().as_ref().map(|p| {
+                    (
+                        p.uid,
+                        p.sess_id.clone(),
+                        p.kind == MediaKind::Group,
+                        p.video_enabled,
+                    )
+                });
+                (s, p)
+            };
+            if let (Some((server, token)), Some((uid, sess_id, is_group, video_on))) =
+                (server_opt, p_opt)
+            {
+                let ping_pkt = if is_group {
+                    let group_camera_enabled =
+                        !std::env::var("ZCALL_GROUP_CAMERA").is_ok_and(|value| value == "0");
+                    // The camera state is independent of SRTP mode. The
+                    // encrypted group path still sends camera RTP; gating
+                    // this bit on `group_plain` made the SFU advertise us
+                    // as camera-off while packets were being transmitted.
+                    let ping_video_on = group_camera_advertised(video_on, group_camera_enabled);
+                    let group_seq =
+                        next_group_control_sequence(&self.resources.tx_group_control_seq);
+                    media_debug(&format!(
+                        "periodic-zavi-ping seq={group_seq} video_on={ping_video_on}"
+                    ));
+                    build_zavi_ping_packet(uid, token, group_seq, &sess_id, ping_video_on)
+                } else {
+                    self.ping_seq = self.ping_seq.wrapping_add(1);
+                    build_ping_packet(uid, token, self.ping_seq, &sess_id)
+                };
+                let _ = self.resources.tx_socket.send_to(&ping_pkt, server);
+
+                if is_group {
+                    let plan = self
+                        .resources
+                        .tx_group_plan
+                        .lock()
+                        .ok()
+                        .and_then(|plan| plan.clone());
+                    if let Some(plan) = plan.filter(|plan| !plan.send.is_empty()) {
+                        let group_seq =
+                            next_group_control_sequence(&self.resources.tx_group_control_seq);
+                        let packet =
+                            build_group_video_quality_config(uid, token, group_seq, &plan.send);
+                        let _ = self.resources.tx_socket.send_to(&packet, server);
+                    }
+                    let entries = self
+                        .resources
+                        .tx_group_wanted
+                        .lock()
+                        .map_or_default(|wanted| {
+                            wanted
+                                .iter()
+                                .map(|(uid, quality_id)| GroupVideoQualityRequest {
+                                    uid: *uid,
+                                    quality_id: if std::env::var("ZCALL_GROUP_QUALITY")
+                                        .is_ok_and(|value| value == "0")
+                                    {
+                                        0xff
+                                    } else {
+                                        *quality_id
+                                    },
+                                })
+                                .collect::<Vec<_>>()
+                        });
+                    if !entries.is_empty() {
+                        let group_seq =
+                            next_group_control_sequence(&self.resources.tx_group_control_seq);
+                        let packet =
+                            build_group_video_quality_request(uid, token, group_seq, &entries);
+                        let _ = self.resources.tx_socket.send_to(&packet, server);
+                    }
+                }
+            }
+        }
+    }
+
+    fn capture_pcm_frame(&mut self) -> Option<(Vec<i16>, u8)> {
+        let has_recorder = self.recorder.is_some();
+        if !has_recorder {
+            thread::sleep(Duration::from_millis(10));
+            return None;
+        }
+        let read_ok = self
+            .recorder
+            .as_mut()
+            .is_some_and(|recorder| recorder.read(&mut self.pcm_buf).is_ok());
+        if !read_ok {
+            if !self.mic_fault_reported {
+                if let Ok(mut events) = self.resources.tx_media_events.lock() {
+                    events.push_back(GroupMediaEvent::AudioFault("mic".into()));
+                }
+                self.mic_fault_reported = true;
+            }
+            self.recorder = None;
+            self.last_mic_reopen = Instant::now();
+            thread::sleep(Duration::from_millis(5));
+            return None;
+        }
+
+        let mut pcm_s16: Vec<i16> = self
+            .pcm_buf
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| i16::from_le_bytes(*pair))
+            .collect();
+        if self.resources.tx_muted.load(Ordering::Relaxed) || self.clip_guard.is_os_muted() {
+            pcm_s16.fill(0);
+        } else {
+            // ClipGuard measures unprocessed hardware PCM before APM.
+            self.clip_guard.feed(&pcm_s16);
+            if let Some(apm) = self.resources.tx_apm.as_ref() {
+                apm.process_capture(&mut pcm_s16);
+            }
+            if self.mic_gain_enabled {
+                self.leveler.process(&mut pcm_s16);
+            }
+        }
+        apply_soft_limiter(&mut pcm_s16);
+
+        let level = compute_rfc6464_level(&pcm_s16);
+        if self.last_level_at.elapsed() >= Duration::from_millis(100) {
+            self.resources.tx_mic_level.store(level, Ordering::Relaxed);
+            self.resources
+                .tx_mic_level_dirty
+                .store(true, Ordering::Release);
+            self.last_level_at = Instant::now();
+        }
+        let current_volume = self.resources.tx_mic_volume.load(Ordering::Relaxed);
+        if current_volume != self.last_volume_reported {
+            self.last_volume_reported = current_volume;
+            self.resources
+                .tx_mic_volume_dirty
+                .store(true, Ordering::Release);
+        }
+        Some((pcm_s16, level))
+    }
+
+    fn encode_and_send_audio(&mut self, pcm_s16: &[i16], level: u8) {
+        let encoded_len = {
+            let Some(encoder) = self.encoder.as_mut() else {
+                return;
+            };
+            let Ok(encoded_len) = encoder.encode(pcm_s16, &mut self.opus_buf) else {
+                return;
+            };
+            encoded_len
+        };
+        let opus_data = self.opus_buf[..encoded_len].to_vec();
+        self.send_audio_packet(&opus_data, encoded_len, level);
+    }
+
+    fn send_audio_packet(&mut self, opus_data: &[u8], encoded_len: usize, level: u8) {
+        let (server_opt, p_opt, k_opt) = {
+            let selected = *self.resources.tx_selected.lock().unwrap();
+            let params = self
+                .resources
+                .tx_params
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|params| {
+                    (
+                        params.uid,
+                        params.send_udp,
+                        params.call_id,
+                        params.role == MediaRole::Caller,
+                        params.kind == MediaKind::Group,
+                    )
+                });
+            let keys = self
+                .resources
+                .tx_keys
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|keys| (keys.enc, keys.auth, keys.salt));
+            (selected, params, keys)
+        };
+        let (Some((server, token)), Some((uid, send_udp, call_id, is_caller, is_group))) =
+            (server_opt, p_opt)
+        else {
+            return;
+        };
+        if !send_udp || (!is_group && k_opt.is_none()) {
+            return;
+        }
+
+        let tw_seq = self.resources.tx_twcc.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut controller) = self.resources.tx_rate.lock() {
+            if let Some(controller) = controller.as_mut() {
+                controller.on_sent(tw_seq, unix_now_ms());
+            }
+        }
+        let rtp_header = if is_group {
+            build_group_audio_rtp_header(
+                self.seq,
+                self.ts,
+                uid,
+                tw_seq,
+                false,
+                112,
+                unix_now_ms(),
+                level,
+            )
+        } else {
+            build_audio_rtp_header(self.seq, self.ts, uid, tw_seq, false, 112).to_vec()
+        };
+        let media_payload = if let Some((enc_k, auth_k, salt_k)) = k_opt {
+            let keys = SrtpKeys {
+                enc: enc_k,
+                auth: auth_k,
+                salt: salt_k,
+            };
+            protect_rtp(&rtp_header, opus_data, &keys, self.seq, uid, self.audio_roc)
+        } else {
+            let mut plain = rtp_header;
+            plain.extend_from_slice(opus_data);
+            plain
+        };
+        let media_packet = wrap_media_packet(msg_types::AUDIO_RTP, token, &media_payload);
+        let _ = self.resources.tx_socket.send_to(&media_packet, server);
+        if !is_group {
+            if let Some(peer) = self
+                .resources
+                .tx_p2p_path
+                .lock()
+                .ok()
+                .and_then(|path| *path)
+            {
+                let direct = p2p::wrap(!is_caller, call_id, p2p::AUDIO, &media_payload);
+                let _ = self.resources.tx_socket.send_to(&direct, peer);
+            }
+        }
+        self.audio_packets = self.audio_packets.wrapping_add(1);
+        self.resources
+            .tx_audio_packets
+            .fetch_add(1, Ordering::Relaxed);
+        self.audio_octets = self.audio_octets.wrapping_add(encoded_len as u32);
+        self.seq = self.seq.wrapping_add(1);
+        if self.seq == 0 {
+            self.audio_roc = self.audio_roc.wrapping_add(1);
+        }
+        self.ts = self.ts.wrapping_add(320);
+    }
+}
+
+#[derive(Default)]
+struct GroupLayoutAttempt {
+    responded: HashSet<SocketAddr>,
+    accepted: Vec<(SocketAddr, u32, Option<String>)>,
+}
+
+struct ReceiveWorkerSetup {
+    running: Arc<AtomicBool>,
+    socket: Arc<UdpSocket>,
+    keys: Arc<Mutex<Option<SrtpKeys>>>,
+    selected_server: Arc<Mutex<Option<(SocketAddr, u32)>>>,
+    params: Arc<Mutex<Option<MediaSessionParams>>>,
+    jitter_buffer: Option<Arc<Mutex<JitterBuffer>>>,
+    group_audio: Arc<Mutex<GroupAudioMixer>>,
+}
+
+struct ReceiveWorker {
+    rx_running: Arc<AtomicBool>,
+    rx_audio_packets: Arc<AtomicU64>,
+    rx_socket: Arc<UdpSocket>,
+    rx_keys: Arc<Mutex<Option<SrtpKeys>>>,
+    rx_fallback_keys: Arc<Mutex<Option<SrtpKeys>>>,
+    rx_selected: Arc<Mutex<Option<(SocketAddr, u32)>>>,
+    video_frames: Arc<Mutex<VecDeque<VideoFrame>>>,
+    rx_params: Arc<Mutex<Option<MediaSessionParams>>>,
+    rx_rtcp: Arc<Mutex<Option<RtcpFeedback>>>,
+    rx_nack: Arc<Mutex<NackTracker>>,
+    rx_keyframe_request: Arc<AtomicBool>,
+    rx_p2p_path: Arc<Mutex<Option<SocketAddr>>>,
+    rx_p2p_enabled: Arc<AtomicBool>,
+    rx_video_history: VideoHistory,
+    rx_group_events: Arc<Mutex<VecDeque<GroupMediaEvent>>>,
+    rx_share_peer: Arc<Mutex<Option<GroupSharePeer>>>,
+    rx_remote_share_uid: Arc<AtomicU32>,
+    rx_send_rate: Arc<Mutex<Option<SendRateController>>>,
+    rx_last_media_rx_ms: Arc<AtomicU64>,
+    rx_audio_enabled: Arc<AtomicBool>,
+    rx_tx_audio_packets: Arc<AtomicU64>,
+    rx_last_video_sent_ms: Arc<AtomicU64>,
+    rx_tx_video_packets: Arc<AtomicU64>,
+    rx_jitter_buffer: Option<Arc<Mutex<JitterBuffer>>>,
+    rx_group_audio: Arc<Mutex<GroupAudioMixer>>,
+    video_assemblers: HashMap<u32, VideoAssembler>,
+    audio_roc: RocTracker,
+    video_rocs: HashMap<u32, RocTracker>,
+    last_video_pli: HashMap<u32, Instant>,
+    audio_dedup: AudioDeduplicator,
+    member_audio_seen: HashSet<u32>,
+    member_speaking: HashMap<u32, MemberSpeakingTracker>,
+    last_audio_rx: Instant,
+    last_p2p_rx: Option<Instant>,
+    last_recovery: Instant,
+    local_ip_sig: String,
+    next_network_check: Instant,
+    change_address_retries: VecDeque<(Instant, &'static str)>,
+    change_addr_seq: u32,
+    relay_audio_streak: u32,
+    rx_audio_second: u32,
+    early_audio_rx_count: u32,
+    group_rx_audio_packets: u64,
+    group_rx_video_packets: u64,
+    group_rx_audio_decoded: u64,
+    group_rx_video_decoded: u64,
+    group_rx_audio_bad: u64,
+    group_rx_video_bad: u64,
+    rx_video_packets: u64,
+    rx_video_decoded: u64,
+    rx_video_bad: u64,
+    rx_video_first: u8,
+    group_rx_other_host: u64,
+    group_rx_alt_port: u64,
+    group_rx_last_summary: Instant,
+    group_rx_audio_first: u8,
+    group_rx_video_first: u8,
+    group_audio_srtp_profile: Option<(usize, usize)>,
+    group_video_srtp_profile: Option<(usize, usize)>,
+    group_audio_srtp_profile_discovery_attempts: u8,
+    group_video_srtp_profile_discovery_attempts: u8,
+    audio_auth: AudioAuthDiagnostics,
+    video_auth: VideoAuthDiagnostics,
+}
+
+impl ReceiveWorker {
+    fn run(mut self) {
+        let mut buf = [0u8; 2048];
+
+        while self.rx_running.load(Ordering::Relaxed) {
+            if let Ok((len, from)) = self.rx_socket.recv_from(&mut buf) {
+                let pkt = &buf[..len];
+                if pkt.is_empty() {
+                    continue;
+                }
+                if self.process_packet(pkt, from) {
+                    continue;
+                }
+            }
+            let recovery_now = Instant::now();
+            self.check_network_recovery(recovery_now);
+
+            self.expire_member_speaking();
+
+            self.send_change_address_retries(recovery_now);
+
+            self.log_receive_summary();
+
+            self.poll_pending_video_nacks();
+        }
+    }
+    fn handle_audio_rtp_down(
+        &mut self,
+        payload: &[u8],
+        from: SocketAddr,
+        direct: bool,
+        params_snapshot: Option<&MediaSessionParams>,
+    ) -> bool {
+        if payload.len() < 12 {
+            return false;
+        }
+        // The relay and P2P path carry identical SRTP sequence spaces. Decode
+        // first, then deliver each SSRC/ROC/sequence exactly once.
+        let rtp_body = payload;
+        let seq = u16::from_be_bytes([rtp_body[2], rtp_body[3]]);
+        let ssrc = u32::from_be_bytes([rtp_body[8], rtp_body[9], rtp_body[10], rtp_body[11]]);
+        let local_uid = params_snapshot.map_or_default(|params| params.uid);
+        let is_group = params_snapshot.is_some_and(|params| params.kind == MediaKind::Group);
+        if is_group {
+            self.handle_group_audio_rtp(
+                rtp_body,
+                AudioRtpSource { from, direct },
+                params_snapshot,
+                ssrc,
+                seq,
+                local_uid,
+            )
+        } else {
+            self.handle_peer_audio_rtp(rtp_body, from, direct, params_snapshot)
+        }
+    }
+
+    fn handle_video_down(
+        &mut self,
+        payload: &[u8],
+        from: SocketAddr,
+        direct: bool,
+        params_snapshot: Option<&MediaSessionParams>,
+    ) -> bool {
+        if payload.len() < 12 {
+            return false;
+        }
+        let rtp_body = payload;
+        let ssrc = u32::from_be_bytes([rtp_body[8], rtp_body[9], rtp_body[10], rtp_body[11]]);
+        if params_snapshot
+            .is_some_and(|params| params.kind == MediaKind::Group && params.uid == ssrc)
+            && !std::env::var("ZCALL_CAM_LOOPBACK").is_ok_and(|value| value == "1")
+        {
+            return true;
+        }
+        let local_share_uid = self
+            .rx_share_peer
+            .lock()
+            .ok()
+            .and_then(|peer| peer.as_ref().map(|peer| peer.uid));
+        let is_local_share = local_share_uid == Some(ssrc);
+        let is_share = is_local_share || self.rx_remote_share_uid.load(Ordering::Acquire) == ssrc;
+        if is_local_share && !std::env::var("ZCALL_SHARE_LOOPBACK").is_ok_and(|value| value == "1")
+        {
+            return true;
+        }
+        let marker = (rtp_body[1] & 0x80) != 0;
+        let pt = rtp_body[1] & 0x7f;
+        let is_group_video = params_snapshot.is_some_and(|params| params.kind == MediaKind::Group);
+        if is_group_video || pt == VIDEO_PT_KEY || pt == VIDEO_PT_INTER {
+            let decoded = self.decode_video_rtp(rtp_body, ssrc, is_share, is_group_video);
+            self.record_video_auth_result(rtp_body, ssrc, pt, marker, is_group_video, &decoded);
+            if let Some(packet) = decoded.packet {
+                self.deliver_video_rtp(
+                    &packet,
+                    rtp_body,
+                    VideoRtpDeliveryContext {
+                        source: AudioRtpSource { from, direct },
+                        is_group: is_group_video,
+                        is_share,
+                        payload_type: pt,
+                        marker,
+                    },
+                );
+            }
+        }
+        false
+    }
+
+    fn check_network_recovery(&mut self, recovery_now: Instant) {
+        if recovery_now >= self.next_network_check {
+            self.next_network_check = recovery_now + Duration::from_millis(500);
+            let current_signature = local_ipv4_signature();
+            let network_changed =
+                !current_signature.is_empty() && current_signature != self.local_ip_sig;
+            if !current_signature.is_empty() {
+                self.local_ip_sig = current_signature;
+            }
+
+            let params_now = self.rx_params.lock().ok().and_then(|params| params.clone());
+            let selected_now = *self.rx_selected.lock().unwrap();
+
+            if network_changed {
+                if let Some(params) = params_now.as_ref() {
+                    crate::zcall_log!(
+                                "[zcall-rust] local IPv4 changed ({}); stopping P2P and sending ChangeAddress",
+                                self.local_ip_sig
+                            );
+                    stop_p2p_path(
+                        &self.rx_socket,
+                        selected_now,
+                        &self.rx_p2p_path,
+                        &self.rx_p2p_enabled,
+                        params,
+                        true,
+                    );
+                    send_change_address(
+                        &self.rx_socket,
+                        selected_now,
+                        params,
+                        self.change_addr_seq,
+                    );
+                    self.change_addr_seq = self.change_addr_seq.wrapping_add(1);
+                    self.change_address_retries.push_back((
+                        recovery_now + Duration::from_secs(1),
+                        "local-ip-change retry 1",
+                    ));
+                    self.change_address_retries.push_back((
+                        recovery_now + Duration::from_millis(2500),
+                        "local-ip-change retry 2",
+                    ));
+                    self.last_recovery = recovery_now;
+                }
+            } else if self.rx_p2p_path.lock().is_ok_and(|path| path.is_some())
+                && self.last_p2p_rx.is_some_and(|last| {
+                    recovery_now.duration_since(last) > Duration::from_millis(2500)
+                })
+            {
+                if let Some(params) = params_now.as_ref() {
+                    crate::zcall_log!(
+                        "[zcall-rust] P2P receive timed out; requesting relay fallback"
+                    );
+                    stop_p2p_path(
+                        &self.rx_socket,
+                        selected_now,
+                        &self.rx_p2p_path,
+                        &self.rx_p2p_enabled,
+                        params,
+                        true,
+                    );
+                    send_change_address(
+                        &self.rx_socket,
+                        selected_now,
+                        params,
+                        self.change_addr_seq,
+                    );
+                    self.change_addr_seq = self.change_addr_seq.wrapping_add(1);
+                    self.relay_audio_streak = 0;
+                    self.last_recovery = recovery_now;
+                }
+            } else if !params_now
+                .as_ref()
+                .is_some_and(|params| params.kind == MediaKind::Group)
+                && recovery_now.duration_since(self.last_audio_rx) > Duration::from_secs(2)
+                && recovery_now.duration_since(self.last_audio_rx) < Duration::from_secs(20)
+                && recovery_now.duration_since(self.last_recovery) > Duration::from_millis(2500)
+            {
+                if let Some(params) = params_now.as_ref() {
+                    crate::zcall_log!(
+                                "[zcall-rust] audio receive stalled; requesting relay fallback and ChangeAddress"
+                            );
+                    stop_p2p_path(
+                        &self.rx_socket,
+                        selected_now,
+                        &self.rx_p2p_path,
+                        &self.rx_p2p_enabled,
+                        params,
+                        true,
+                    );
+                    send_change_address(
+                        &self.rx_socket,
+                        selected_now,
+                        params,
+                        self.change_addr_seq,
+                    );
+                    self.change_addr_seq = self.change_addr_seq.wrapping_add(1);
+                    self.relay_audio_streak = 0;
+                    self.last_recovery = recovery_now;
+                }
+            }
+        }
+    }
+    fn expire_member_speaking(&mut self) {
+        let speaking_now = Instant::now();
+        for (uid, tracker) in &mut self.member_speaking {
+            if tracker.expire(speaking_now) {
+                if let Ok(mut events) = self.rx_group_events.lock() {
+                    events.push_back(GroupMediaEvent::MemberSpeaking(*uid, false));
+                }
+            }
+        }
+    }
+    fn send_change_address_retries(&mut self, recovery_now: Instant) {
+        while self
+            .change_address_retries
+            .front()
+            .is_some_and(|(due, _)| recovery_now >= *due)
+        {
+            if let Some((_, reason)) = self.change_address_retries.pop_front() {
+                if let Some(params) = self.rx_params.lock().ok().and_then(|params| params.clone()) {
+                    let selected = *self.rx_selected.lock().unwrap();
+                    crate::zcall_log!("[zcall-rust] sending {reason}");
+                    send_change_address(&self.rx_socket, selected, &params, self.change_addr_seq);
+                    self.change_addr_seq = self.change_addr_seq.wrapping_add(1);
+                }
+            }
+        }
+    }
+    fn log_receive_summary(&mut self) {
+        let summary_mode = self.rx_params.lock().ok().and_then(|params| {
+            params.as_ref().map(|params| {
+                if params.kind == MediaKind::Group {
+                    "group"
+                } else {
+                    "one-to-one"
+                }
+            })
+        });
+        if let Some(mode) = summary_mode {
+            if self.group_rx_last_summary.elapsed() >= Duration::from_secs(5) {
+                media_debug(&format!(
+                            "summary mode={mode} rx_video={} decoded_video={} bad_video={} tx_video={} tx_audio={} rx_audio_delivered={} group_rx_audio={} group_decoded_audio={} group_bad_audio={} group_rx_video={} group_decoded_video={} group_bad_video={} other_host={} same_host_alt_port={} last_video_tx_ms={}",
+                            self.rx_video_packets,
+                            self.rx_video_decoded,
+                            self.rx_video_bad,
+                            self.rx_tx_video_packets.load(Ordering::Relaxed),
+                            self.rx_tx_audio_packets.load(Ordering::Relaxed),
+                            self.rx_audio_packets.load(Ordering::Relaxed),
+                            self.group_rx_audio_packets,
+                            self.group_rx_audio_decoded,
+                            self.group_rx_audio_bad,
+                            self.group_rx_video_packets,
+                            self.group_rx_video_decoded,
+                            self.group_rx_video_bad,
+                            self.group_rx_other_host,
+                            self.group_rx_alt_port,
+                            self.rx_last_video_sent_ms.load(Ordering::Relaxed)
+                        ));
+                self.group_rx_last_summary = Instant::now();
+            }
+        }
+    }
+    fn poll_pending_video_nacks(&mut self) {
+        if let Ok(mut tracker) = self.rx_nack.lock() {
+            let requests = tracker.poll(unix_now_ms());
+            if !requests.is_empty() {
+                let selected = *self.rx_selected.lock().unwrap();
+                if let Some((server, token)) = selected {
+                    let local_uid = self
+                        .rx_params
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .map_or_default(|params| params.uid);
+                    for (ssrc, missing) in requests {
+                        let report = build_nack_many(local_uid, ssrc, &missing);
+                        let packet = wrap_media_packet(msg_types::VIDEO_FEC, token, &report);
+                        let _ = self.rx_socket.send_to(&packet, server);
+                        if let Some(peer) = self.rx_p2p_path.lock().ok().and_then(|path| *path) {
+                            let params = self.rx_params.lock().unwrap().clone();
+                            if let Some(params) = params {
+                                let direct_packet = p2p::wrap(
+                                    params.role == MediaRole::Callee,
+                                    params.call_id,
+                                    p2p::VIDEO_RTCP,
+                                    &report,
+                                );
+                                let _ = self.rx_socket.send_to(&direct_packet, peer);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn process_packet(&mut self, pkt: &[u8], from: SocketAddr) -> bool {
+        let params_snapshot = self.rx_params.lock().ok().and_then(|params| params.clone());
+        self.record_group_packet_source(pkt, from, params_snapshot.as_ref());
+        let Some((msg_type, payload, direct)) =
+            self.classify_incoming_packet(pkt, from, params_snapshot.as_ref())
+        else {
+            return true;
+        };
+        self.log_first_video_packet(msg_type, payload, direct, params_snapshot.as_ref());
+        self.dispatch_media_message(
+            msg_type,
+            payload,
+            pkt,
+            from,
+            direct,
+            params_snapshot.as_ref(),
+        )
+    }
+
+    fn record_group_packet_source(
+        &mut self,
+        pkt: &[u8],
+        from: SocketAddr,
+        params: Option<&MediaSessionParams>,
+    ) {
+        if !params.is_some_and(|params| params.kind == MediaKind::Group)
+            || !matches!(pkt[0], msg_types::AUDIO_RTP_DOWN | msg_types::VIDEO_DOWN)
+        {
+            return;
+        }
+        let selected = self
+            .rx_selected
+            .lock()
+            .ok()
+            .and_then(|selected| selected.map(|(addr, _)| addr));
+        let same_host = selected.is_some_and(|selected| selected.ip() == from.ip());
+        let source = if selected == Some(from) {
+            "selected"
+        } else if same_host {
+            self.group_rx_alt_port = self.group_rx_alt_port.saturating_add(1);
+            "same-host-alt-port"
+        } else {
+            self.group_rx_other_host = self.group_rx_other_host.saturating_add(1);
+            "other-host"
+        };
+        let ssrc =
+            (pkt.len() >= 13).then(|| u32::from_be_bytes([pkt[9], pkt[10], pkt[11], pkt[12]]));
+        if pkt[0] == msg_types::AUDIO_RTP_DOWN {
+            self.group_rx_audio_packets = self.group_rx_audio_packets.saturating_add(1);
+            if self.group_rx_audio_first < 3 {
+                media_debug(&format!(
+                    "udp-audio source={source} bytes={} ssrc={}",
+                    pkt.len(),
+                    ssrc.map_or_else(|| "short".into(), |uid| uid.to_string())
+                ));
+                self.group_rx_audio_first += 1;
+            }
+        } else {
+            self.group_rx_video_packets = self.group_rx_video_packets.saturating_add(1);
+            if self.group_rx_video_first < 3 {
+                media_debug(&format!(
+                    "udp-video source={source} bytes={} ssrc={}",
+                    pkt.len(),
+                    ssrc.map_or_else(|| "short".into(), |uid| uid.to_string())
+                ));
+                self.group_rx_video_first += 1;
+            }
+        }
+    }
+
+    fn classify_incoming_packet<'a>(
+        &mut self,
+        pkt: &'a [u8],
+        from: SocketAddr,
+        params: Option<&MediaSessionParams>,
+    ) -> Option<(u8, &'a [u8], bool)> {
+        if pkt[0] == msg_types::P2P_EXT {
+            self.classify_p2p_packet(pkt, from, params)
+        } else {
+            self.classify_relay_packet(pkt, from, params)
+        }
+    }
+
+    fn classify_p2p_packet<'a>(
+        &mut self,
+        pkt: &'a [u8],
+        from: SocketAddr,
+        params: Option<&MediaSessionParams>,
+    ) -> Option<(u8, &'a [u8], bool)> {
+        let params = params?;
+        let (header, body) = p2p::parse(pkt)?;
+        let peer_is_callee = params.role == MediaRole::Caller;
+        if header.call_id != params.call_id
+            || header.is_callee != peer_is_callee
+            || (!params.p2p_candidates.is_empty()
+                && !params
+                    .p2p_candidates
+                    .iter()
+                    .any(|candidate| candidate.ip() == from.ip()))
+        {
+            return None;
+        }
+        self.last_p2p_rx = Some(Instant::now());
+        match header.kind {
+            p2p::BIND_PEER => {
+                if let Some(answer) = p2p::bind_answer(
+                    params.role == MediaRole::Callee,
+                    params.call_id,
+                    body,
+                    &format!("{}|{}", from.ip(), from.port()),
+                ) {
+                    let _ = self.rx_socket.send_to(&answer, from);
+                }
+                None
+            }
+            p2p::SIGNAL => {
+                match body.first() {
+                    Some(1) => self.rx_p2p_enabled.store(true, Ordering::Release),
+                    Some(2) => self.rx_p2p_enabled.store(false, Ordering::Release),
+                    _ => {}
+                }
+                if matches!(body.first(), Some(1 | 2)) {
+                    if let Ok(mut path) = self.rx_p2p_path.lock() {
+                        *path = None;
+                    }
+                    self.relay_audio_streak = 0;
+                }
+                None
+            }
+            p2p::KEEPALIVE => {
+                if matches!(body.first(), Some(1 | 2)) {
+                    // Publish the path before replying so TX can route duplicates immediately.
+                    if let Ok(mut path) = self.rx_p2p_path.lock() {
+                        *path = Some(from);
+                    }
+                    if body.first() == Some(&1) {
+                        if let Some(pong) = p2p::pong(params.role == MediaRole::Callee, pkt) {
+                            let _ = self.rx_socket.send_to(&pong, from);
+                        }
+                    }
+                }
+                None
+            }
+            p2p::AUDIO => Some((msg_types::AUDIO_RTP_DOWN, body, true)),
+            p2p::VIDEO => Some((msg_types::VIDEO_DOWN, body, true)),
+            p2p::AUDIO_RTCP => Some((msg_types::AUDIO_FEC, body, false)),
+            p2p::VIDEO_RTCP => Some((msg_types::VIDEO_FEC, body, false)),
+            _ => None,
+        }
+    }
+
+    fn classify_relay_packet<'a>(
+        &mut self,
+        pkt: &'a [u8],
+        from: SocketAddr,
+        params: Option<&MediaSessionParams>,
+    ) -> Option<(u8, &'a [u8], bool)> {
+        let selected_from = self
+            .rx_selected
+            .lock()
+            .ok()
+            .and_then(|selected| selected.map(|(addr, _)| addr));
+        if !accepts_relay_source(
+            selected_from,
+            from,
+            params.is_some_and(|params| params.kind == MediaKind::Group),
+        ) {
+            return None;
+        }
+        let (msg_type, payload) = match pkt[0] {
+            msg_types::AUDIO_RTP_DOWN | msg_types::VIDEO_DOWN => (pkt[0], &pkt[1..]),
+            msg_types::AUDIO_FEC | msg_types::VIDEO_FEC => {
+                if pkt.len() < 9 {
+                    return None;
+                }
+                let token = u32::from_le_bytes([pkt[1], pkt[2], pkt[3], pkt[4]]);
+                let expected_token = self
+                    .rx_selected
+                    .lock()
+                    .ok()
+                    .and_then(|selected| selected.map(|(_, token)| token));
+                if expected_token != Some(token) {
+                    return None;
+                }
+                (pkt[0], &pkt[5..])
+            }
+            other => (other, pkt),
+        };
+        Some((msg_type, payload, false))
+    }
+
+    fn log_first_video_packet(
+        &mut self,
+        msg_type: u8,
+        payload: &[u8],
+        direct: bool,
+        params: Option<&MediaSessionParams>,
+    ) {
+        if msg_type != msg_types::VIDEO_DOWN {
+            return;
+        }
+        self.rx_video_packets = self.rx_video_packets.saturating_add(1);
+        if self.rx_video_first < 3 && payload.len() >= 12 {
+            let ssrc = u32::from_be_bytes([payload[8], payload[9], payload[10], payload[11]]);
+            let mode = if params.is_some_and(|params| params.kind == MediaKind::Group) {
+                "group"
+            } else {
+                "one-to-one"
+            };
+            media_debug(&format!(
+                "rx-video mode={mode} path={} bytes={} ssrc={ssrc}",
+                if direct { "direct" } else { "relay" },
+                payload.len()
+            ));
+            self.rx_video_first += 1;
+        }
+    }
+
+    fn dispatch_media_message(
+        &mut self,
+        msg_type: u8,
+        payload: &[u8],
+        pkt: &[u8],
+        from: SocketAddr,
+        direct: bool,
+        params_snapshot: Option<&MediaSessionParams>,
+    ) -> bool {
+        match msg_type {
+            msg_types::AUDIO_FEC | msg_types::VIDEO_FEC => {
+                self.handle_rtcp_feedback(msg_type, payload);
+                false
+            }
+            msg_types::AUDIO_RTP_DOWN => {
+                self.handle_audio_rtp_down(payload, from, direct, params_snapshot)
+            }
+            msg_types::VIDEO_DOWN => self.handle_video_down(payload, from, direct, params_snapshot),
+            msg_types::SERVER_REPLY => {
+                self.handle_server_reply(pkt, from);
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_rtcp_feedback(&mut self, msg_type: u8, payload: &[u8]) {
+        let is_video = msg_type == msg_types::VIDEO_FEC;
+        let now_ms = unix_now_ms();
+        let targets = self
+            .rx_rtcp
+            .lock()
+            .ok()
+            .and_then(|mut feedback| {
+                feedback
+                    .as_mut()
+                    .map(|feedback| feedback.on_rtcp(is_video, payload, now_ms))
+            })
+            .unwrap_or_default();
+        if let Ok(mut controller) = self.rx_send_rate.lock() {
+            if let Some(controller) = controller.as_mut() {
+                controller.on_feedback(&targets.twcc_feedback, &targets.report_blocks, now_ms);
+            }
+        }
+        let local_uid = self
+            .rx_params
+            .lock()
+            .ok()
+            .and_then(|params| params.as_ref().map(|params| params.uid));
+        if local_uid.is_some_and(|uid| targets.keyframe_targets.contains(&uid)) {
+            self.rx_keyframe_request.store(true, Ordering::Relaxed);
+        }
+        if is_video {
+            let params = self.rx_params.lock().ok().and_then(|params| params.clone());
+            if let Some(params) = params {
+                if let Some((relay, token)) = *self.rx_selected.lock().unwrap() {
+                    for nack in targets.nack_requests {
+                        if nack.media_ssrc != 0 && nack.media_ssrc != params.uid {
+                            continue;
+                        }
+                        for sequence in nack.lost_sequences {
+                            let cached = self.rx_video_history.lock().ok().and_then(|history| {
+                                history
+                                    .iter()
+                                    .rev()
+                                    .find(|(seq, _)| *seq == sequence)
+                                    .map(|(_, packet)| packet.clone())
+                            });
+                            if let Some(protected) = cached {
+                                let relay_packet =
+                                    wrap_media_packet(msg_types::VIDEO_RTP, token, &protected);
+                                let _ = self.rx_socket.send_to(&relay_packet, relay);
+                                if let Some(peer) =
+                                    self.rx_p2p_path.lock().ok().and_then(|path| *path)
+                                {
+                                    let direct_packet = p2p::wrap(
+                                        params.role == MediaRole::Callee,
+                                        params.call_id,
+                                        p2p::VIDEO,
+                                        &protected,
+                                    );
+                                    let _ = self.rx_socket.send_to(&direct_packet, peer);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_server_reply(&mut self, pkt: &[u8], from: SocketAddr) {
+        if let Some(reply) = parse_server_reply(pkt) {
+            let selected_from = self
+                .rx_selected
+                .lock()
+                .ok()
+                .and_then(|selected| selected.map(|(addr, _)| addr));
+            let group_uid = self.rx_params.lock().ok().and_then(|params| {
+                params
+                    .as_ref()
+                    .filter(|p| p.kind == MediaKind::Group)
+                    .map(|p| p.uid)
+            });
+            if selected_from == Some(from) || group_uid.is_some() {
+                if let Some(local_uid) = group_uid {
+                    if let Some(event) = group_event_from_reply(&reply, local_uid) {
+                        if let Ok(mut events) = self.rx_group_events.lock() {
+                            events.push_back(event);
+                            while events.len() > 128 {
+                                events.pop_front();
+                            }
+                        }
+                    }
+                }
+                if reply.cmd == crate::protocol::zrtp::commands::CHANGE_ADDRESS {
+                    crate::zcall_log!("[zcall-rust] relay acknowledged ChangeAddress");
+                } else if reply.cmd == crate::protocol::zrtp::commands::REQ_FORWARD
+                    && matches!(reply.sub_cmd, 2 | 3)
+                {
+                    if let Ok(mut path) = self.rx_p2p_path.lock() {
+                        *path = None;
+                    }
+                    self.rx_p2p_enabled
+                        .store(reply.sub_cmd == 3, Ordering::Release);
+                    self.last_p2p_rx = None;
+                    self.relay_audio_streak = 0;
+                }
+                let mut selected = self.rx_selected.lock().unwrap();
+                if let Some((addr, _)) = *selected {
+                    if addr == from {
+                        *selected = Some((from, reply.server_token.unwrap_or(reply.token)));
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_group_audio_rtp(
+        &mut self,
+        rtp_body: &[u8],
+        source: AudioRtpSource,
+        params_snapshot: Option<&MediaSessionParams>,
+        ssrc: u32,
+        seq: u16,
+        local_uid: u32,
+    ) -> bool {
+        if ssrc == local_uid {
+            return false;
+        }
+        let decoded = self.decode_group_audio_packet(rtp_body, ssrc, seq);
+        self.deliver_group_audio_packet(
+            rtp_body,
+            source.from,
+            source.direct,
+            params_snapshot,
+            decoded,
+        )
+    }
+
+    fn decode_group_audio_packet(
+        &mut self,
+        rtp_body: &[u8],
+        ssrc: u32,
+        seq: u16,
+    ) -> Option<(u16, u32, u32, Vec<u8>)> {
+        let candidates = self
+            .rx_group_audio
+            .lock()
+            .map_or_else(|_| vec![0], |mixer| mixer.candidate_rocs(ssrc, seq));
+        let mut decoded = None;
+        let mut fallback_key_used = false;
+        let mut auth_profile = (0usize, 10usize);
+        let profile_to_try = self.group_audio_srtp_profile.or_else(|| {
+            (self.group_audio_srtp_profile_discovery_attempts >= GROUP_SRTP_PROFILE_DISCOVERY_LIMIT)
+                .then_some((0, 10))
+        });
+        if self.group_audio_srtp_profile.is_none()
+            && self.group_audio_srtp_profile_discovery_attempts < GROUP_SRTP_PROFILE_DISCOVERY_LIMIT
+        {
+            self.group_audio_srtp_profile_discovery_attempts += 1;
+        }
+        if let (Ok(keys), Ok(fallback)) = (self.rx_keys.lock(), self.rx_fallback_keys.lock()) {
+            let primary = keys.as_ref();
+            let fallback = fallback.as_ref();
+            if let Some((clear, roc, used_fallback, mki_len, tag_len)) =
+                unprotect_group_with_candidates(
+                    rtp_body,
+                    primary,
+                    fallback,
+                    &candidates,
+                    profile_to_try,
+                )
+            {
+                decoded = Some((clear.seq, clear.ssrc, roc, clear.opus));
+                fallback_key_used = used_fallback;
+                auth_profile = (mki_len, tag_len);
+                self.group_audio_srtp_profile = Some(auth_profile);
+            }
+            // Preserve legacy plain-RTP mode only when
+            // zrtcConfig.srtpKey is absent. Try the
+            // authenticated session candidate first.
+            if decoded.is_none() && primary.is_none() {
+                if let Some((clear_seq, clear_ssrc, opus)) = read_plain_rtp_payload(rtp_body) {
+                    decoded = Some((clear_seq, clear_ssrc, candidates[0], opus));
+                }
+            }
+        }
+        if let Some((clear_seq, clear_ssrc, _, opus)) = decoded.as_ref() {
+            self.group_rx_audio_decoded = self.group_rx_audio_decoded.saturating_add(1);
+            if !self.audio_auth.reported {
+                media_debug(&format!(
+                                                    "group-audio-auth=ok ssrc={clear_ssrc} seq={clear_seq} key_source={} mki_bytes={} tag_bytes={} opus_bytes={}",
+                                                    if fallback_key_used { "session" } else { "group" },
+                                                    auth_profile.0,
+                                                    auth_profile.1,
+                                                    opus.len()
+                                                ));
+                self.audio_auth.reported = true;
+            }
+        } else {
+            self.group_rx_audio_bad = self.group_rx_audio_bad.saturating_add(1);
+            if !self.audio_auth.failed_reported {
+                if std::env::var("ZCALL_GROUP_AUTH_DUMP").is_ok_and(|value| value == "1") {
+                    let packet_hex = hex::encode(rtp_body);
+                    media_debug(&format!("group-audio-auth-dump={packet_hex}"));
+                }
+                let fallback_probe = self
+                    .rx_fallback_keys
+                    .lock()
+                    .ok()
+                    .and_then(|keys| {
+                        keys.as_ref()
+                            .map(|keys| probe_srtp_auth_layout(rtp_body, keys))
+                    })
+                    .unwrap_or_else(|| "no-keys".into());
+                media_debug(&format!(
+                                                    "group-audio-auth=failed ssrc={ssrc} seq={seq} srtp_keys={} fallback_probe={} rtp_bytes={}",
+                                                    self.rx_keys.lock().is_ok_and(|keys| keys.is_some()),
+                                                    fallback_probe,
+                                                    rtp_body.len()
+                                                ));
+                self.audio_auth.failed_reported = true;
+            }
+        }
+        decoded
+    }
+
+    fn deliver_group_audio_packet(
+        &mut self,
+        rtp_body: &[u8],
+        from: SocketAddr,
+        direct: bool,
+        params_snapshot: Option<&MediaSessionParams>,
+        decoded: Option<(u16, u32, u32, Vec<u8>)>,
+    ) -> bool {
+        if let Some((clear_seq, clear_ssrc, roc, opus)) = decoded {
+            if self
+                .rx_share_peer
+                .lock()
+                .ok()
+                .and_then(|peer| peer.as_ref().map(|peer| peer.uid))
+                == Some(clear_ssrc)
+                || self.rx_remote_share_uid.load(Ordering::Acquire) == clear_ssrc
+            {
+                return true;
+            }
+            let ext_seq = (roc << 16) | u32::from(clear_seq);
+            self.last_audio_rx = Instant::now();
+            self.rx_last_media_rx_ms
+                .store(unix_now_ms(), Ordering::Release);
+            let new_source = if direct {
+                self.relay_audio_streak = 0;
+                if let Ok(mut path) = self.rx_p2p_path.lock() {
+                    *path = Some(from);
+                }
+                true
+            } else {
+                if self.rx_p2p_path.lock().is_ok_and(|path| path.is_some()) {
+                    self.relay_audio_streak = self.relay_audio_streak.saturating_add(1);
+                    if self.relay_audio_streak >= 25 {
+                        let selected = *self.rx_selected.lock().ok().as_deref().unwrap_or(&None);
+                        if let Some(params) = params_snapshot {
+                            stop_p2p_path(
+                                &self.rx_socket,
+                                selected,
+                                &self.rx_p2p_path,
+                                &self.rx_p2p_enabled,
+                                params,
+                                true,
+                            );
+                        }
+                        self.relay_audio_streak = 0;
+                    }
+                }
+                false
+            };
+            let _ = new_source;
+            if self.audio_dedup.accept(clear_ssrc, ext_seq) {
+                self.rx_audio_second = self.rx_audio_second.saturating_add(1);
+                self.rx_audio_packets.fetch_add(1, Ordering::Relaxed);
+                if params_snapshot
+                    .as_ref()
+                    .is_some_and(|params| params.uid != clear_ssrc)
+                    && self.member_audio_seen.insert(clear_ssrc)
+                {
+                    if let Ok(mut events) = self.rx_group_events.lock() {
+                        events.push_back(GroupMediaEvent::MemberAudio(clear_ssrc));
+                    }
+                }
+                if let Some(level) = parse_rfc6464_audio_level(rtp_body) {
+                    if let Some(on) = self
+                        .member_speaking
+                        .entry(clear_ssrc)
+                        .or_default()
+                        .observe(level, Instant::now())
+                    {
+                        if let Ok(mut events) = self.rx_group_events.lock() {
+                            events.push_back(GroupMediaEvent::MemberSpeaking(clear_ssrc, on));
+                        }
+                    }
+                }
+                if let Ok(mut mixer) = self.rx_group_audio.lock() {
+                    mixer.push_packet(clear_ssrc, clear_seq, roc, opus);
+                }
+                if let Ok(mut feedback) = self.rx_rtcp.lock() {
+                    if let Some(feedback) = feedback.as_mut() {
+                        feedback.on_rtp(false, rtp_body, unix_now_ms());
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn handle_peer_audio_rtp(
+        &mut self,
+        rtp_body: &[u8],
+        from: SocketAddr,
+        direct: bool,
+        params_snapshot: Option<&MediaSessionParams>,
+    ) -> bool {
+        let mut decoded = None;
+        if let Ok(keys) = self.rx_keys.lock() {
+            if let Some(keys) = keys.as_ref() {
+                decoded = unprotect_with_roc_recovery(rtp_body, keys, &mut self.audio_roc)
+                    .map(|(clear, roc)| (clear.seq, clear.ssrc, roc, clear.opus));
+            } else if let Some((clear_seq, clear_ssrc, opus)) = read_plain_rtp_payload(rtp_body) {
+                let roc = self.audio_roc.guess(clear_seq);
+                self.audio_roc.update(clear_seq, roc);
+                decoded = Some((clear_seq, clear_ssrc, roc, opus));
+            }
+        }
+        if let Some((clear_seq, clear_ssrc, roc, opus)) = decoded {
+            if self
+                .rx_share_peer
+                .lock()
+                .ok()
+                .and_then(|peer| peer.as_ref().map(|peer| peer.uid))
+                == Some(clear_ssrc)
+                || self.rx_remote_share_uid.load(Ordering::Acquire) == clear_ssrc
+            {
+                return true;
+            }
+            let ext_seq = (roc << 16) | u32::from(clear_seq);
+            self.last_audio_rx = Instant::now();
+            if direct {
+                self.relay_audio_streak = 0;
+                if let Ok(mut path) = self.rx_p2p_path.lock() {
+                    *path = Some(from);
+                }
+            } else if self.rx_p2p_path.lock().is_ok_and(|path| path.is_some()) {
+                self.relay_audio_streak = self.relay_audio_streak.saturating_add(1);
+                if self.relay_audio_streak >= 25 {
+                    let selected = *self.rx_selected.lock().unwrap();
+                    if let Some(params) = params_snapshot {
+                        stop_p2p_path(
+                            &self.rx_socket,
+                            selected,
+                            &self.rx_p2p_path,
+                            &self.rx_p2p_enabled,
+                            params,
+                            true,
+                        );
+                    }
+                    self.relay_audio_streak = 0;
+                }
+            }
+
+            if self.audio_dedup.accept(clear_ssrc, ext_seq) {
+                self.rx_last_media_rx_ms
+                    .store(unix_now_ms(), Ordering::Release);
+                self.rx_audio_second = self.rx_audio_second.saturating_add(1);
+                self.rx_audio_packets.fetch_add(1, Ordering::Relaxed);
+                let early_caller = params_snapshot.is_some_and(|params| {
+                    params.role == MediaRole::Caller && params.kind != MediaKind::Group
+                });
+                if early_caller && !self.rx_audio_enabled.load(Ordering::Acquire) {
+                    self.early_audio_rx_count = self.early_audio_rx_count.saturating_add(1);
+                    if let Some(phase) =
+                        early_audio_phase(true, false, false, self.early_audio_rx_count)
+                    {
+                        if let Ok(mut events) = self.rx_group_events.lock() {
+                            events.push_back(GroupMediaEvent::EarlyAudio(phase));
+                        }
+                    }
+                }
+                if let Ok(mut feedback) = self.rx_rtcp.lock() {
+                    if let Some(feedback) = feedback.as_mut() {
+                        feedback.on_rtp(false, rtp_body, unix_now_ms());
+                    }
+                }
+                if let Some(jitter) = self.rx_jitter_buffer.as_ref() {
+                    if let Ok(mut jitter) = jitter.lock() {
+                        jitter.push(ext_seq, opus);
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn decode_video_rtp(
+        &mut self,
+        rtp_body: &[u8],
+        ssrc: u32,
+        is_share: bool,
+        is_group_video: bool,
+    ) -> VideoRtpDecode {
+        let mut auth_profile = (0usize, 10usize);
+        let profile_to_try = self.group_video_srtp_profile.or_else(|| {
+            (self.group_video_srtp_profile_discovery_attempts >= GROUP_SRTP_PROFILE_DISCOVERY_LIMIT)
+                .then_some((0, 10))
+        });
+        if is_group_video
+            && self.group_video_srtp_profile.is_none()
+            && self.group_video_srtp_profile_discovery_attempts < GROUP_SRTP_PROFILE_DISCOVERY_LIMIT
+        {
+            self.group_video_srtp_profile_discovery_attempts += 1;
+        }
+        let (decoded, fallback_key_used) = if is_share {
+            let tracker = self.video_rocs.entry(ssrc).or_default();
+            let decoded =
+                read_plain_rtp_payload(rtp_body).map(|(sequence, media_ssrc, payload)| {
+                    let roc = tracker.guess(sequence);
+                    tracker.update(sequence, roc);
+                    DecodedVideoRtp {
+                        sequence,
+                        ssrc: media_ssrc,
+                        roc,
+                        payload,
+                    }
+                });
+            (decoded, false)
+        } else {
+            let mut fallback_key_used = false;
+            let mut decoded = None;
+            if let (Ok(keys), Ok(fallback)) = (self.rx_keys.lock(), self.rx_fallback_keys.lock()) {
+                let tracker = self.video_rocs.entry(ssrc).or_default();
+                let sequence = u16::from_be_bytes([rtp_body[2], rtp_body[3]]);
+                let rocs = tracker.candidates(sequence);
+                if let Some((clear, roc, used_fallback, mki_len, tag_len)) =
+                    unprotect_group_with_candidates(
+                        rtp_body,
+                        keys.as_ref(),
+                        fallback.as_ref(),
+                        &rocs,
+                        profile_to_try,
+                    )
+                {
+                    tracker.update(sequence, roc);
+                    decoded = Some(DecodedVideoRtp {
+                        sequence: clear.seq,
+                        ssrc: clear.ssrc,
+                        roc,
+                        payload: clear.opus,
+                    });
+                    fallback_key_used = used_fallback;
+                    auth_profile = (mki_len, tag_len);
+                    self.group_video_srtp_profile = Some(auth_profile);
+                }
+                // Legacy plain RTP is valid only if no primary SRTP key is configured.
+                if decoded.is_none() && keys.is_none() {
+                    decoded =
+                        read_plain_rtp_payload(rtp_body).map(|(sequence, media_ssrc, payload)| {
+                            let roc = tracker.guess(sequence);
+                            tracker.update(sequence, roc);
+                            DecodedVideoRtp {
+                                sequence,
+                                ssrc: media_ssrc,
+                                roc,
+                                payload,
+                            }
+                        });
+                }
+            }
+            (decoded, fallback_key_used)
+        };
+        VideoRtpDecode {
+            packet: decoded,
+            fallback_key_used,
+            auth_profile,
+        }
+    }
+
+    fn record_video_auth_result(
+        &mut self,
+        rtp_body: &[u8],
+        ssrc: u32,
+        pt: u8,
+        marker: bool,
+        is_group_video: bool,
+        decode: &VideoRtpDecode,
+    ) {
+        if let Some(packet) = decode.packet.as_ref() {
+            self.rx_video_decoded = self.rx_video_decoded.saturating_add(1);
+            if is_group_video {
+                self.group_rx_video_decoded = self.group_rx_video_decoded.saturating_add(1);
+                if !self.video_auth.reported {
+                    media_debug(&format!(
+                        "group-video-auth=ok ssrc={} seq={} pt={pt} marker={marker} key_source={} mki_bytes={} tag_bytes={} payload_bytes={}",
+                        packet.ssrc,
+                        packet.sequence,
+                        if decode.fallback_key_used { "session" } else { "group" },
+                        decode.auth_profile.0,
+                        decode.auth_profile.1,
+                        packet.payload.len()
+                    ));
+                    self.video_auth.reported = true;
+                }
+            }
+            return;
+        }
+        self.rx_video_bad = self.rx_video_bad.saturating_add(1);
+        if !is_group_video {
+            return;
+        }
+        self.group_rx_video_bad = self.group_rx_video_bad.saturating_add(1);
+        if self.video_auth.failed_reported {
+            return;
+        }
+        // Opt-in, one-packet capture for diagnosing SFU-side SRTP/header mutation.
+        if std::env::var("ZCALL_GROUP_AUTH_DUMP").is_ok_and(|value| value == "1") {
+            media_debug(&format!("group-video-auth-dump={}", hex::encode(rtp_body)));
+        }
+        let header_len = parse_rtp_header_len(rtp_body).unwrap_or(0);
+        let header_hex = hex::encode(rtp_body.get(..header_len.min(32)).unwrap_or_default());
+        let auth_fp = self
+            .rx_keys
+            .lock()
+            .ok()
+            .and_then(|keys| keys.as_ref().map(|keys| sha1(&[&keys.auth])))
+            .map_or_else(|| "none".into(), |digest| hex::encode(&digest[..6]));
+        let auth_probe = self
+            .rx_keys
+            .lock()
+            .ok()
+            .and_then(|keys| {
+                keys.as_ref()
+                    .map(|keys| probe_srtp_auth_layout(rtp_body, keys))
+            })
+            .unwrap_or_else(|| "no-keys".into());
+        let fallback_probe = self
+            .rx_fallback_keys
+            .lock()
+            .ok()
+            .and_then(|keys| {
+                keys.as_ref()
+                    .map(|keys| probe_srtp_auth_layout(rtp_body, keys))
+            })
+            .unwrap_or_else(|| "no-keys".into());
+        let plain_h264_candidate = read_plain_rtp_payload(rtp_body)
+            .is_some_and(|(_, _, payload)| looks_like_group_h264_payload(&payload));
+        media_debug(&format!(
+            "group-video-auth=failed ssrc={ssrc} seq={} pt={pt} marker={marker} plain_h264_candidate={plain_h264_candidate} srtp_keys={} auth_fp={} auth_probe={} fallback_probe={} rtp_bytes={} rtp_header_bytes={header_len} rtp_header={header_hex}",
+            u16::from_be_bytes([rtp_body[2], rtp_body[3]]),
+            self.rx_keys.lock().is_ok_and(|keys| keys.is_some()),
+            auth_fp, auth_probe, fallback_probe, rtp_body.len()
+        ));
+        self.video_auth.failed_reported = true;
+    }
+
+    fn deliver_video_rtp(
+        &mut self,
+        packet: &DecodedVideoRtp,
+        rtp_body: &[u8],
+        context: VideoRtpDeliveryContext,
+    ) {
+        let VideoRtpDeliveryContext {
+            source,
+            is_group,
+            is_share,
+            payload_type,
+            marker,
+        } = context;
+        self.rx_last_media_rx_ms
+            .store(unix_now_ms(), Ordering::Release);
+        if source.direct {
+            if let Ok(mut path) = self.rx_p2p_path.lock() {
+                *path = Some(source.from);
+            }
+        }
+        let now_ms = unix_now_ms();
+        if let Ok(mut feedback) = self.rx_rtcp.lock() {
+            if let Some(feedback) = feedback.as_mut() {
+                feedback.on_rtp(true, rtp_body, now_ms);
+            }
+        }
+        self.send_video_nack_feedback(packet.ssrc, packet.sequence, now_ms);
+        if is_group || payload_type == VIDEO_PT_KEY || payload_type == VIDEO_PT_INTER {
+            let frames = self.assemble_video_frames(
+                packet,
+                rtp_body,
+                is_group,
+                is_share,
+                payload_type,
+                marker,
+            );
+            self.queue_video_frames(frames, packet.ssrc, is_group);
+        }
+    }
+
+    fn send_video_nack_feedback(&mut self, ssrc: u32, sequence: u16, now_ms: u64) {
+        let Ok(mut tracker) = self.rx_nack.lock() else {
+            return;
+        };
+        let requests = tracker.note(ssrc, sequence, now_ms);
+        if requests.is_empty() {
+            return;
+        }
+        let Some((server, token)) = *self.rx_selected.lock().unwrap() else {
+            return;
+        };
+        let Some(params) = self.rx_params.lock().unwrap().clone() else {
+            return;
+        };
+        for (media_ssrc, missing) in requests {
+            let report = build_nack_many(params.uid, media_ssrc, &missing);
+            let packet = wrap_media_packet(msg_types::VIDEO_FEC, token, &report);
+            let _ = self.rx_socket.send_to(&packet, server);
+            if let Some(peer) = self.rx_p2p_path.lock().ok().and_then(|path| *path) {
+                let direct_packet = p2p::wrap(
+                    params.role == MediaRole::Callee,
+                    params.call_id,
+                    p2p::VIDEO_RTCP,
+                    &report,
+                );
+                let _ = self.rx_socket.send_to(&direct_packet, peer);
+            }
+        }
+    }
+
+    fn assemble_video_frames(
+        &mut self,
+        packet: &DecodedVideoRtp,
+        rtp_body: &[u8],
+        is_group: bool,
+        is_share: bool,
+        pt: u8,
+        marker: bool,
+    ) -> Vec<VideoFrame> {
+        let timestamp = u32::from_be_bytes([rtp_body[4], rtp_body[5], rtp_body[6], rtp_body[7]]);
+        let is_new_video_source =
+            is_group && !is_share && !self.video_assemblers.contains_key(&packet.ssrc);
+        if is_new_video_source {
+            if let Ok(mut events) = self.rx_group_events.lock() {
+                events.push_back(GroupMediaEvent::MemberVideo(packet.ssrc));
+            }
+        }
+        let (frames, request_keyframe) = {
+            let assembler = self
+                .video_assemblers
+                .entry(packet.ssrc)
+                .or_insert_with(|| VideoAssembler::with_group(is_group));
+            let frames = assembler.push_packet(
+                packet.sequence,
+                packet.roc,
+                timestamp,
+                &packet.payload,
+                marker,
+                pt,
+            );
+            let request_keyframe = assembler.take_keyframe_request();
+            (frames, request_keyframe)
+        };
+        if is_group && !frames.is_empty() && !self.video_auth.frame_reported {
+            let frame = &frames[0];
+            media_debug(&format!(
+                "group-video-frame=assembled ssrc={} frames={} key={} bytes={}",
+                packet.ssrc,
+                frames.len(),
+                frame.key,
+                frame.data.len()
+            ));
+            self.video_auth.frame_reported = true;
+        }
+        if request_keyframe {
+            self.request_video_keyframe(packet.ssrc);
+        }
+        frames
+    }
+
+    fn request_video_keyframe(&mut self, ssrc: u32) {
+        let now = Instant::now();
+        let can_request = self
+            .last_video_pli
+            .get(&ssrc)
+            .is_none_or(|last| now.duration_since(*last) >= Duration::from_secs(1));
+        if !can_request {
+            return;
+        }
+        self.last_video_pli.insert(ssrc, now);
+        let report = self
+            .rx_rtcp
+            .lock()
+            .ok()
+            .and_then(|mut feedback| feedback.as_mut().map(|feedback| feedback.pli(ssrc)));
+        let Some(report) = report else {
+            return;
+        };
+        let Some((server, token)) = *self.rx_selected.lock().unwrap() else {
+            return;
+        };
+        let packet = wrap_media_packet(msg_types::VIDEO_FEC, token, &report);
+        let _ = self.rx_socket.send_to(&packet, server);
+        if let Some(peer) = self.rx_p2p_path.lock().ok().and_then(|path| *path) {
+            if let Some(params) = self.rx_params.lock().ok().and_then(|params| params.clone()) {
+                let direct_packet = p2p::wrap(
+                    params.role == MediaRole::Callee,
+                    params.call_id,
+                    p2p::VIDEO_RTCP,
+                    &report,
+                );
+                let _ = self.rx_socket.send_to(&direct_packet, peer);
+            }
+        }
+    }
+
+    fn queue_video_frames(&mut self, frames: Vec<VideoFrame>, ssrc: u32, is_group: bool) {
+        if let Ok(mut queue) = self.video_frames.lock() {
+            for mut frame in frames {
+                if is_group {
+                    frame.src = Some(ssrc);
+                }
+                if queue.len() >= 8 {
+                    queue.pop_front();
+                }
+                queue.push_back(frame);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct MediaSessionParams {
     pub call_id: u32,
@@ -969,8 +3222,8 @@ pub struct MediaSessionParams {
     pub uid: u32,
     pub peer_uid: u32,
     pub sess_id: Vec<u8>,
-    pub is_caller: bool,
-    pub is_group: bool,
+    pub role: MediaRole,
+    pub kind: MediaKind,
     pub send_udp: bool,
     pub video_enabled: bool,
     pub video_config: Value,
@@ -986,6 +3239,27 @@ struct VideoTxState {
     layer_seq: u16,
     started_at: Option<Instant>,
     key_sent: bool,
+}
+
+struct VideoTxContext<'a> {
+    params: &'a MediaSessionParams,
+    server: SocketAddr,
+    token: u32,
+    keys: Option<&'a SrtpKeys>,
+    group_plain: bool,
+    plan: Option<&'a GroupVideoPlan>,
+    chunks: &'a [Vec<u8>],
+    key: bool,
+    state: &'a mut VideoTxState,
+}
+
+#[derive(Clone, Copy)]
+struct VideoHeaderContext<'a> {
+    params: &'a MediaSessionParams,
+    group_plain: bool,
+    plan: Option<&'a GroupVideoPlan>,
+    payload_type: u8,
+    capture_ms: u64,
 }
 
 struct GroupSharePeer {
@@ -1065,6 +3339,46 @@ pub struct ZrtcMediaBackend {
     tx_video_packets: Arc<AtomicU64>,
 }
 
+fn build_video_rtp_header(
+    context: VideoHeaderContext<'_>,
+    sequence: u16,
+    timestamp: u32,
+    twcc: u16,
+    marker: bool,
+    layer_sequence: &mut u16,
+) -> Vec<u8> {
+    let VideoHeaderContext {
+        params,
+        group_plain,
+        plan,
+        payload_type,
+        capture_ms,
+    } = context;
+    if group_plain {
+        if let Some(plan) = plan.filter(|plan| plan.sfu_id.is_some()) {
+            *layer_sequence = layer_sequence.wrapping_add(1);
+            build_group_video_rtp_header(
+                sequence,
+                timestamp,
+                params.uid,
+                twcc,
+                marker,
+                payload_type,
+                plan.sfu_long,
+                plan.sfu_id.unwrap_or(0),
+                *layer_sequence,
+                capture_ms,
+                unix_now_ms(),
+            )
+        } else {
+            build_audio_rtp_header(sequence, timestamp, params.uid, twcc, marker, payload_type)
+                .to_vec()
+        }
+    } else {
+        build_audio_rtp_header(sequence, timestamp, params.uid, twcc, marker, payload_type).to_vec()
+    }
+}
+
 impl ZrtcMediaBackend {
     pub fn new() -> Result<Self, String> {
         let socket =
@@ -1134,7 +3448,7 @@ impl ZrtcMediaBackend {
         media_debug_reset();
         media_debug(&format!(
             "session-start mode={} uid={} video_enabled={} send_udp={} relay_candidates={}",
-            if params.is_group {
+            if params.kind == MediaKind::Group {
                 "group"
             } else {
                 "one-to-one"
@@ -1144,6 +3458,23 @@ impl ZrtcMediaBackend {
             params.send_udp,
             servers.len()
         ));
+        self.reset_media_session(&params)?;
+
+        if !params.send_udp {
+            let selected = servers.first().copied();
+            *self.params.lock().map_err(|e| e.to_string())? = Some(params);
+            if let Some(addr) = selected {
+                *self.selected_server.lock().map_err(|e| e.to_string())? = Some((addr, 0));
+            }
+            return Ok(selected);
+        }
+        if params.kind == MediaKind::Group {
+            return self.prepare_group(params, servers);
+        }
+        self.prepare_one_to_one(params, servers)
+    }
+
+    fn reset_media_session(&self, params: &MediaSessionParams) -> Result<(), String> {
         self.audio_enabled.store(false, Ordering::Release);
         self.tx_audio_packets.store(0, Ordering::Relaxed);
         self.rx_audio_packets.store(0, Ordering::Relaxed);
@@ -1181,7 +3512,7 @@ impl ZrtcMediaBackend {
         self.last_media_rx_ms.store(0, Ordering::Relaxed);
         self.first_video_ui_drain_logged
             .store(false, Ordering::Relaxed);
-        let group_plan = if params.is_group {
+        let group_plan = if params.kind == MediaKind::Group {
             parse_group_video_plan(&params.video_config)
         } else {
             None
@@ -1204,18 +3535,14 @@ impl ZrtcMediaBackend {
         self.p2p_enabled
             .store(!params.p2p_candidates.is_empty(), Ordering::Release);
         self.p2p_seq.store(0, Ordering::Relaxed);
+        Ok(())
+    }
 
-        if !params.send_udp {
-            let selected = servers.first().copied();
-            *self.params.lock().map_err(|e| e.to_string())? = Some(params);
-            if let Some(addr) = selected {
-                *self.selected_server.lock().map_err(|e| e.to_string())? = Some((addr, 0));
-            }
-            return Ok(selected);
-        }
-        if params.is_group {
-            return self.prepare_group(params, servers);
-        }
+    fn prepare_one_to_one(
+        &self,
+        params: MediaSessionParams,
+        servers: &[SocketAddr],
+    ) -> Result<Option<SocketAddr>, String> {
         let master = master_from_sess_id(&params.sess_id)
             .map_err(|err| format!("invalid call-v2 session id: {err}"))?;
         let session = session_keys(&master)
@@ -1224,7 +3551,7 @@ impl ZrtcMediaBackend {
         *self.rx_fallback_keys.lock().map_err(|e| e.to_string())? = None;
 
         let init_pkt = build_init_zrtp_packet(
-            params.is_caller,
+            params.role == MediaRole::Caller,
             params.uid,
             params.peer_uid,
             params.call_id,
@@ -1311,6 +3638,74 @@ impl ZrtcMediaBackend {
         params: MediaSessionParams,
         servers: &[SocketAddr],
     ) -> Result<Option<SocketAddr>, String> {
+        let plan = self.log_group_video_plan();
+        let group_key = params
+            .video_config
+            .get("srtpKey")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        Self::log_group_init_config(&params, servers, group_key, plan.as_ref());
+        if servers.is_empty() {
+            *self.params.lock().map_err(|e| e.to_string())? = Some(params);
+            return Ok(None);
+        }
+
+        self.configure_group_srtp_keys(&params, group_key)?;
+        let (layouts, forced) = Self::group_init_layouts()?;
+        let expected_cmd = if params.role == MediaRole::Caller {
+            crate::protocol::zrtp::commands::INIT_CALL_CALLER
+        } else {
+            crate::protocol::zrtp::commands::INIT_CALL_CALLEE
+        };
+
+        for layout in layouts {
+            let attempt = self.send_group_init_layout(&params, servers, layout, expected_cmd)?;
+            if let Some((server, token, public)) = attempt.accepted.first().cloned() {
+                *self.selected_server.lock().map_err(|e| e.to_string())? = Some((server, token));
+                *self.public_addr.lock().map_err(|e| e.to_string())? = public;
+                *self.ring_servers.lock().map_err(|e| e.to_string())? = attempt
+                    .accepted
+                    .iter()
+                    .map(|(address, media_token, _)| (*address, *media_token))
+                    .collect();
+                *self.params.lock().map_err(|e| e.to_string())? = Some(params);
+                if forced.is_none() {
+                    Self::save_group_init_layout(layout);
+                }
+                crate::zcall_log!(
+                    "[zcall-rust] group InitZRTP accepted with layout {}",
+                    layout.name()
+                );
+                media_debug(&format!(
+                    "init-accepted layout={} accepted_relays={}",
+                    layout.name(),
+                    attempt.accepted.len()
+                ));
+                return Ok(Some(server));
+            }
+
+            if attempt.responded.is_empty() {
+                // A silent relay is a network/route failure, not evidence that
+                // another speculative payload layout will be accepted.
+                *self.params.lock().map_err(|e| e.to_string())? = Some(params);
+                return Ok(None);
+            }
+            crate::zcall_log!(
+                "[zcall-rust] group InitZRTP layout {} refused by {}/{} server(s)",
+                layout.name(),
+                attempt.responded.len(),
+                servers.iter().copied().collect::<HashSet<_>>().len()
+            );
+        }
+
+        *self.selected_server.lock().map_err(|e| e.to_string())? = None;
+        *self.ring_servers.lock().map_err(|e| e.to_string())? = Vec::new();
+        *self.public_addr.lock().map_err(|e| e.to_string())? = None;
+        *self.params.lock().map_err(|e| e.to_string())? = Some(params);
+        Ok(None)
+    }
+
+    fn log_group_video_plan(&self) -> Option<GroupVideoPlan> {
         let plan = self
             .group_video_plan
             .lock()
@@ -1323,24 +3718,21 @@ impl ZrtcMediaBackend {
             plan.as_ref().map_or(0, |plan| plan.encode.width),
             plan.as_ref().map_or(0, |plan| plan.encode.height),
             plan.as_ref().map_or(0, |plan| plan.encode.fps),
-            plan.as_ref().map_or_default(|plan| plan
-                .send
-                .iter()
-                .map(|layer| layer.id)
-                .collect::<Vec<_>>())
+            plan.as_ref().map_or_default(|plan| {
+                plan.send.iter().map(|layer| layer.id).collect::<Vec<_>>()
+            })
         ));
-        let group_key = params
-            .video_config
-            .get("srtpKey")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        plan
+    }
+
+    fn log_group_init_config(
+        params: &MediaSessionParams,
+        servers: &[SocketAddr],
+        group_key: &str,
+        plan: Option<&GroupVideoPlan>,
+    ) {
         let master_fp = sha1(&[group_key.as_bytes()]);
-        let master_fp = master_fp[..6]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        // These SFU flags are relevant to the wire SRTP profile. Log only
-        // scalar type/value metadata; never serialize the full config/key.
+        // These SFU flags affect the wire SRTP profile. Log scalar metadata only.
         let config_scalar = |name: &str| {
             params.video_config.get(name).map_or_else(
                 || "missing".to_string(),
@@ -1354,27 +3746,26 @@ impl ZrtcMediaBackend {
                 },
             )
         };
-        let srtp_mode = config_scalar("srtpMode");
-        let srtp_no_seq = config_scalar("srtpNoSeq");
-        let audio_srtp_no_seq = config_scalar("audSrtpNoSeq");
         media_debug(&format!(
             "group-config uid={} video_enabled={} srtp={} key_bytes={} key_fp={} srtp_mode={} srtp_no_seq={} audio_srtp_no_seq={} relay_candidates={} video_layers={}",
             params.uid,
             params.video_enabled,
             !group_key.is_empty(),
             group_key.len(),
-            master_fp,
-            srtp_mode,
-            srtp_no_seq,
-            audio_srtp_no_seq,
+            hex::encode(&master_fp[..6]),
+            config_scalar("srtpMode"),
+            config_scalar("srtpNoSeq"),
+            config_scalar("audSrtpNoSeq"),
             servers.len(),
-            plan.as_ref().map_or(0, |plan| plan.layers.len())
+            plan.map_or(0, |plan| plan.layers.len())
         ));
-        if servers.is_empty() {
-            *self.params.lock().map_err(|e| e.to_string())? = Some(params);
-            return Ok(None);
-        }
+    }
 
+    fn configure_group_srtp_keys(
+        &self,
+        params: &MediaSessionParams,
+        group_key: &str,
+    ) -> Result<(), String> {
         let primary = if group_key.is_empty() {
             None
         } else {
@@ -1388,9 +3779,7 @@ impl ZrtcMediaBackend {
         let primary_present = primary.is_some();
         *self.keys.lock().map_err(|e| e.to_string())? = primary;
 
-        // The legacy group path uses zrtcConfig.srtpKey when present and plain
-        // RTP when it is absent. Some SFU receive paths may nevertheless use
-        // callSetting.session; keep that as a receive-only authenticated
+        // Some SFU receive paths use callSetting.session as a receive-only
         // candidate. A failed HMAC never falls through as decrypted media.
         let fallback = if params.sess_id.as_slice() == group_key.as_bytes() {
             None
@@ -1400,19 +3789,18 @@ impl ZrtcMediaBackend {
                 .and_then(|master| session_keys(&master).ok())
         };
         let session_fp = sha1(&[&params.sess_id]);
-        let session_fp = session_fp[..6]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
         media_debug(&format!(
             "group-key-candidates primary={} fallback_session={} session_bytes={} session_fp={}",
             primary_present,
             fallback.is_some(),
             params.sess_id.len(),
-            session_fp
+            hex::encode(&session_fp[..6])
         ));
         *self.rx_fallback_keys.lock().map_err(|e| e.to_string())? = fallback;
+        Ok(())
+    }
 
+    fn group_init_layouts() -> Result<(Vec<GroupInitLayout>, Option<String>), String> {
         let forced = std::env::var("ZCALL_GROUP_INIT_LAYOUT").ok();
         let mut layouts = Vec::new();
         if let Some(value) = forced.as_deref() {
@@ -1433,114 +3821,75 @@ impl ZrtcMediaBackend {
                 }
             }
         }
+        Ok((layouts, forced))
+    }
 
-        let allowed: HashSet<SocketAddr> = servers.iter().copied().collect();
-        let expected_cmd = if params.is_caller {
-            crate::protocol::zrtp::commands::INIT_CALL_CALLER
-        } else {
-            crate::protocol::zrtp::commands::INIT_CALL_CALLEE
-        };
-
-        for layout in layouts {
-            let packet = build_group_init_zrtp_packet(
-                params.is_caller,
-                params.uid,
-                &params.sess_id,
-                params.call_id,
-                params.host_call,
-                params.video_enabled,
-                layout,
-            );
-            let mut responded = HashSet::new();
-            let mut accepted = Vec::<(SocketAddr, u32, Option<String>)>::new();
-            let mut buf = [0u8; 1500];
-            let started = Instant::now();
-            let max_wait = Duration::from_millis(3200);
-            let mut attempt = 0u8;
-            let mut next_retry = Duration::from_millis(1000);
-
-            while started.elapsed() < max_wait && responded.len() < allowed.len() {
-                if attempt == 0 || (attempt < 3 && started.elapsed() >= next_retry) {
-                    for server in servers {
-                        if !responded.contains(server) {
-                            let _ = self.socket.send_to(&packet, server);
-                        }
-                    }
-                    attempt += 1;
-                    next_retry = Duration::from_millis(1000 * u64::from(attempt));
-                }
-
-                match self.socket.recv_from(&mut buf) {
-                    Ok((len, from)) => {
-                        if !allowed.contains(&from) || responded.contains(&from) {
-                            continue;
-                        }
-                        let Some(reply) = parse_server_reply(&buf[..len]) else {
-                            continue;
-                        };
-                        if reply.cmd != expected_cmd {
-                            continue;
-                        }
-                        responded.insert(from);
-                        if reply.result == Some(0) {
-                            if let Some(token) = reply.server_token {
-                                accepted.push((from, token, reply.public_addr));
-                            }
-                        }
-                    }
-                    Err(error)
-                        if error.kind() == std::io::ErrorKind::WouldBlock
-                            || error.kind() == std::io::ErrorKind::TimedOut => {}
-                    Err(error) => return Err(format!("group ZRTP receive failed: {error}")),
-                }
-            }
-
-            if let Some((server, token, public)) = accepted.first().cloned() {
-                *self.selected_server.lock().map_err(|e| e.to_string())? = Some((server, token));
-                *self.public_addr.lock().map_err(|e| e.to_string())? = public;
-                *self.ring_servers.lock().map_err(|e| e.to_string())? = accepted
-                    .iter()
-                    .map(|(address, media_token, _)| (*address, *media_token))
-                    .collect();
-                *self.params.lock().map_err(|e| e.to_string())? = Some(params);
-                if forced.is_none() {
-                    if let Ok(directory) = std::env::var("ZCALL_LOG_DIR") {
-                        let path = std::path::PathBuf::from(directory);
-                        let _ = std::fs::create_dir_all(&path);
-                        let _ = std::fs::write(path.join("group-init-layout"), layout.name());
-                    }
-                }
-                crate::zcall_log!(
-                    "[zcall-rust] group InitZRTP accepted with layout {}",
-                    layout.name()
-                );
-                media_debug(&format!(
-                    "init-accepted layout={} accepted_relays={}",
-                    layout.name(),
-                    accepted.len()
-                ));
-                return Ok(Some(server));
-            }
-
-            if responded.is_empty() {
-                // A silent relay is a network/route failure, not evidence that
-                // another speculative payload layout will be accepted.
-                *self.params.lock().map_err(|e| e.to_string())? = Some(params);
-                return Ok(None);
-            }
-            crate::zcall_log!(
-                "[zcall-rust] group InitZRTP layout {} refused by {}/{} server(s)",
-                layout.name(),
-                responded.len(),
-                allowed.len()
-            );
+    fn save_group_init_layout(layout: GroupInitLayout) {
+        if let Ok(directory) = std::env::var("ZCALL_LOG_DIR") {
+            let path = std::path::PathBuf::from(directory);
+            let _ = std::fs::create_dir_all(&path);
+            let _ = std::fs::write(path.join("group-init-layout"), layout.name());
         }
+    }
 
-        *self.selected_server.lock().map_err(|e| e.to_string())? = None;
-        *self.ring_servers.lock().map_err(|e| e.to_string())? = Vec::new();
-        *self.public_addr.lock().map_err(|e| e.to_string())? = None;
-        *self.params.lock().map_err(|e| e.to_string())? = Some(params);
-        Ok(None)
+    fn send_group_init_layout(
+        &self,
+        params: &MediaSessionParams,
+        servers: &[SocketAddr],
+        layout: GroupInitLayout,
+        expected_cmd: u16,
+    ) -> Result<GroupLayoutAttempt, String> {
+        let packet = build_group_init_zrtp_packet(
+            params.role == MediaRole::Caller,
+            params.uid,
+            &params.sess_id,
+            params.call_id,
+            params.host_call,
+            params.video_enabled,
+            layout,
+        );
+        let allowed: HashSet<SocketAddr> = servers.iter().copied().collect();
+        let mut attempt = GroupLayoutAttempt::default();
+        let mut buf = [0u8; 1500];
+        let started = Instant::now();
+        let max_wait = Duration::from_millis(3200);
+        let mut retry = 0u8;
+        let mut next_retry = Duration::from_millis(1000);
+        while started.elapsed() < max_wait && attempt.responded.len() < allowed.len() {
+            if retry == 0 || (retry < 3 && started.elapsed() >= next_retry) {
+                for server in servers {
+                    if !attempt.responded.contains(server) {
+                        let _ = self.socket.send_to(&packet, server);
+                    }
+                }
+                retry += 1;
+                next_retry = Duration::from_millis(1000 * u64::from(retry));
+            }
+            match self.socket.recv_from(&mut buf) {
+                Ok((len, from)) => {
+                    if !allowed.contains(&from) || attempt.responded.contains(&from) {
+                        continue;
+                    }
+                    let Some(reply) = parse_server_reply(&buf[..len]) else {
+                        continue;
+                    };
+                    if reply.cmd != expected_cmd {
+                        continue;
+                    }
+                    attempt.responded.insert(from);
+                    if reply.result == Some(0) {
+                        if let Some(token) = reply.server_token {
+                            attempt.accepted.push((from, token, reply.public_addr));
+                        }
+                    }
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        || error.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(error) => return Err(format!("group ZRTP receive failed: {error}")),
+            }
+        }
+        Ok(attempt)
     }
 
     pub fn media_timed_out(&self) -> bool {
@@ -1548,7 +3897,10 @@ impl ZrtcMediaBackend {
         let Some(params) = params else {
             return false;
         };
-        if params.is_group || !params.send_udp || !self.running.load(Ordering::Acquire) {
+        if params.kind == MediaKind::Group
+            || !params.send_udp
+            || !self.running.load(Ordering::Acquire)
+        {
             return false;
         }
         media_receive_timed_out(self.last_media_rx_ms.load(Ordering::Acquire), unix_now_ms())
@@ -1606,6 +3958,67 @@ impl ZrtcMediaBackend {
         let tx_group_plan = self.group_video_plan.clone();
         let tx_group_wanted = self.group_video_wanted.clone();
         let tx_group_control_seq = self.group_control_seq.clone();
+        let (apm, far_active) = Self::create_audio_processing(&params);
+        spawn_p2p_bind_worker(
+            self.params.lock().ok().and_then(|params| params.clone()),
+            socket.clone(),
+            running.clone(),
+            self.p2p_path.clone(),
+            self.p2p_enabled.clone(),
+            self.p2p_seq.clone(),
+        );
+
+        let (jitter_buffer, group_audio) =
+            self.spawn_audio_playout(&running, &params, speaker_off, apm.as_ref(), &far_active);
+
+        self.spawn_receive_worker(ReceiveWorkerSetup {
+            running: running.clone(),
+            socket: socket.clone(),
+            keys: keys.clone(),
+            selected_server: selected_server.clone(),
+            params: params.clone(),
+            jitter_buffer: jitter_buffer.clone(),
+            group_audio: group_audio.clone(),
+        });
+
+        // Audio recording & transmit thread
+        let resources = AudioTransmitResources {
+            tx_running: running,
+            tx_audio_packets: self.tx_audio_packets.clone(),
+            tx_socket: socket,
+            tx_keys: keys,
+            tx_params: params,
+            tx_selected: selected_server,
+            tx_muted: muted,
+            tx_twcc: self.twcc_seq.clone(),
+            tx_devices: self.devices.clone(),
+            tx_device_generation: self.device_generation.clone(),
+            tx_rtcp: self.rtcp.clone(),
+            tx_p2p_path: self.p2p_path.clone(),
+            tx_rate: self.send_rate.clone(),
+            tx_last_video: self.last_video_sent_ms.clone(),
+            tx_pending_profile: self.pending_video_profile.clone(),
+            tx_apm: apm,
+            tx_far_active: far_active,
+            tx_mic_volume: self.mic_volume.clone(),
+            tx_mic_volume_dirty: self.mic_volume_dirty.clone(),
+            tx_mic_manual: self.mic_manual.clone(),
+            tx_pending_mic_volume: self.pending_mic_volume.clone(),
+            tx_mic_level: self.mic_level.clone(),
+            tx_mic_level_dirty: self.mic_level_dirty.clone(),
+            tx_audio_enabled: self.audio_enabled.clone(),
+            tx_media_events: self.group_events.clone(),
+            last_ping,
+            tx_group_plan,
+            tx_group_wanted,
+            tx_group_control_seq,
+        };
+        thread::spawn(move || AudioTransmitWorker::new(resources).run());
+    }
+
+    fn create_audio_processing(
+        params: &Arc<Mutex<Option<MediaSessionParams>>>,
+    ) -> (Option<Arc<Apm>>, Arc<AtomicBool>) {
         let audio_config = params
             .lock()
             .ok()
@@ -1624,7 +4037,13 @@ impl ZrtcMediaBackend {
             .get("audioHighPassFilter")
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        let apm = match Apm::new(SAMPLE_RATE as i32, 1, aec_enabled, ns_enabled, hpf_enabled) {
+        let apm = match Apm::new(
+            SAMPLE_RATE.cast_signed(),
+            1,
+            aec_enabled,
+            ns_enabled,
+            hpf_enabled,
+        ) {
             Ok(apm) => {
                 crate::zcall_log!(
                     "[zcall-rust] Sonora audio processing enabled: AEC={aec_enabled} NS={ns_enabled} HPF={hpf_enabled}"
@@ -1636,73 +4055,22 @@ impl ZrtcMediaBackend {
                 None
             }
         };
-        let bind_params = self.params.lock().ok().and_then(|params| params.clone());
-        if let Some(bind_params) = bind_params.filter(|params| !params.p2p_candidates.is_empty()) {
-            let bind_socket = socket.clone();
-            let bind_running = running.clone();
-            let bind_path = self.p2p_path.clone();
-            let bind_enabled = self.p2p_enabled.clone();
-            let bind_seq = self.p2p_seq.clone();
-            thread::Builder::new()
-                .name("zcall-p2p-bind".into())
-                .spawn(move || {
-                    let mut attempt_started = Instant::now();
-                    let mut last_send = Instant::now()
-                        .checked_sub(Duration::from_millis(100))
-                        .unwrap();
-                    let mut was_enabled = false;
-                    while bind_running.load(Ordering::Relaxed) {
-                        let path_is_up = bind_path.lock().is_ok_and(|path| path.is_some());
-                        let enabled = bind_enabled.load(Ordering::Acquire);
-                        if !enabled {
-                            was_enabled = false;
-                            thread::sleep(Duration::from_millis(100));
-                            continue;
-                        }
-                        if !was_enabled {
-                            // P2P_BIND_GIVE_UP_MS = 15 s. Explicit subCmd 3
-                            // or a fresh start signal begins another bind window.
-                            attempt_started = Instant::now();
-                            last_send = Instant::now()
-                                .checked_sub(Duration::from_millis(100))
-                                .unwrap();
-                            was_enabled = true;
-                        }
-                        if path_is_up {
-                            thread::sleep(Duration::from_millis(100));
-                            continue;
-                        }
-                        if attempt_started.elapsed() >= Duration::from_secs(15) {
-                            thread::sleep(Duration::from_millis(100));
-                            continue;
-                        }
-                        let interval = if attempt_started.elapsed() < Duration::from_secs(1) {
-                            Duration::from_millis(100)
-                        } else {
-                            Duration::from_millis(400)
-                        };
-                        if last_send.elapsed() >= interval {
-                            last_send = Instant::now();
-                            let sequence = bind_seq.fetch_add(1, Ordering::Relaxed);
-                            for (index, candidate) in bind_params.p2p_candidates.iter().enumerate()
-                            {
-                                let packet = p2p::bind(
-                                    !bind_params.is_caller,
-                                    bind_params.call_id,
-                                    sequence,
-                                    index as u32,
-                                );
-                                let _ = bind_socket.send_to(&packet, candidate);
-                            }
-                        }
-                        thread::sleep(Duration::from_millis(25));
-                    }
-                })
-                .ok();
-        }
+        (apm, far_active)
+    }
 
+    fn spawn_audio_playout(
+        &self,
+        running: &Arc<AtomicBool>,
+        params: &Arc<Mutex<Option<MediaSessionParams>>>,
+        speaker_off: Arc<AtomicBool>,
+        apm: Option<&Arc<Apm>>,
+        far_active: &Arc<AtomicBool>,
+    ) -> (
+        Option<Arc<Mutex<JitterBuffer>>>,
+        Arc<Mutex<GroupAudioMixer>>,
+    ) {
         let params_for_playout = params.clone();
-        let jitter_buffer = match JitterBuffer::new(SAMPLE_RATE as i32, 1, 10) {
+        let jitter_buffer = match JitterBuffer::new(SAMPLE_RATE.cast_signed(), 1, 10) {
             Ok(mut buffer) => {
                 buffer.set_min_target(3);
                 Some(Arc::new(Mutex::new(buffer)))
@@ -1722,12 +4090,25 @@ impl ZrtcMediaBackend {
             params_for_playout,
             jitter_buffer.clone(),
             group_audio.clone(),
-            apm.clone(),
+            apm.cloned(),
             far_active.clone(),
             self.mic_volume.clone(),
             self.group_events.clone(),
         );
 
+        (jitter_buffer, group_audio)
+    }
+
+    fn spawn_receive_worker(&self, setup: ReceiveWorkerSetup) {
+        let ReceiveWorkerSetup {
+            running,
+            socket,
+            keys,
+            selected_server,
+            params,
+            jitter_buffer,
+            group_audio,
+        } = setup;
         // UDP receive thread: authenticate/depacketize and queue audio. Playback
         // is intentionally independent and follows the hardware clock.
         let rx_running = running.clone();
@@ -1755,1734 +4136,72 @@ impl ZrtcMediaBackend {
         let rx_tx_video_packets = self.tx_video_packets.clone();
 
         thread::spawn(move || {
-            let rx_jitter_buffer = jitter_buffer;
-            let rx_group_audio = group_audio;
-            let mut video_assemblers = HashMap::<u32, VideoAssembler>::new();
-            let mut audio_roc = RocTracker::default();
-            let mut video_rocs = HashMap::<u32, RocTracker>::new();
-            let mut last_video_pli = HashMap::<u32, Instant>::new();
-            let mut audio_dedup = AudioDeduplicator::new(256);
-            let mut member_audio_seen = HashSet::<u32>::new();
-            let mut member_speaking = HashMap::<u32, MemberSpeakingTracker>::new();
-            let mut last_audio_rx = Instant::now();
-            let mut last_p2p_rx: Option<Instant> = None;
-            let mut last_recovery = Instant::now().checked_sub(Duration::from_secs(3)).unwrap();
-            let mut local_ip_sig = local_ipv4_signature();
-            let mut next_network_check = Instant::now() + Duration::from_millis(250);
-            let mut change_address_retries = VecDeque::<(Instant, &'static str)>::new();
-            let mut change_addr_seq = 0u32;
-            let mut relay_audio_streak = 0u32;
-            let mut rx_audio_second = 0u32;
-            let mut early_audio_rx_count = 0u32;
-            let mut group_rx_audio_packets = 0u64;
-            let mut group_rx_video_packets = 0u64;
-            let mut group_rx_audio_decoded = 0u64;
-            let mut group_rx_video_decoded = 0u64;
-            let mut group_rx_audio_bad = 0u64;
-            let mut group_rx_video_bad = 0u64;
-            let mut rx_video_packets = 0u64;
-            let mut rx_video_decoded = 0u64;
-            let mut rx_video_bad = 0u64;
-            let mut rx_video_first = 0u8;
-            let mut group_rx_other_host = 0u64;
-            let mut group_rx_alt_port = 0u64;
-            let mut group_rx_last_summary = Instant::now();
-            let mut group_rx_audio_first = 0u8;
-            let mut group_rx_video_first = 0u8;
-            let mut group_audio_srtp_profile: Option<(usize, usize)> = None;
-            let mut group_video_srtp_profile: Option<(usize, usize)> = None;
-            let mut group_audio_srtp_profile_discovery_attempts = 0u8;
-            let mut group_video_srtp_profile_discovery_attempts = 0u8;
-            const GROUP_SRTP_PROFILE_DISCOVERY_LIMIT: u8 = 4;
-            let mut group_audio_auth_reported = false;
-            let mut group_audio_auth_failed_reported = false;
-            let mut group_video_auth_reported = false;
-            let mut group_video_auth_failed_reported = false;
-            let mut group_video_frame_reported = false;
-            let mut buf = [0u8; 2048];
-
-            while rx_running.load(Ordering::Relaxed) {
-                if let Ok((len, from)) = rx_socket.recv_from(&mut buf) {
-                    let pkt = &buf[..len];
-                    if pkt.is_empty() {
-                        continue;
-                    }
-
-                    let params_snapshot = rx_params.lock().ok().and_then(|params| params.clone());
-                    if params_snapshot
-                        .as_ref()
-                        .is_some_and(|params| params.is_group)
-                        && matches!(pkt[0], msg_types::AUDIO_RTP_DOWN | msg_types::VIDEO_DOWN)
-                    {
-                        let selected = rx_selected
-                            .lock()
-                            .ok()
-                            .and_then(|selected| selected.map(|(addr, _)| addr));
-                        let same_host = selected.is_some_and(|selected| selected.ip() == from.ip());
-                        let source = if selected == Some(from) {
-                            "selected"
-                        } else if same_host {
-                            group_rx_alt_port = group_rx_alt_port.saturating_add(1);
-                            "same-host-alt-port"
-                        } else {
-                            group_rx_other_host = group_rx_other_host.saturating_add(1);
-                            "other-host"
-                        };
-                        let ssrc = (pkt.len() >= 13)
-                            .then(|| u32::from_be_bytes([pkt[9], pkt[10], pkt[11], pkt[12]]));
-                        if pkt[0] == msg_types::AUDIO_RTP_DOWN {
-                            group_rx_audio_packets = group_rx_audio_packets.saturating_add(1);
-                            if group_rx_audio_first < 3 {
-                                media_debug(&format!(
-                                    "udp-audio source={source} bytes={} ssrc={}",
-                                    pkt.len(),
-                                    ssrc.map_or_else(|| "short".into(), |uid| uid.to_string())
-                                ));
-                                group_rx_audio_first += 1;
-                            }
-                        } else {
-                            group_rx_video_packets = group_rx_video_packets.saturating_add(1);
-                            if group_rx_video_first < 3 {
-                                media_debug(&format!(
-                                    "udp-video source={source} bytes={} ssrc={}",
-                                    pkt.len(),
-                                    ssrc.map_or_else(|| "short".into(), |uid| uid.to_string())
-                                ));
-                                group_rx_video_first += 1;
-                            }
-                        }
-                    }
-                    let mut direct = false;
-                    let (msg_type, payload) = if pkt[0] == msg_types::P2P_EXT {
-                        let Some(params_snapshot) = params_snapshot.as_ref() else {
-                            continue;
-                        };
-                        let Some((header, body)) = p2p::parse(pkt) else {
-                            continue;
-                        };
-                        let peer_is_callee = params_snapshot.is_caller;
-                        if header.call_id != params_snapshot.call_id
-                            || header.is_callee != peer_is_callee
-                            || (!params_snapshot.p2p_candidates.is_empty()
-                                && !params_snapshot
-                                    .p2p_candidates
-                                    .iter()
-                                    .any(|candidate| candidate.ip() == from.ip()))
-                        {
-                            continue;
-                        }
-                        last_p2p_rx = Some(Instant::now());
-                        match header.kind {
-                            p2p::BIND_PEER => {
-                                if let Some(answer) = p2p::bind_answer(
-                                    !params_snapshot.is_caller,
-                                    params_snapshot.call_id,
-                                    body,
-                                    &format!("{}|{}", from.ip(), from.port()),
-                                ) {
-                                    let _ = rx_socket.send_to(&answer, from);
-                                }
-                                continue;
-                            }
-                            p2p::SIGNAL => {
-                                match body.first() {
-                                    Some(1) => rx_p2p_enabled.store(true, Ordering::Release),
-                                    Some(2) => rx_p2p_enabled.store(false, Ordering::Release),
-                                    _ => {}
-                                }
-                                if matches!(body.first(), Some(1 | 2)) {
-                                    if let Ok(mut path) = rx_p2p_path.lock() {
-                                        *path = None;
-                                    }
-                                    relay_audio_streak = 0;
-                                }
-                                continue;
-                            }
-                            p2p::KEEPALIVE => {
-                                if matches!(body.first(), Some(1 | 2)) {
-                                    // Publish the direct path before replying. The
-                                    // peer may send media immediately after it sees
-                                    // the pong, so the TX worker must already route
-                                    // duplicate packets to this endpoint.
-                                    if let Ok(mut path) = rx_p2p_path.lock() {
-                                        *path = Some(from);
-                                    }
-                                    if body.first() == Some(&1) {
-                                        if let Some(pong) =
-                                            p2p::pong(!params_snapshot.is_caller, pkt)
-                                        {
-                                            let _ = rx_socket.send_to(&pong, from);
-                                        }
-                                    }
-                                }
-                                continue;
-                            }
-                            p2p::AUDIO => {
-                                direct = true;
-                                (msg_types::AUDIO_RTP_DOWN, body)
-                            }
-                            p2p::VIDEO => {
-                                direct = true;
-                                (msg_types::VIDEO_DOWN, body)
-                            }
-                            p2p::AUDIO_RTCP => (msg_types::AUDIO_FEC, body),
-                            p2p::VIDEO_RTCP => (msg_types::VIDEO_FEC, body),
-                            _ => continue,
-                        }
-                    } else {
-                        let selected_from = rx_selected
-                            .lock()
-                            .ok()
-                            .and_then(|selected| selected.map(|(addr, _)| addr));
-                        let is_group = params_snapshot
-                            .as_ref()
-                            .is_some_and(|params| params.is_group);
-                        if !accepts_relay_source(selected_from, from, is_group) {
-                            continue;
-                        }
-                        match pkt[0] {
-                            msg_types::AUDIO_RTP_DOWN | msg_types::VIDEO_DOWN => {
-                                (pkt[0], &pkt[1..])
-                            }
-                            msg_types::AUDIO_FEC | msg_types::VIDEO_FEC => {
-                                if pkt.len() < 9 {
-                                    continue;
-                                }
-                                let token = u32::from_le_bytes([pkt[1], pkt[2], pkt[3], pkt[4]]);
-                                let expected_token = rx_selected
-                                    .lock()
-                                    .ok()
-                                    .and_then(|selected| selected.map(|(_, token)| token));
-                                if expected_token != Some(token) {
-                                    continue;
-                                }
-                                (pkt[0], &pkt[5..])
-                            }
-                            other => (other, pkt),
-                        }
-                    };
-                    if msg_type == msg_types::VIDEO_DOWN {
-                        rx_video_packets = rx_video_packets.saturating_add(1);
-                        if rx_video_first < 3 && payload.len() >= 12 {
-                            let ssrc = u32::from_be_bytes([
-                                payload[8],
-                                payload[9],
-                                payload[10],
-                                payload[11],
-                            ]);
-                            let mode = if params_snapshot
-                                .as_ref()
-                                .is_some_and(|params| params.is_group)
-                            {
-                                "group"
-                            } else {
-                                "one-to-one"
-                            };
-                            media_debug(&format!(
-                                "rx-video mode={mode} path={} bytes={} ssrc={}",
-                                if direct { "direct" } else { "relay" },
-                                payload.len(),
-                                ssrc
-                            ));
-                            rx_video_first += 1;
-                        }
-                    }
-
-                    match msg_type {
-                        msg_types::AUDIO_FEC | msg_types::VIDEO_FEC => {
-                            let is_video = msg_type == msg_types::VIDEO_FEC;
-                            let now_ms = unix_now_ms();
-                            let targets = rx_rtcp
-                                .lock()
-                                .ok()
-                                .and_then(|mut feedback| {
-                                    feedback
-                                        .as_mut()
-                                        .map(|feedback| feedback.on_rtcp(is_video, payload, now_ms))
-                                })
-                                .unwrap_or_default();
-                            if let Ok(mut controller) = rx_send_rate.lock() {
-                                if let Some(controller) = controller.as_mut() {
-                                    controller.on_feedback(
-                                        &targets.twcc_feedback,
-                                        &targets.report_blocks,
-                                        now_ms,
-                                    );
-                                }
-                            }
-                            let local_uid = rx_params
-                                .lock()
-                                .ok()
-                                .and_then(|params| params.as_ref().map(|params| params.uid));
-                            if local_uid.is_some_and(|uid| targets.keyframe_targets.contains(&uid))
-                            {
-                                rx_keyframe_request.store(true, Ordering::Relaxed);
-                            }
-                            if is_video {
-                                let params =
-                                    rx_params.lock().ok().and_then(|params| params.clone());
-                                if let Some(params) = params {
-                                    if let Some((relay, token)) = *rx_selected.lock().unwrap() {
-                                        for nack in targets.nack_requests {
-                                            if nack.media_ssrc != 0 && nack.media_ssrc != params.uid
-                                            {
-                                                continue;
-                                            }
-                                            for sequence in nack.lost_sequences {
-                                                let cached = rx_video_history.lock().ok().and_then(
-                                                    |history| {
-                                                        history
-                                                            .iter()
-                                                            .rev()
-                                                            .find(|(seq, _)| *seq == sequence)
-                                                            .map(|(_, packet)| packet.clone())
-                                                    },
-                                                );
-                                                if let Some(protected) = cached {
-                                                    let relay_packet = wrap_media_packet(
-                                                        msg_types::VIDEO_RTP,
-                                                        token,
-                                                        &protected,
-                                                    );
-                                                    let _ = rx_socket.send_to(&relay_packet, relay);
-                                                    if let Some(peer) = rx_p2p_path
-                                                        .lock()
-                                                        .ok()
-                                                        .and_then(|path| *path)
-                                                    {
-                                                        let direct_packet = p2p::wrap(
-                                                            !params.is_caller,
-                                                            params.call_id,
-                                                            p2p::VIDEO,
-                                                            &protected,
-                                                        );
-                                                        let _ =
-                                                            rx_socket.send_to(&direct_packet, peer);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        msg_types::AUDIO_RTP_DOWN => {
-                            // The relay and P2P path carry identical SRTP sequence
-                            // spaces. Authenticate first, then deliver each SSRC/ROC/seq
-                            // exactly once to the relevant jitter buffer.
-                            let is_group = params_snapshot
-                                .as_ref()
-                                .is_some_and(|params| params.is_group);
-                            if payload.len() >= 12 {
-                                let rtp_body = payload;
-                                let seq = u16::from_be_bytes([rtp_body[2], rtp_body[3]]);
-                                let ssrc = u32::from_be_bytes([
-                                    rtp_body[8],
-                                    rtp_body[9],
-                                    rtp_body[10],
-                                    rtp_body[11],
-                                ]);
-                                let local_uid =
-                                    params_snapshot.as_ref().map_or_default(|params| params.uid);
-
-                                if is_group {
-                                    if ssrc != local_uid {
-                                        let candidates = rx_group_audio.lock().map_or_else(
-                                            |_| vec![0],
-                                            |mixer| mixer.candidate_rocs(ssrc, seq),
-                                        );
-                                        let mut decoded = None;
-                                        let mut fallback_key_used = false;
-                                        let mut auth_profile = (0usize, 10usize);
-                                        let profile_to_try =
-                                            group_audio_srtp_profile.or_else(|| {
-                                                (group_audio_srtp_profile_discovery_attempts
-                                                    >= GROUP_SRTP_PROFILE_DISCOVERY_LIMIT)
-                                                    .then_some((0, 10))
-                                            });
-                                        if group_audio_srtp_profile.is_none()
-                                            && group_audio_srtp_profile_discovery_attempts
-                                                < GROUP_SRTP_PROFILE_DISCOVERY_LIMIT
-                                        {
-                                            group_audio_srtp_profile_discovery_attempts += 1;
-                                        }
-                                        if let (Ok(keys), Ok(fallback)) =
-                                            (rx_keys.lock(), rx_fallback_keys.lock())
-                                        {
-                                            let primary = keys.as_ref();
-                                            let fallback = fallback.as_ref();
-                                            if let Some((
-                                                clear,
-                                                roc,
-                                                used_fallback,
-                                                mki_len,
-                                                tag_len,
-                                            )) = unprotect_group_with_candidates(
-                                                rtp_body,
-                                                primary,
-                                                fallback,
-                                                &candidates,
-                                                profile_to_try,
-                                            ) {
-                                                decoded =
-                                                    Some((clear.seq, clear.ssrc, roc, clear.opus));
-                                                fallback_key_used = used_fallback;
-                                                auth_profile = (mki_len, tag_len);
-                                                group_audio_srtp_profile = Some(auth_profile);
-                                            }
-                                            // Preserve legacy plain-RTP mode only when
-                                            // zrtcConfig.srtpKey is absent. Try the
-                                            // authenticated session candidate first.
-                                            if decoded.is_none() && primary.is_none() {
-                                                if let Some((clear_seq, clear_ssrc, opus)) =
-                                                    read_plain_rtp_payload(rtp_body)
-                                                {
-                                                    decoded = Some((
-                                                        clear_seq,
-                                                        clear_ssrc,
-                                                        candidates[0],
-                                                        opus,
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                        if let Some((clear_seq, clear_ssrc, _, opus)) =
-                                            decoded.as_ref()
-                                        {
-                                            group_rx_audio_decoded =
-                                                group_rx_audio_decoded.saturating_add(1);
-                                            if !group_audio_auth_reported {
-                                                media_debug(&format!(
-                                                    "group-audio-auth=ok ssrc={clear_ssrc} seq={clear_seq} key_source={} mki_bytes={} tag_bytes={} opus_bytes={}",
-                                                    if fallback_key_used { "session" } else { "group" },
-                                                    auth_profile.0,
-                                                    auth_profile.1,
-                                                    opus.len()
-                                                ));
-                                                group_audio_auth_reported = true;
-                                            }
-                                        } else {
-                                            group_rx_audio_bad =
-                                                group_rx_audio_bad.saturating_add(1);
-                                            if !group_audio_auth_failed_reported {
-                                                if std::env::var("ZCALL_GROUP_AUTH_DUMP")
-                                                    .is_ok_and(|value| value == "1")
-                                                {
-                                                    let packet_hex = rtp_body
-                                                        .iter()
-                                                        .map(|byte| format!("{byte:02x}"))
-                                                        .collect::<String>();
-                                                    media_debug(&format!(
-                                                        "group-audio-auth-dump={packet_hex}"
-                                                    ));
-                                                }
-                                                let fallback_probe = rx_fallback_keys
-                                                    .lock()
-                                                    .ok()
-                                                    .and_then(|keys| {
-                                                        keys.as_ref().map(|keys| {
-                                                            probe_srtp_auth_layout(rtp_body, keys)
-                                                        })
-                                                    })
-                                                    .unwrap_or_else(|| "no-keys".into());
-                                                media_debug(&format!(
-                                                    "group-audio-auth=failed ssrc={ssrc} seq={seq} srtp_keys={} fallback_probe={} rtp_bytes={}",
-                                                    rx_keys.lock().is_ok_and(|keys| keys.is_some()),
-                                                    fallback_probe,
-                                                    rtp_body.len()
-                                                ));
-                                                group_audio_auth_failed_reported = true;
-                                            }
-                                        }
-                                        if let Some((clear_seq, clear_ssrc, roc, opus)) = decoded {
-                                            if rx_share_peer
-                                                .lock()
-                                                .ok()
-                                                .and_then(|peer| peer.as_ref().map(|peer| peer.uid))
-                                                == Some(clear_ssrc)
-                                                || rx_remote_share_uid.load(Ordering::Acquire)
-                                                    == clear_ssrc
-                                            {
-                                                continue;
-                                            }
-                                            let ext_seq = (roc << 16) | u32::from(clear_seq);
-                                            last_audio_rx = Instant::now();
-                                            rx_last_media_rx_ms
-                                                .store(unix_now_ms(), Ordering::Release);
-                                            let new_source = if direct {
-                                                relay_audio_streak = 0;
-                                                if let Ok(mut path) = rx_p2p_path.lock() {
-                                                    *path = Some(from);
-                                                }
-                                                true
-                                            } else {
-                                                if rx_p2p_path
-                                                    .lock()
-                                                    .is_ok_and(|path| path.is_some())
-                                                {
-                                                    relay_audio_streak =
-                                                        relay_audio_streak.saturating_add(1);
-                                                    if relay_audio_streak >= 25 {
-                                                        let selected = *rx_selected
-                                                            .lock()
-                                                            .ok()
-                                                            .as_deref()
-                                                            .unwrap_or(&None);
-                                                        if let Some(params) =
-                                                            params_snapshot.as_ref()
-                                                        {
-                                                            stop_p2p_path(
-                                                                &rx_socket,
-                                                                selected,
-                                                                &rx_p2p_path,
-                                                                &rx_p2p_enabled,
-                                                                params,
-                                                                true,
-                                                            );
-                                                        }
-                                                        relay_audio_streak = 0;
-                                                    }
-                                                }
-                                                false
-                                            };
-                                            let _ = new_source;
-                                            if audio_dedup.accept(clear_ssrc, ext_seq) {
-                                                rx_audio_second = rx_audio_second.saturating_add(1);
-                                                rx_audio_packets.fetch_add(1, Ordering::Relaxed);
-                                                if params_snapshot
-                                                    .as_ref()
-                                                    .is_some_and(|params| params.uid != clear_ssrc)
-                                                    && member_audio_seen.insert(clear_ssrc)
-                                                {
-                                                    if let Ok(mut events) = rx_group_events.lock() {
-                                                        events.push_back(
-                                                            GroupMediaEvent::MemberAudio(
-                                                                clear_ssrc,
-                                                            ),
-                                                        );
-                                                    }
-                                                }
-                                                if let Some(level) =
-                                                    parse_rfc6464_audio_level(rtp_body)
-                                                {
-                                                    if let Some(on) = member_speaking
-                                                        .entry(clear_ssrc)
-                                                        .or_default()
-                                                        .observe(level, Instant::now())
-                                                    {
-                                                        if let Ok(mut events) =
-                                                            rx_group_events.lock()
-                                                        {
-                                                            events.push_back(
-                                                                GroupMediaEvent::MemberSpeaking(
-                                                                    clear_ssrc, on,
-                                                                ),
-                                                            );
-                                                        }
-                                                    }
-                                                }
-                                                if let Ok(mut mixer) = rx_group_audio.lock() {
-                                                    mixer.push_packet(
-                                                        clear_ssrc, clear_seq, roc, opus,
-                                                    );
-                                                }
-                                                if let Ok(mut feedback) = rx_rtcp.lock() {
-                                                    if let Some(feedback) = feedback.as_mut() {
-                                                        feedback.on_rtp(
-                                                            false,
-                                                            rtp_body,
-                                                            unix_now_ms(),
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    let mut decoded = None;
-                                    if let Ok(keys) = rx_keys.lock() {
-                                        if let Some(keys) = keys.as_ref() {
-                                            decoded = unprotect_with_roc_recovery(
-                                                rtp_body,
-                                                keys,
-                                                &mut audio_roc,
-                                            )
-                                            .map(|(clear, roc)| {
-                                                (clear.seq, clear.ssrc, roc, clear.opus)
-                                            });
-                                        } else if let Some((clear_seq, clear_ssrc, opus)) =
-                                            read_plain_rtp_payload(rtp_body)
-                                        {
-                                            let roc = audio_roc.guess(clear_seq);
-                                            audio_roc.update(clear_seq, roc);
-                                            decoded = Some((clear_seq, clear_ssrc, roc, opus));
-                                        }
-                                    }
-                                    if let Some((clear_seq, clear_ssrc, roc, opus)) = decoded {
-                                        if rx_share_peer
-                                            .lock()
-                                            .ok()
-                                            .and_then(|peer| peer.as_ref().map(|peer| peer.uid))
-                                            == Some(clear_ssrc)
-                                            || rx_remote_share_uid.load(Ordering::Acquire)
-                                                == clear_ssrc
-                                        {
-                                            continue;
-                                        }
-                                        let ext_seq = (roc << 16) | u32::from(clear_seq);
-                                        last_audio_rx = Instant::now();
-                                        if direct {
-                                            relay_audio_streak = 0;
-                                            if let Ok(mut path) = rx_p2p_path.lock() {
-                                                *path = Some(from);
-                                            }
-                                        } else if rx_p2p_path
-                                            .lock()
-                                            .is_ok_and(|path| path.is_some())
-                                        {
-                                            relay_audio_streak =
-                                                relay_audio_streak.saturating_add(1);
-                                            if relay_audio_streak >= 25 {
-                                                let selected = *rx_selected.lock().unwrap();
-                                                if let Some(params) = params_snapshot.as_ref() {
-                                                    stop_p2p_path(
-                                                        &rx_socket,
-                                                        selected,
-                                                        &rx_p2p_path,
-                                                        &rx_p2p_enabled,
-                                                        params,
-                                                        true,
-                                                    );
-                                                }
-                                                relay_audio_streak = 0;
-                                            }
-                                        }
-
-                                        if audio_dedup.accept(clear_ssrc, ext_seq) {
-                                            rx_last_media_rx_ms
-                                                .store(unix_now_ms(), Ordering::Release);
-                                            rx_audio_second = rx_audio_second.saturating_add(1);
-                                            rx_audio_packets.fetch_add(1, Ordering::Relaxed);
-                                            let early_caller =
-                                                params_snapshot.as_ref().is_some_and(|params| {
-                                                    params.is_caller && !params.is_group
-                                                });
-                                            if early_caller
-                                                && !rx_audio_enabled.load(Ordering::Acquire)
-                                            {
-                                                early_audio_rx_count =
-                                                    early_audio_rx_count.saturating_add(1);
-                                                if let Some(phase) = early_audio_phase(
-                                                    true,
-                                                    false,
-                                                    false,
-                                                    early_audio_rx_count,
-                                                ) {
-                                                    if let Ok(mut events) = rx_group_events.lock() {
-                                                        events.push_back(
-                                                            GroupMediaEvent::EarlyAudio(phase),
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                            if let Ok(mut feedback) = rx_rtcp.lock() {
-                                                if let Some(feedback) = feedback.as_mut() {
-                                                    feedback.on_rtp(false, rtp_body, unix_now_ms());
-                                                }
-                                            }
-                                            if let Some(jitter) = rx_jitter_buffer.as_ref() {
-                                                if let Ok(mut jitter) = jitter.lock() {
-                                                    jitter.push(ext_seq, opus);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        msg_types::VIDEO_DOWN => {
-                            if payload.len() >= 12 {
-                                let rtp_body = payload;
-                                let ssrc = u32::from_be_bytes([
-                                    rtp_body[8],
-                                    rtp_body[9],
-                                    rtp_body[10],
-                                    rtp_body[11],
-                                ]);
-                                if params_snapshot
-                                    .as_ref()
-                                    .is_some_and(|params| params.is_group && params.uid == ssrc)
-                                    && !std::env::var("ZCALL_CAM_LOOPBACK")
-                                        .is_ok_and(|value| value == "1")
-                                {
-                                    continue;
-                                }
-                                let local_share_uid = rx_share_peer
-                                    .lock()
-                                    .ok()
-                                    .and_then(|peer| peer.as_ref().map(|peer| peer.uid));
-                                let is_local_share = local_share_uid == Some(ssrc);
-                                let is_share = is_local_share
-                                    || rx_remote_share_uid.load(Ordering::Acquire) == ssrc;
-                                if is_local_share
-                                    && !std::env::var("ZCALL_SHARE_LOOPBACK")
-                                        .is_ok_and(|value| value == "1")
-                                {
-                                    continue;
-                                }
-                                let marker = (rtp_body[1] & 0x80) != 0;
-                                let pt = rtp_body[1] & 0x7f;
-                                let is_group_video = params_snapshot
-                                    .as_ref()
-                                    .is_some_and(|params| params.is_group);
-                                if is_group_video || pt == VIDEO_PT_KEY || pt == VIDEO_PT_INTER {
-                                    let mut auth_profile = (0usize, 10usize);
-                                    let profile_to_try = group_video_srtp_profile.or_else(|| {
-                                        (group_video_srtp_profile_discovery_attempts
-                                            >= GROUP_SRTP_PROFILE_DISCOVERY_LIMIT)
-                                            .then_some((0, 10))
-                                    });
-                                    if is_group_video
-                                        && group_video_srtp_profile.is_none()
-                                        && group_video_srtp_profile_discovery_attempts
-                                            < GROUP_SRTP_PROFILE_DISCOVERY_LIMIT
-                                    {
-                                        group_video_srtp_profile_discovery_attempts += 1;
-                                    }
-                                    let (decoded, fallback_key_used) = if is_share {
-                                        let tracker = video_rocs.entry(ssrc).or_default();
-                                        let decoded = read_plain_rtp_payload(rtp_body).map(
-                                            |(clear_seq, clear_ssrc, opus)| {
-                                                let roc = tracker.guess(clear_seq);
-                                                tracker.update(clear_seq, roc);
-                                                (clear_seq, clear_ssrc, roc, opus)
-                                            },
-                                        );
-                                        (decoded, false)
-                                    } else {
-                                        let mut fallback_key_used = false;
-                                        let mut decoded = None;
-                                        if let (Ok(keys), Ok(fallback)) =
-                                            (rx_keys.lock(), rx_fallback_keys.lock())
-                                        {
-                                            let tracker = video_rocs.entry(ssrc).or_default();
-                                            let seq =
-                                                u16::from_be_bytes([rtp_body[2], rtp_body[3]]);
-                                            let rocs = tracker.candidates(seq);
-                                            if let Some((
-                                                clear,
-                                                roc,
-                                                used_fallback,
-                                                mki_len,
-                                                tag_len,
-                                            )) = unprotect_group_with_candidates(
-                                                rtp_body,
-                                                keys.as_ref(),
-                                                fallback.as_ref(),
-                                                &rocs,
-                                                profile_to_try,
-                                            ) {
-                                                tracker.update(seq, roc);
-                                                decoded =
-                                                    Some((clear.seq, clear.ssrc, roc, clear.opus));
-                                                fallback_key_used = used_fallback;
-                                                auth_profile = (mki_len, tag_len);
-                                                group_video_srtp_profile = Some(auth_profile);
-                                            }
-                                            // No configured primary SRTP key means
-                                            // legacy plain-RTP mode; retain it after
-                                            // the optional session candidate fails.
-                                            if decoded.is_none() && keys.is_none() {
-                                                decoded = read_plain_rtp_payload(rtp_body).map(
-                                                    |(clear_seq, clear_ssrc, opus)| {
-                                                        let roc = tracker.guess(clear_seq);
-                                                        tracker.update(clear_seq, roc);
-                                                        (clear_seq, clear_ssrc, roc, opus)
-                                                    },
-                                                );
-                                            }
-                                        }
-                                        (decoded, fallback_key_used)
-                                    };
-                                    if let Some((clear_seq, clear_ssrc, _, data)) = decoded.as_ref()
-                                    {
-                                        rx_video_decoded = rx_video_decoded.saturating_add(1);
-                                        if is_group_video {
-                                            group_rx_video_decoded =
-                                                group_rx_video_decoded.saturating_add(1);
-                                            if !group_video_auth_reported {
-                                                media_debug(&format!(
-                                                    "group-video-auth=ok ssrc={clear_ssrc} seq={clear_seq} pt={pt} marker={marker} key_source={} mki_bytes={} tag_bytes={} payload_bytes={}",
-                                                    if fallback_key_used { "session" } else { "group" },
-                                                    auth_profile.0,
-                                                    auth_profile.1,
-                                                    data.len()
-                                                ));
-                                                group_video_auth_reported = true;
-                                            }
-                                        }
-                                    } else {
-                                        rx_video_bad = rx_video_bad.saturating_add(1);
-                                        if is_group_video {
-                                            group_rx_video_bad =
-                                                group_rx_video_bad.saturating_add(1);
-                                            if !group_video_auth_failed_reported {
-                                                // Opt-in, one-packet capture for diagnosing SFU-side
-                                                // SRTP/header mutation. Never log key material or payload by default.
-                                                if std::env::var("ZCALL_GROUP_AUTH_DUMP")
-                                                    .is_ok_and(|value| value == "1")
-                                                {
-                                                    let packet_hex = rtp_body
-                                                        .iter()
-                                                        .map(|byte| format!("{byte:02x}"))
-                                                        .collect::<String>();
-                                                    media_debug(&format!(
-                                                        "group-video-auth-dump={packet_hex}"
-                                                    ));
-                                                }
-                                                let header_len =
-                                                    parse_rtp_header_len(rtp_body).unwrap_or(0);
-                                                let header_hex = rtp_body
-                                                    .get(..header_len.min(32))
-                                                    .unwrap_or_default()
-                                                    .iter()
-                                                    .map(|byte| format!("{byte:02x}"))
-                                                    .collect::<String>();
-                                                let auth_fp = rx_keys
-                                                    .lock()
-                                                    .ok()
-                                                    .and_then(|keys| {
-                                                        keys.as_ref()
-                                                            .map(|keys| sha1(&[&keys.auth]))
-                                                    })
-                                                    .map_or_else(
-                                                        || "none".into(),
-                                                        |digest| {
-                                                            digest[..6]
-                                                                .iter()
-                                                                .map(|byte| format!("{byte:02x}"))
-                                                                .collect::<String>()
-                                                        },
-                                                    );
-                                                let auth_probe = rx_keys
-                                                    .lock()
-                                                    .ok()
-                                                    .and_then(|keys| {
-                                                        keys.as_ref().map(|keys| {
-                                                            probe_srtp_auth_layout(rtp_body, keys)
-                                                        })
-                                                    })
-                                                    .unwrap_or_else(|| "no-keys".into());
-                                                let fallback_probe = rx_fallback_keys
-                                                    .lock()
-                                                    .ok()
-                                                    .and_then(|keys| {
-                                                        keys.as_ref().map(|keys| {
-                                                            probe_srtp_auth_layout(rtp_body, keys)
-                                                        })
-                                                    })
-                                                    .unwrap_or_else(|| "no-keys".into());
-                                                let plain_h264_candidate = read_plain_rtp_payload(
-                                                    rtp_body,
-                                                )
-                                                .is_some_and(|(_, _, payload)| {
-                                                    looks_like_group_h264_payload(&payload)
-                                                });
-                                                media_debug(&format!(
-                                                    "group-video-auth=failed ssrc={ssrc} seq={} pt={pt} marker={marker} plain_h264_candidate={plain_h264_candidate} srtp_keys={} auth_fp={} auth_probe={} fallback_probe={} rtp_bytes={} rtp_header_bytes={header_len} rtp_header={header_hex}",
-                                                    u16::from_be_bytes([rtp_body[2], rtp_body[3]]),
-                                                    rx_keys.lock().is_ok_and(|keys| keys.is_some()),
-                                                    auth_fp,
-                                                    auth_probe,
-                                                    fallback_probe,
-                                                    rtp_body.len()
-                                                ));
-                                                group_video_auth_failed_reported = true;
-                                            }
-                                        }
-                                    }
-                                    if let Some((clear_seq, clear_ssrc, _roc, data)) = decoded {
-                                        rx_last_media_rx_ms.store(unix_now_ms(), Ordering::Release);
-                                        if direct {
-                                            if let Ok(mut path) = rx_p2p_path.lock() {
-                                                *path = Some(from);
-                                            }
-                                        }
-                                        let now_ms = unix_now_ms();
-                                        if let Ok(mut feedback) = rx_rtcp.lock() {
-                                            if let Some(feedback) = feedback.as_mut() {
-                                                feedback.on_rtp(true, rtp_body, now_ms);
-                                            }
-                                        }
-                                        if let Ok(mut tracker) = rx_nack.lock() {
-                                            let requests =
-                                                tracker.note(clear_ssrc, clear_seq, now_ms);
-                                            if !requests.is_empty() {
-                                                let selected = *rx_selected.lock().unwrap();
-                                                if let Some((server, token)) = selected {
-                                                    if let Some(params) =
-                                                        rx_params.lock().unwrap().clone()
-                                                    {
-                                                        for (media_ssrc, missing) in requests {
-                                                            let report = build_nack_many(
-                                                                params.uid, media_ssrc, &missing,
-                                                            );
-                                                            let packet = wrap_media_packet(
-                                                                msg_types::VIDEO_FEC,
-                                                                token,
-                                                                &report,
-                                                            );
-                                                            let _ =
-                                                                rx_socket.send_to(&packet, server);
-                                                            if let Some(peer) = rx_p2p_path
-                                                                .lock()
-                                                                .ok()
-                                                                .and_then(|path| *path)
-                                                            {
-                                                                let direct_packet = p2p::wrap(
-                                                                    !params.is_caller,
-                                                                    params.call_id,
-                                                                    p2p::VIDEO_RTCP,
-                                                                    &report,
-                                                                );
-                                                                let _ = rx_socket
-                                                                    .send_to(&direct_packet, peer);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        let is_group = is_group_video;
-                                        if is_group || pt == VIDEO_PT_KEY || pt == VIDEO_PT_INTER {
-                                            let timestamp = u32::from_be_bytes([
-                                                rtp_body[4],
-                                                rtp_body[5],
-                                                rtp_body[6],
-                                                rtp_body[7],
-                                            ]);
-                                            let is_new_video_source = is_group
-                                                && !is_share
-                                                && !video_assemblers.contains_key(&clear_ssrc);
-                                            let assembler =
-                                                video_assemblers.entry(clear_ssrc).or_insert_with(
-                                                    || VideoAssembler::with_group(is_group),
-                                                );
-                                            if is_new_video_source {
-                                                if let Ok(mut events) = rx_group_events.lock() {
-                                                    events.push_back(GroupMediaEvent::MemberVideo(
-                                                        clear_ssrc,
-                                                    ));
-                                                }
-                                            }
-                                            let frames = assembler.push_packet(
-                                                clear_seq, _roc, timestamp, &data, marker, pt,
-                                            );
-                                            if is_group
-                                                && !frames.is_empty()
-                                                && !group_video_frame_reported
-                                            {
-                                                let frame = &frames[0];
-                                                media_debug(&format!(
-                                                    "group-video-frame=assembled ssrc={clear_ssrc} frames={} key={} bytes={}",
-                                                    frames.len(),
-                                                    frame.key,
-                                                    frame.data.len()
-                                                ));
-                                                group_video_frame_reported = true;
-                                            }
-                                            let request_keyframe =
-                                                assembler.take_keyframe_request();
-                                            if request_keyframe {
-                                                let now = Instant::now();
-                                                let can_request = last_video_pli
-                                                    .get(&clear_ssrc)
-                                                    .is_none_or(|last| {
-                                                        now.duration_since(*last)
-                                                            >= Duration::from_secs(1)
-                                                    });
-                                                if can_request {
-                                                    last_video_pli.insert(clear_ssrc, now);
-                                                    let report = rx_rtcp.lock().ok().and_then(
-                                                        |mut feedback| {
-                                                            feedback.as_mut().map(|feedback| {
-                                                                feedback.pli(clear_ssrc)
-                                                            })
-                                                        },
-                                                    );
-                                                    if let Some(report) = report {
-                                                        if let Some((server, token)) =
-                                                            *rx_selected.lock().unwrap()
-                                                        {
-                                                            let packet = wrap_media_packet(
-                                                                msg_types::VIDEO_FEC,
-                                                                token,
-                                                                &report,
-                                                            );
-                                                            let _ =
-                                                                rx_socket.send_to(&packet, server);
-                                                            if let Some(peer) = rx_p2p_path
-                                                                .lock()
-                                                                .ok()
-                                                                .and_then(|path| *path)
-                                                            {
-                                                                if let Some(params) =
-                                                                    rx_params.lock().ok().and_then(
-                                                                        |params| params.clone(),
-                                                                    )
-                                                                {
-                                                                    let direct_packet = p2p::wrap(
-                                                                        !params.is_caller,
-                                                                        params.call_id,
-                                                                        p2p::VIDEO_RTCP,
-                                                                        &report,
-                                                                    );
-                                                                    let _ = rx_socket.send_to(
-                                                                        &direct_packet,
-                                                                        peer,
-                                                                    );
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            if let Ok(mut queue) = video_frames.lock() {
-                                                for mut frame in frames {
-                                                    if is_group {
-                                                        frame.src = Some(clear_ssrc);
-                                                    }
-                                                    if queue.len() >= 8 {
-                                                        queue.pop_front();
-                                                    }
-                                                    queue.push_back(frame);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        msg_types::SERVER_REPLY => {
-                            if let Some(reply) = parse_server_reply(pkt) {
-                                let selected_from = rx_selected
-                                    .lock()
-                                    .ok()
-                                    .and_then(|selected| selected.map(|(addr, _)| addr));
-                                let group_uid = rx_params.lock().ok().and_then(|params| {
-                                    params.as_ref().filter(|p| p.is_group).map(|p| p.uid)
-                                });
-                                if selected_from == Some(from) || group_uid.is_some() {
-                                    if let Some(local_uid) = group_uid {
-                                        if let Some(event) =
-                                            group_event_from_reply(&reply, local_uid)
-                                        {
-                                            if let Ok(mut events) = rx_group_events.lock() {
-                                                events.push_back(event);
-                                                while events.len() > 128 {
-                                                    events.pop_front();
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if reply.cmd == crate::protocol::zrtp::commands::CHANGE_ADDRESS
-                                    {
-                                        crate::zcall_log!(
-                                            "[zcall-rust] relay acknowledged ChangeAddress"
-                                        );
-                                    } else if reply.cmd
-                                        == crate::protocol::zrtp::commands::REQ_FORWARD
-                                        && matches!(reply.sub_cmd, 2 | 3)
-                                    {
-                                        if let Ok(mut path) = rx_p2p_path.lock() {
-                                            *path = None;
-                                        }
-                                        rx_p2p_enabled.store(reply.sub_cmd == 3, Ordering::Release);
-                                        last_p2p_rx = None;
-                                        relay_audio_streak = 0;
-                                    }
-                                    let mut selected = rx_selected.lock().unwrap();
-                                    if let Some((addr, _)) = *selected {
-                                        if addr == from {
-                                            *selected = Some((
-                                                from,
-                                                reply.server_token.unwrap_or(reply.token),
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                let recovery_now = Instant::now();
-                if recovery_now >= next_network_check {
-                    next_network_check = recovery_now + Duration::from_millis(500);
-                    let current_signature = local_ipv4_signature();
-                    let network_changed =
-                        !current_signature.is_empty() && current_signature != local_ip_sig;
-                    if !current_signature.is_empty() {
-                        local_ip_sig = current_signature;
-                    }
-
-                    let params_now = rx_params.lock().ok().and_then(|params| params.clone());
-                    let selected_now = *rx_selected.lock().unwrap();
-
-                    if network_changed {
-                        if let Some(params) = params_now.as_ref() {
-                            crate::zcall_log!(
-                                "[zcall-rust] local IPv4 changed ({}); stopping P2P and sending ChangeAddress",
-                                local_ip_sig
-                            );
-                            stop_p2p_path(
-                                &rx_socket,
-                                selected_now,
-                                &rx_p2p_path,
-                                &rx_p2p_enabled,
-                                params,
-                                true,
-                            );
-                            send_change_address(&rx_socket, selected_now, params, change_addr_seq);
-                            change_addr_seq = change_addr_seq.wrapping_add(1);
-                            change_address_retries.push_back((
-                                recovery_now + Duration::from_secs(1),
-                                "local-ip-change retry 1",
-                            ));
-                            change_address_retries.push_back((
-                                recovery_now + Duration::from_millis(2500),
-                                "local-ip-change retry 2",
-                            ));
-                            last_recovery = recovery_now;
-                        }
-                    } else if rx_p2p_path.lock().is_ok_and(|path| path.is_some())
-                        && last_p2p_rx.is_some_and(|last| {
-                            recovery_now.duration_since(last) > Duration::from_millis(2500)
-                        })
-                    {
-                        if let Some(params) = params_now.as_ref() {
-                            crate::zcall_log!(
-                                "[zcall-rust] P2P receive timed out; requesting relay fallback"
-                            );
-                            stop_p2p_path(
-                                &rx_socket,
-                                selected_now,
-                                &rx_p2p_path,
-                                &rx_p2p_enabled,
-                                params,
-                                true,
-                            );
-                            send_change_address(&rx_socket, selected_now, params, change_addr_seq);
-                            change_addr_seq = change_addr_seq.wrapping_add(1);
-                            relay_audio_streak = 0;
-                            last_recovery = recovery_now;
-                        }
-                    } else if !params_now.as_ref().is_some_and(|params| params.is_group)
-                        && recovery_now.duration_since(last_audio_rx) > Duration::from_secs(2)
-                        && recovery_now.duration_since(last_audio_rx) < Duration::from_secs(20)
-                        && recovery_now.duration_since(last_recovery) > Duration::from_millis(2500)
-                    {
-                        if let Some(params) = params_now.as_ref() {
-                            crate::zcall_log!(
-                                "[zcall-rust] audio receive stalled; requesting relay fallback and ChangeAddress"
-                            );
-                            stop_p2p_path(
-                                &rx_socket,
-                                selected_now,
-                                &rx_p2p_path,
-                                &rx_p2p_enabled,
-                                params,
-                                true,
-                            );
-                            send_change_address(&rx_socket, selected_now, params, change_addr_seq);
-                            change_addr_seq = change_addr_seq.wrapping_add(1);
-                            relay_audio_streak = 0;
-                            last_recovery = recovery_now;
-                        }
-                    }
-                }
-
-                let speaking_now = Instant::now();
-                for (uid, tracker) in &mut member_speaking {
-                    if tracker.expire(speaking_now) {
-                        if let Ok(mut events) = rx_group_events.lock() {
-                            events.push_back(GroupMediaEvent::MemberSpeaking(*uid, false));
-                        }
-                    }
-                }
-
-                while change_address_retries
-                    .front()
-                    .is_some_and(|(due, _)| recovery_now >= *due)
-                {
-                    if let Some((_, reason)) = change_address_retries.pop_front() {
-                        if let Some(params) =
-                            rx_params.lock().ok().and_then(|params| params.clone())
-                        {
-                            let selected = *rx_selected.lock().unwrap();
-                            crate::zcall_log!("[zcall-rust] sending {reason}");
-                            send_change_address(&rx_socket, selected, &params, change_addr_seq);
-                            change_addr_seq = change_addr_seq.wrapping_add(1);
-                        }
-                    }
-                }
-
-                let summary_mode = rx_params.lock().ok().and_then(|params| {
-                    params.as_ref().map(|params| {
-                        if params.is_group {
-                            "group"
-                        } else {
-                            "one-to-one"
-                        }
-                    })
-                });
-                if let Some(mode) = summary_mode {
-                    if group_rx_last_summary.elapsed() >= Duration::from_secs(5) {
-                        media_debug(&format!(
-                            "summary mode={mode} rx_video={} decoded_video={} bad_video={} tx_video={} tx_audio={} rx_audio_delivered={} group_rx_audio={} group_decoded_audio={} group_bad_audio={} group_rx_video={} group_decoded_video={} group_bad_video={} other_host={} same_host_alt_port={} last_video_tx_ms={}",
-                            rx_video_packets,
-                            rx_video_decoded,
-                            rx_video_bad,
-                            rx_tx_video_packets.load(Ordering::Relaxed),
-                            rx_tx_audio_packets.load(Ordering::Relaxed),
-                            rx_audio_packets.load(Ordering::Relaxed),
-                            group_rx_audio_packets,
-                            group_rx_audio_decoded,
-                            group_rx_audio_bad,
-                            group_rx_video_packets,
-                            group_rx_video_decoded,
-                            group_rx_video_bad,
-                            group_rx_other_host,
-                            group_rx_alt_port,
-                            rx_last_video_sent_ms.load(Ordering::Relaxed)
-                        ));
-                        group_rx_last_summary = Instant::now();
-                    }
-                }
-
-                if let Ok(mut tracker) = rx_nack.lock() {
-                    let requests = tracker.poll(unix_now_ms());
-                    if !requests.is_empty() {
-                        let selected = *rx_selected.lock().unwrap();
-                        if let Some((server, token)) = selected {
-                            let local_uid = rx_params
-                                .lock()
-                                .unwrap()
-                                .as_ref()
-                                .map_or_default(|params| params.uid);
-                            for (ssrc, missing) in requests {
-                                let report = build_nack_many(local_uid, ssrc, &missing);
-                                let packet =
-                                    wrap_media_packet(msg_types::VIDEO_FEC, token, &report);
-                                let _ = rx_socket.send_to(&packet, server);
-                                if let Some(peer) = rx_p2p_path.lock().ok().and_then(|path| *path) {
-                                    let params = rx_params.lock().unwrap().clone();
-                                    if let Some(params) = params {
-                                        let direct_packet = p2p::wrap(
-                                            !params.is_caller,
-                                            params.call_id,
-                                            p2p::VIDEO_RTCP,
-                                            &report,
-                                        );
-                                        let _ = rx_socket.send_to(&direct_packet, peer);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        // Audio recording & transmit thread
-        let tx_running = running;
-        let tx_audio_packets = self.tx_audio_packets.clone();
-        let tx_socket = socket;
-        let tx_keys = keys;
-        let tx_params = params;
-        let tx_selected = selected_server;
-        let tx_muted = muted;
-        let tx_twcc = self.twcc_seq.clone();
-        let tx_devices = self.devices.clone();
-        let tx_device_generation = self.device_generation.clone();
-        let tx_rtcp = self.rtcp.clone();
-        let tx_p2p_path = self.p2p_path.clone();
-        let tx_rate = self.send_rate.clone();
-        let tx_last_video = self.last_video_sent_ms.clone();
-        let tx_pending_profile = self.pending_video_profile.clone();
-        let tx_apm = apm;
-        let tx_far_active = far_active;
-        let tx_mic_volume = self.mic_volume.clone();
-        let tx_mic_volume_dirty = self.mic_volume_dirty.clone();
-        let tx_mic_manual = self.mic_manual.clone();
-        let tx_pending_mic_volume = self.pending_mic_volume.clone();
-        let tx_mic_level = self.mic_level.clone();
-        let tx_mic_level_dirty = self.mic_level_dirty.clone();
-        let tx_audio_enabled = self.audio_enabled.clone();
-        let tx_media_events = self.group_events.clone();
-
-        thread::spawn(move || {
-            let mut recorder: Option<PulseRecorder> = None;
-            let mut mic_fault_reported = false;
-            let initial_microphone = tx_devices.lock().map_or(None, |devices| devices.0.clone());
-            let mut clip_guard = ClipGuard::new(initial_microphone.clone(), tx_mic_volume.clone())
-                .with_controls(Some(tx_far_active.clone()), tx_mic_manual.clone());
-            clip_guard.initialize_device();
-            let mut guard_device = initial_microphone;
-            let mut leveler = MicLeveler::new(Some(tx_far_active.clone()));
-            let mic_gain_enabled =
-                std::env::var("ZCALL_MIC_GAIN").map_or(true, |value| value != "0");
-            let mut last_volume_reported = tx_mic_volume.load(Ordering::Relaxed);
-            let mut active_device_generation = u64::MAX;
-            let mut last_mic_reopen = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
-            let mut last_level_at = Instant::now()
-                .checked_sub(Duration::from_millis(100))
-                .unwrap();
-            let mut encoder = match OpusEncoder::new(SAMPLE_RATE as i32, 1, 32000) {
-                Ok(encoder) => Some(encoder),
-                Err(err) => {
-                    crate::zcall_log!("[zcall-rust] Opus encoder unavailable: {err}");
-                    None
-                }
+            let worker = ReceiveWorker {
+                rx_running,
+                rx_audio_packets,
+                rx_socket,
+                rx_keys,
+                rx_fallback_keys,
+                rx_selected,
+                video_frames,
+                rx_params,
+                rx_rtcp,
+                rx_nack,
+                rx_keyframe_request,
+                rx_p2p_path,
+                rx_p2p_enabled,
+                rx_video_history,
+                rx_group_events,
+                rx_share_peer,
+                rx_remote_share_uid,
+                rx_send_rate,
+                rx_last_media_rx_ms,
+                rx_audio_enabled,
+                rx_tx_audio_packets,
+                rx_last_video_sent_ms,
+                rx_tx_video_packets,
+                rx_jitter_buffer: jitter_buffer,
+                rx_group_audio: group_audio,
+                video_assemblers: HashMap::new(),
+                audio_roc: RocTracker::default(),
+                video_rocs: HashMap::new(),
+                last_video_pli: HashMap::new(),
+                audio_dedup: AudioDeduplicator::new(256),
+                member_audio_seen: HashSet::new(),
+                member_speaking: HashMap::new(),
+                last_audio_rx: Instant::now(),
+                last_p2p_rx: None,
+                last_recovery: Instant::now().checked_sub(Duration::from_secs(3)).unwrap(),
+                local_ip_sig: local_ipv4_signature(),
+                next_network_check: Instant::now() + Duration::from_millis(250),
+                change_address_retries: VecDeque::new(),
+                change_addr_seq: 0,
+                relay_audio_streak: 0,
+                rx_audio_second: 0,
+                early_audio_rx_count: 0,
+                group_rx_audio_packets: 0,
+                group_rx_video_packets: 0,
+                group_rx_audio_decoded: 0,
+                group_rx_video_decoded: 0,
+                group_rx_audio_bad: 0,
+                group_rx_video_bad: 0,
+                rx_video_packets: 0,
+                rx_video_decoded: 0,
+                rx_video_bad: 0,
+                rx_video_first: 0,
+                group_rx_other_host: 0,
+                group_rx_alt_port: 0,
+                group_rx_last_summary: Instant::now(),
+                group_rx_audio_first: 0,
+                group_rx_video_first: 0,
+                group_audio_srtp_profile: None,
+                group_video_srtp_profile: None,
+                group_audio_srtp_profile_discovery_attempts: 0,
+                group_video_srtp_profile_discovery_attempts: 0,
+                audio_auth: AudioAuthDiagnostics::default(),
+                video_auth: VideoAuthDiagnostics::default(),
             };
-            let mut opus_buf = vec![0u8; 1024];
-            let mut pcm_buf = vec![0u8; FRAME_BYTES];
-
-            let mut seq: u16 = 0;
-            let mut audio_roc: u32 = 0;
-            let mut ts: u32 = 0;
-            let mut ping_seq: u32 = 0;
-            let mut last_twcc = Instant::now();
-            let mut last_report = Instant::now();
-            let mut audio_packets = 0u32;
-            let mut audio_octets = 0u32;
-
-            while tx_running.load(Ordering::Relaxed) {
-                if let Ok(mut pending) = tx_pending_mic_volume.lock() {
-                    if let Some(percent) = pending.take() {
-                        if percent > 0 {
-                            let _ = set_source_mute(guard_device.as_deref(), false);
-                            pulse_normalize_own_stream();
-                        }
-                        clip_guard.mark_manual_write();
-                        if set_source_volume(guard_device.as_deref(), percent).is_ok() {
-                            let actual = get_source_volume(guard_device.as_deref())
-                                .map_or(percent, |value| value.min(100));
-                            tx_mic_volume.store(actual, Ordering::Relaxed);
-                            crate::zcall_log!("[zcall-rust] mic volume: {actual}%");
-                        } else {
-                            tx_mic_volume.store(percent, Ordering::Relaxed);
-                            crate::zcall_log!(
-                                "[zcall-rust] warning: failed to apply manual mic volume"
-                            );
-                        }
-                        last_volume_reported = tx_mic_volume.load(Ordering::Relaxed);
-                        tx_mic_volume_dirty.store(true, Ordering::Release);
-                    }
-                }
-
-                let device_generation = tx_device_generation.load(Ordering::Acquire);
-                if device_generation != active_device_generation {
-                    let microphone = tx_devices.lock().map_or(None, |devices| devices.0.clone());
-                    let audio_enabled = tx_audio_enabled.load(Ordering::Acquire);
-                    let switch_result = if audio_enabled {
-                        PulseRecorder::new(microphone.as_deref()).map(Some)
-                    } else if pulse_get_source_info(microphone.as_deref()).is_some() {
-                        Ok(None)
-                    } else {
-                        Err("selected microphone source could not be resolved".to_owned())
-                    };
-
-                    match switch_result {
-                        Ok(new_recorder) => {
-                            recorder = new_recorder;
-                            if audio_enabled {
-                                // The capture stream must exist before normalizing its
-                                // source-output volume/mute state in PulseAudio/PipeWire.
-                                pulse_normalize_own_stream();
-                            }
-                            if microphone != guard_device {
-                                clip_guard.set_device(microphone.clone());
-                                clip_guard.initialize_device();
-                                guard_device = microphone;
-                                tx_mic_manual.store(false, Ordering::Release);
-                                leveler = MicLeveler::new(Some(tx_far_active.clone()));
-                                last_volume_reported = tx_mic_volume.load(Ordering::Relaxed);
-                                tx_mic_volume_dirty.store(true, Ordering::Release);
-                            }
-                            mic_fault_reported = false;
-                        }
-                        Err(error) => {
-                            crate::zcall_log!(
-                                "[zcall-rust] microphone switch rejected; keeping previous device: {error}"
-                            );
-                            // Roll back the requested selection as well as retaining the
-                            // previous recorder and ClipGuard target.
-                            if let Ok(mut devices) = tx_devices.lock() {
-                                devices.0 = guard_device.clone();
-                            }
-                            if !mic_fault_reported {
-                                if let Ok(mut events) = tx_media_events.lock() {
-                                    events.push_back(GroupMediaEvent::AudioFault("mic".into()));
-                                }
-                                mic_fault_reported = true;
-                            }
-                        }
-                    }
-                    active_device_generation = device_generation;
-                    last_mic_reopen = Instant::now();
-                }
-                if recorder.is_none()
-                    && tx_audio_enabled.load(Ordering::Acquire)
-                    && last_mic_reopen.elapsed() >= Duration::from_millis(500)
-                {
-                    last_mic_reopen = Instant::now();
-                    let microphone = tx_devices.lock().map_or(None, |devices| devices.0.clone());
-                    match PulseRecorder::new(microphone.as_deref()) {
-                        Ok(reopened) => {
-                            crate::zcall_log!("[zcall-rust] Pulse microphone stream recovered");
-                            recorder = Some(reopened);
-                            pulse_normalize_own_stream();
-                        }
-                        Err(error) => {
-                            if !mic_fault_reported {
-                                if let Ok(mut events) = tx_media_events.lock() {
-                                    events.push_back(GroupMediaEvent::AudioFault("mic".into()));
-                                }
-                                mic_fault_reported = true;
-                            }
-                            crate::zcall_log!(
-                                "[zcall-rust] Pulse microphone reopen failed: {error}"
-                            );
-                        }
-                    }
-                }
-                if clip_guard.sync_os_volume() {
-                    if let Ok(reopened) = PulseRecorder::new(None) {
-                        recorder = Some(reopened);
-                        pulse_normalize_own_stream();
-                        clip_guard.initialize_device();
-                        leveler = MicLeveler::new(Some(tx_far_active.clone()));
-                        last_volume_reported = tx_mic_volume.load(Ordering::Relaxed);
-                        tx_mic_volume_dirty.store(true, Ordering::Release);
-                    }
-                }
-
-                // Read 20 ms PCM from mic
-                let mut recorder_failed = false;
-                if let Some(ref mut r) = recorder {
-                    if r.read(&mut pcm_buf).is_ok() {
-                        let mut pcm_s16: Vec<i16> = pcm_buf
-                            .as_chunks::<2>()
-                            .0
-                            .iter()
-                            .map(|pair| i16::from_le_bytes(*pair))
-                            .collect();
-                        if tx_muted.load(Ordering::Relaxed) || clip_guard.is_os_muted() {
-                            pcm_s16.fill(0);
-                        } else {
-                            // ClipGuard measures unprocessed hardware PCM before APM.
-                            clip_guard.feed(&pcm_s16);
-                            if let Some(apm) = tx_apm.as_ref() {
-                                apm.process_capture(&mut pcm_s16);
-                            }
-                            if mic_gain_enabled {
-                                leveler.process(&mut pcm_s16);
-                            }
-                        }
-                        apply_soft_limiter(&mut pcm_s16);
-
-                        let level = compute_rfc6464_level(&pcm_s16);
-                        if last_level_at.elapsed() >= Duration::from_millis(100) {
-                            tx_mic_level.store(level, Ordering::Relaxed);
-                            tx_mic_level_dirty.store(true, Ordering::Release);
-                            last_level_at = Instant::now();
-                        }
-                        let current_volume = tx_mic_volume.load(Ordering::Relaxed);
-                        if current_volume != last_volume_reported {
-                            last_volume_reported = current_volume;
-                            tx_mic_volume_dirty.store(true, Ordering::Release);
-                        }
-
-                        if let Some(ref mut enc) = encoder {
-                            if let Ok(encoded_len) = enc.encode(&pcm_s16, &mut opus_buf) {
-                                let opus_data = &opus_buf[..encoded_len];
-
-                                let (server_opt, p_opt, k_opt) = {
-                                    let s = *tx_selected.lock().unwrap();
-                                    let p = tx_params.lock().unwrap().as_ref().map(|p| {
-                                        (p.uid, p.send_udp, p.call_id, p.is_caller, p.is_group)
-                                    });
-                                    let k = tx_keys
-                                        .lock()
-                                        .unwrap()
-                                        .as_ref()
-                                        .map(|k| (k.enc, k.auth, k.salt));
-                                    (s, p, k)
-                                };
-
-                                if let (
-                                    Some((server, token)),
-                                    Some((uid, send_udp, call_id, is_caller, is_group)),
-                                ) = (server_opt, p_opt)
-                                {
-                                    if send_udp && (is_group || k_opt.is_some()) {
-                                        let tw_seq = tx_twcc.fetch_add(1, Ordering::Relaxed);
-                                        if let Ok(mut controller) = tx_rate.lock() {
-                                            if let Some(controller) = controller.as_mut() {
-                                                controller.on_sent(tw_seq, unix_now_ms());
-                                            }
-                                        }
-                                        let rtp_header = if is_group {
-                                            build_group_audio_rtp_header(
-                                                seq,
-                                                ts,
-                                                uid,
-                                                tw_seq,
-                                                false,
-                                                112,
-                                                unix_now_ms(),
-                                                level,
-                                            )
-                                        } else {
-                                            build_audio_rtp_header(seq, ts, uid, tw_seq, false, 112)
-                                                .to_vec()
-                                        };
-                                        let media_payload =
-                                            if let Some((enc_k, auth_k, salt_k)) = k_opt {
-                                                let keys = SrtpKeys {
-                                                    enc: enc_k,
-                                                    auth: auth_k,
-                                                    salt: salt_k,
-                                                };
-                                                protect_rtp(
-                                                    &rtp_header,
-                                                    opus_data,
-                                                    &keys,
-                                                    seq,
-                                                    uid,
-                                                    audio_roc,
-                                                )
-                                            } else {
-                                                let mut plain = rtp_header;
-                                                plain.extend_from_slice(opus_data);
-                                                plain
-                                            };
-                                        let media_pkt = wrap_media_packet(
-                                            msg_types::AUDIO_RTP,
-                                            token,
-                                            &media_payload,
-                                        );
-                                        let _ = tx_socket.send_to(&media_pkt, server);
-                                        if !is_group {
-                                            if let Some(peer) =
-                                                tx_p2p_path.lock().ok().and_then(|path| *path)
-                                            {
-                                                let direct = p2p::wrap(
-                                                    !is_caller,
-                                                    call_id,
-                                                    p2p::AUDIO,
-                                                    &media_payload,
-                                                );
-                                                let _ = tx_socket.send_to(&direct, peer);
-                                            }
-                                        }
-                                        audio_packets = audio_packets.wrapping_add(1);
-                                        tx_audio_packets.fetch_add(1, Ordering::Relaxed);
-                                        audio_octets =
-                                            audio_octets.wrapping_add(encoded_len as u32);
-                                        seq = seq.wrapping_add(1);
-                                        if seq == 0 {
-                                            audio_roc = audio_roc.wrapping_add(1);
-                                        }
-                                        ts = ts.wrapping_add(320);
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        if !mic_fault_reported {
-                            if let Ok(mut events) = tx_media_events.lock() {
-                                events.push_back(GroupMediaEvent::AudioFault("mic".into()));
-                            }
-                            mic_fault_reported = true;
-                        }
-                        recorder_failed = true;
-                        thread::sleep(Duration::from_millis(5));
-                    }
-                } else {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                if recorder_failed {
-                    recorder = None;
-                    last_mic_reopen = Instant::now();
-                }
-
-                // Zalo's send-side bandwidth estimator depends on regular
-                // transport-wide feedback. Audio RTCP carries TWCC + SR + SDES;
-                // video RTCP carries RR + SDES when we have received video.
-                if last_twcc.elapsed() >= Duration::from_millis(50) {
-                    last_twcc = Instant::now();
-                    let selected = *tx_selected.lock().unwrap();
-                    if let Some((server, token)) = selected {
-                        let reports = tx_rtcp
-                            .lock()
-                            .ok()
-                            .and_then(|mut feedback| {
-                                feedback.as_mut().map(RtcpFeedback::twcc_packets)
-                            })
-                            .unwrap_or_default();
-                        for report in reports {
-                            let packet = wrap_media_packet(msg_types::AUDIO_FEC, token, &report);
-                            let _ = tx_socket.send_to(&packet, server);
-                            if let Some(peer) = tx_p2p_path.lock().ok().and_then(|path| *path) {
-                                if let Some(params) =
-                                    tx_params.lock().ok().and_then(|params| params.clone())
-                                {
-                                    let direct = p2p::wrap(
-                                        !params.is_caller,
-                                        params.call_id,
-                                        p2p::AUDIO_RTCP,
-                                        &report,
-                                    );
-                                    let _ = tx_socket.send_to(&direct, peer);
-                                }
-                            }
-                        }
-                    }
-                }
-                if last_report.elapsed() >= Duration::from_secs(1) {
-                    last_report = Instant::now();
-                    let selected = *tx_selected.lock().unwrap();
-                    if let Some((server, token)) = selected {
-                        let reports = tx_rtcp.lock().ok().and_then(|mut feedback| {
-                            let feedback = feedback.as_mut()?;
-                            let now = unix_now_ms();
-                            let downlink_loss = feedback.downlink_audio_loss();
-                            let audio = feedback.audio_report(now, ts, audio_packets, audio_octets);
-                            let video = feedback.video_report(now);
-                            Some((audio, video, downlink_loss))
-                        });
-                        if let Some((audio_report, video_report, downlink_loss)) = reports {
-                            let now = unix_now_ms();
-                            let sending_video =
-                                now.saturating_sub(tx_last_video.load(Ordering::Relaxed)) < 1_500;
-                            let changed = tx_rate.lock().ok().and_then(|mut controller| {
-                                controller.as_mut().and_then(|controller| {
-                                    controller.tick(now, sending_video, downlink_loss)
-                                })
-                            });
-                            if let Some(profile) = changed {
-                                if let Ok(mut pending) = tx_pending_profile.lock() {
-                                    *pending = Some(profile);
-                                }
-                            }
-                            let packet =
-                                wrap_media_packet(msg_types::AUDIO_FEC, token, &audio_report);
-                            let _ = tx_socket.send_to(&packet, server);
-                            if let Some(peer) = tx_p2p_path.lock().ok().and_then(|path| *path) {
-                                if let Some(params) =
-                                    tx_params.lock().ok().and_then(|params| params.clone())
-                                {
-                                    let direct = p2p::wrap(
-                                        !params.is_caller,
-                                        params.call_id,
-                                        p2p::AUDIO_RTCP,
-                                        &audio_report,
-                                    );
-                                    let _ = tx_socket.send_to(&direct, peer);
-                                }
-                            }
-                            if let Some(video_report) = video_report {
-                                let packet =
-                                    wrap_media_packet(msg_types::VIDEO_FEC, token, &video_report);
-                                let _ = tx_socket.send_to(&packet, server);
-                                if let Some(peer) = tx_p2p_path.lock().ok().and_then(|path| *path) {
-                                    if let Some(params) =
-                                        tx_params.lock().ok().and_then(|params| params.clone())
-                                    {
-                                        let direct = p2p::wrap(
-                                            !params.is_caller,
-                                            params.call_id,
-                                            p2p::VIDEO_RTCP,
-                                            &video_report,
-                                        );
-                                        let _ = tx_socket.send_to(&direct, peer);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Send 6-second keepalive ping
-                if last_ping.lock().unwrap().elapsed() >= Duration::from_secs(6) {
-                    *last_ping.lock().unwrap() = Instant::now();
-                    let (server_opt, p_opt) = {
-                        let s = *tx_selected.lock().unwrap();
-                        let p = tx_params
-                            .lock()
-                            .unwrap()
-                            .as_ref()
-                            .map(|p| (p.uid, p.sess_id.clone(), p.is_group, p.video_enabled));
-                        (s, p)
-                    };
-                    if let (Some((server, token)), Some((uid, sess_id, is_group, video_on))) =
-                        (server_opt, p_opt)
-                    {
-                        let ping_pkt = if is_group {
-                            let group_camera_enabled = !std::env::var("ZCALL_GROUP_CAMERA")
-                                .is_ok_and(|value| value == "0");
-                            // The camera state is independent of SRTP mode. The
-                            // encrypted group path still sends camera RTP; gating
-                            // this bit on `group_plain` made the SFU advertise us
-                            // as camera-off while packets were being transmitted.
-                            let ping_video_on =
-                                group_camera_advertised(video_on, group_camera_enabled);
-                            let seq = next_group_control_sequence(&tx_group_control_seq);
-                            media_debug(&format!(
-                                "periodic-zavi-ping seq={seq} video_on={ping_video_on}"
-                            ));
-                            build_zavi_ping_packet(uid, token, seq, &sess_id, ping_video_on)
-                        } else {
-                            ping_seq = ping_seq.wrapping_add(1);
-                            build_ping_packet(uid, token, ping_seq, &sess_id)
-                        };
-                        let _ = tx_socket.send_to(&ping_pkt, server);
-
-                        if is_group {
-                            let plan = tx_group_plan.lock().ok().and_then(|plan| plan.clone());
-                            if let Some(plan) = plan.filter(|plan| !plan.send.is_empty()) {
-                                let seq = next_group_control_sequence(&tx_group_control_seq);
-                                let packet =
-                                    build_group_video_quality_config(uid, token, seq, &plan.send);
-                                let _ = tx_socket.send_to(&packet, server);
-                            }
-                            let entries = tx_group_wanted.lock().map_or_default(|wanted| {
-                                wanted
-                                    .iter()
-                                    .map(|(uid, quality_id)| GroupVideoQualityRequest {
-                                        uid: *uid,
-                                        quality_id: if std::env::var("ZCALL_GROUP_QUALITY")
-                                            .is_ok_and(|value| value == "0")
-                                        {
-                                            0xff
-                                        } else {
-                                            *quality_id
-                                        },
-                                    })
-                                    .collect::<Vec<_>>()
-                            });
-                            if !entries.is_empty() {
-                                let seq = next_group_control_sequence(&tx_group_control_seq);
-                                let packet =
-                                    build_group_video_quality_request(uid, token, seq, &entries);
-                                let _ = tx_socket.send_to(&packet, server);
-                            }
-                        }
-                    }
-                }
-            }
+            worker.run();
         });
     }
 
@@ -3501,7 +4220,7 @@ impl ZrtcMediaBackend {
         };
         for (server, token) in servers {
             let packet = if selected == Some((server, token)) {
-                if params.is_group {
+                if params.kind == MediaKind::Group {
                     // The group SFU expects its dedicated ZaviPing control
                     // message immediately after InitZRTP. The legacy
                     // _sendPing() never used the one-to-one PING command here.
@@ -3518,7 +4237,7 @@ impl ZrtcMediaBackend {
             };
             let _ = self.socket.send_to(&packet, server);
         }
-        if params.is_group {
+        if params.kind == MediaKind::Group {
             if let Ok(mut last_ping) = self.last_ping.lock() {
                 *last_ping = Instant::now();
             }
@@ -3576,57 +4295,18 @@ impl ZrtcMediaBackend {
     /// Send one encoded H.264 Annex-B frame through the active relay. Group
     /// calls use the SFU RTP extension and plain RTP when the negotiated group
     /// session has no SRTP key, matching the existing Zalo group transport.
-    pub fn send_video_frame(&self, key: bool, annex_b: &[u8]) -> Result<usize, String> {
-        if !self.running.load(Ordering::Relaxed) || annex_b.is_empty() {
-            if key && !annex_b.is_empty() {
-                media_debug("video keyframe dropped: media backend is not running");
-            }
-            return Ok(0);
-        }
-        let params_guard = self.params.lock().map_err(|e| e.to_string())?;
-        let params = params_guard.as_ref().ok_or("no active media session")?;
-        if !params.video_enabled {
-            if key {
-                media_debug("video keyframe dropped: media session video_enabled=false");
-            }
-            return Ok(0);
-        }
-        let (server, token) = self
-            .selected_server
-            .lock()
-            .map_err(|e| e.to_string())?
-            .ok_or("no selected media relay")?;
-        let keys_guard = self.keys.lock().map_err(|e| e.to_string())?;
-        let keys = keys_guard.as_ref();
-        if params.is_group && !params.video_enabled {
-            return Ok(0);
-        }
-        let group_plain = params.is_group
-            && keys.is_none()
-            && !std::env::var("ZCALL_GROUP_CAMERA").is_ok_and(|value| value == "0");
-        if keys.is_none() && !group_plain {
-            if key {
-                media_debug("video keyframe dropped: SRTP keys are not ready");
-            }
-            return Ok(0);
-        }
-        let plan = if params.is_group {
-            self.group_video_plan
-                .lock()
-                .map_err(|e| e.to_string())?
-                .clone()
-        } else {
-            None
-        };
-        let chunks = packetize_frame(annex_b, 1068);
-        let mut state = self.video_tx.lock().map_err(|e| e.to_string())?;
-        if !key && !state.key_sent {
-            self.local_keyframe_request.store(true, Ordering::Release);
-            return Ok(0);
-        }
-        if key {
-            state.key_sent = true;
-        }
+    fn send_video_chunks(&self, context: VideoTxContext<'_>) -> Result<usize, String> {
+        let VideoTxContext {
+            params,
+            server,
+            token,
+            keys,
+            group_plain,
+            plan,
+            chunks,
+            key,
+            state,
+        } = context;
         let started = *state.started_at.get_or_insert_with(Instant::now);
         let timestamp = started.elapsed().as_millis().saturating_mul(90) as u32;
         let capture_ms = unix_now_ms();
@@ -3645,44 +4325,20 @@ impl ZrtcMediaBackend {
                     controller.on_sent(twcc, capture_ms);
                 }
             }
-            let header = if group_plain {
-                if let Some(plan) = plan.as_ref().filter(|plan| plan.sfu_id.is_some()) {
-                    state.layer_seq = state.layer_seq.wrapping_add(1);
-                    build_group_video_rtp_header(
-                        seq,
-                        timestamp,
-                        params.uid,
-                        twcc,
-                        index + 1 == chunks.len(),
-                        payload_type,
-                        plan.sfu_long,
-                        plan.sfu_id.unwrap_or(0),
-                        state.layer_seq,
-                        capture_ms,
-                        unix_now_ms(),
-                    )
-                } else {
-                    build_audio_rtp_header(
-                        seq,
-                        timestamp,
-                        params.uid,
-                        twcc,
-                        index + 1 == chunks.len(),
-                        payload_type,
-                    )
-                    .to_vec()
-                }
-            } else {
-                build_audio_rtp_header(
-                    seq,
-                    timestamp,
-                    params.uid,
-                    twcc,
-                    index + 1 == chunks.len(),
+            let header = build_video_rtp_header(
+                VideoHeaderContext {
+                    params,
+                    group_plain,
+                    plan,
                     payload_type,
-                )
-                .to_vec()
-            };
+                    capture_ms,
+                },
+                seq,
+                timestamp,
+                twcc,
+                index + 1 == chunks.len(),
+                &mut state.layer_seq,
+            );
             let packet_payload = if group_plain {
                 let mut payload = header;
                 payload.extend_from_slice(chunk);
@@ -3712,7 +4368,7 @@ impl ZrtcMediaBackend {
             if video_packet_count == 1 {
                 media_debug(&format!(
                     "tx-video-first mode={} key={} rtp_bytes={} packet_type={}",
-                    if params.is_group {
+                    if params.kind == MediaKind::Group {
                         "group"
                     } else {
                         "one-to-one"
@@ -3722,10 +4378,10 @@ impl ZrtcMediaBackend {
                     msg_types::VIDEO_RTP
                 ));
             }
-            if !params.is_group {
+            if params.kind != MediaKind::Group {
                 if let Some(peer) = self.p2p_path.lock().ok().and_then(|path| *path) {
                     let direct = p2p::wrap(
-                        !params.is_caller,
+                        params.role == MediaRole::Callee,
                         params.call_id,
                         p2p::VIDEO,
                         &packet_payload,
@@ -3741,6 +4397,70 @@ impl ZrtcMediaBackend {
             }
         }
         Ok(sent)
+    }
+
+    pub fn send_video_frame(&self, key: bool, annex_b: &[u8]) -> Result<usize, String> {
+        if !self.running.load(Ordering::Relaxed) || annex_b.is_empty() {
+            if key && !annex_b.is_empty() {
+                media_debug("video keyframe dropped: media backend is not running");
+            }
+            return Ok(0);
+        }
+        let params_guard = self.params.lock().map_err(|e| e.to_string())?;
+        let params = params_guard.as_ref().ok_or("no active media session")?;
+        if !params.video_enabled {
+            if key {
+                media_debug("video keyframe dropped: media session video_enabled=false");
+            }
+            return Ok(0);
+        }
+        let (server, token) = self
+            .selected_server
+            .lock()
+            .map_err(|e| e.to_string())?
+            .ok_or("no selected media relay")?;
+        let keys_guard = self.keys.lock().map_err(|e| e.to_string())?;
+        let keys = keys_guard.as_ref();
+        if params.kind == MediaKind::Group && !params.video_enabled {
+            return Ok(0);
+        }
+        let group_plain = params.kind == MediaKind::Group
+            && keys.is_none()
+            && !std::env::var("ZCALL_GROUP_CAMERA").is_ok_and(|value| value == "0");
+        if keys.is_none() && !group_plain {
+            if key {
+                media_debug("video keyframe dropped: SRTP keys are not ready");
+            }
+            return Ok(0);
+        }
+        let plan = if params.kind == MediaKind::Group {
+            self.group_video_plan
+                .lock()
+                .map_err(|e| e.to_string())?
+                .clone()
+        } else {
+            None
+        };
+        let chunks = packetize_frame(annex_b, 1068);
+        let mut state = self.video_tx.lock().map_err(|e| e.to_string())?;
+        if !key && !state.key_sent {
+            self.local_keyframe_request.store(true, Ordering::Release);
+            return Ok(0);
+        }
+        if key {
+            state.key_sent = true;
+        }
+        self.send_video_chunks(VideoTxContext {
+            params,
+            server,
+            token,
+            keys,
+            group_plain,
+            plan: plan.as_ref(),
+            chunks: &chunks,
+            key,
+            state: &mut state,
+        })
     }
 
     pub fn video_profile(&self) -> Option<VideoProfile> {
@@ -3771,7 +4491,7 @@ impl ZrtcMediaBackend {
         let Some(params) = params.as_mut() else {
             return Ok(());
         };
-        if params.is_group {
+        if params.kind == MediaKind::Group {
             params.video_enabled = on;
         }
         Ok(())
@@ -3785,7 +4505,7 @@ impl ZrtcMediaBackend {
             .map_err(|e| e.to_string())?
             .clone()
             .ok_or("no active media session")?;
-        if !params.is_group {
+        if params.kind != MediaKind::Group {
             return Ok(false);
         }
         let Some(plan) = self
@@ -3818,7 +4538,7 @@ impl ZrtcMediaBackend {
             .map_err(|e| e.to_string())?
             .clone()
             .ok_or("no active media session")?;
-        if !params.is_group || uid == 0 || uid == params.uid {
+        if params.kind != MediaKind::Group || uid == 0 || uid == params.uid {
             return Ok(false);
         }
         let width = self
@@ -3888,7 +4608,10 @@ impl ZrtcMediaBackend {
             .map_err(|e| e.to_string())?
             .clone()
             .ok_or("no active media session")?;
-        if !params.is_group || !params.send_udp || !self.running.load(Ordering::Acquire) {
+        if params.kind != MediaKind::Group
+            || !params.send_udp
+            || !self.running.load(Ordering::Acquire)
+        {
             return Err("group screen share requires an active UDP group call".into());
         }
         let (server, _) = self
@@ -3960,7 +4683,14 @@ impl ZrtcMediaBackend {
         thread::Builder::new()
             .name("zcall-group-share".into())
             .spawn(move || {
-                group_share_worker(socket, share_state, share_events, running, active, init);
+                group_share_worker(
+                    &socket,
+                    &share_state,
+                    &share_events,
+                    &running,
+                    &active,
+                    &init,
+                );
             })
             .map_err(|error| {
                 self.stop_group_share();
@@ -4160,7 +4890,12 @@ impl ZrtcMediaBackend {
             .map_err(|error| format!("send RTCP PLI failed: {error}"))?;
         if let Some(peer) = self.p2p_path.lock().ok().and_then(|path| *path) {
             if let Some(params) = self.params.lock().ok().and_then(|params| params.clone()) {
-                let direct = p2p::wrap(!params.is_caller, params.call_id, p2p::VIDEO_RTCP, &report);
+                let direct = p2p::wrap(
+                    params.role == MediaRole::Callee,
+                    params.call_id,
+                    p2p::VIDEO_RTCP,
+                    &report,
+                );
                 let _ = self.socket.send_to(&direct, peer);
             }
         }

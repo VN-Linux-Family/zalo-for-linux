@@ -181,29 +181,12 @@ fn number(value: Option<&serde_json::Value>) -> Option<f64> {
     })
 }
 
-/// Port of the legacy `groupVideoPlan()` calculation. Invalid/empty spatial
-/// layer tables are not advertised to the SFU.
-#[must_use]
-pub fn group_video_plan(config: &serde_json::Value) -> Option<GroupVideoPlan> {
-    let group = config.get("groupcall")?;
-    let spatial_layers = group.get("spatialLayers")?.as_array()?;
-    let temporal = number(group.get("temporalNum"))? as i64;
-    if !(1..=8).contains(&temporal) {
-        return None;
-    }
-    let max_width = number(config.get("maxWidth"))
-        .filter(|value| *value > 0.0)
-        .unwrap_or(1280.0)
-        .trunc();
-    let max_height = number(config.get("maxHeight"))
-        .filter(|value| *value > 0.0)
-        .unwrap_or(720.0)
-        .trunc();
-    let keyframe_interval_ms = number(config.get("keyFrameIntervalMs"))
-        .filter(|value| *value > 0.0)
-        .unwrap_or(1000.0)
-        .trunc() as u64;
-
+fn parse_spatial_layers(
+    spatial_layers: &[serde_json::Value],
+    max_width: f64,
+    max_height: f64,
+    temporal: i64,
+) -> (Vec<GroupVideoLayer>, Vec<(GroupVideoLayer, u32)>) {
     let mut layers = Vec::new();
     let mut rows = Vec::new();
     let mut spatial_index = 0u8;
@@ -219,9 +202,8 @@ pub fn group_video_plan(config: &serde_json::Value) -> Option<GroupVideoPlan> {
         };
         let denominator = (factor_den.trunc() as i64 & 0xff) as u32;
         let numerator = (factor_num.trunc() as i64 & 0xff) as u32;
-        let bitrate = number(raw.get("bitrateKbps"));
-        let fps = number(raw.get("fps"));
-        let (Some(bitrate), Some(fps)) = (bitrate, fps) else {
+        let (Some(bitrate), Some(fps)) = (number(raw.get("bitrateKbps")), number(raw.get("fps")))
+        else {
             continue;
         };
         if denominator == 0 || !bitrate.is_finite() || !fps.is_finite() || fps <= 0.0 {
@@ -255,6 +237,33 @@ pub fn group_video_plan(config: &serde_json::Value) -> Option<GroupVideoPlan> {
         }
         spatial_index = spatial_index.saturating_add(1);
     }
+    (layers, rows)
+}
+
+/// Port of the legacy `groupVideoPlan()` calculation. Invalid/empty spatial
+/// layer tables are not advertised to the SFU.
+#[must_use]
+pub fn group_video_plan(config: &serde_json::Value) -> Option<GroupVideoPlan> {
+    let group = config.get("groupcall")?;
+    let spatial_layers = group.get("spatialLayers")?.as_array()?;
+    let temporal = number(group.get("temporalNum"))? as i64;
+    if !(1..=8).contains(&temporal) {
+        return None;
+    }
+    let max_width = number(config.get("maxWidth"))
+        .filter(|value| *value > 0.0)
+        .unwrap_or(1280.0)
+        .trunc();
+    let max_height = number(config.get("maxHeight"))
+        .filter(|value| *value > 0.0)
+        .unwrap_or(720.0)
+        .trunc();
+    let keyframe_interval_ms = number(config.get("keyFrameIntervalMs"))
+        .filter(|value| *value > 0.0)
+        .unwrap_or(1000.0)
+        .trunc() as u64;
+
+    let (layers, rows) = parse_spatial_layers(spatial_layers, max_width, max_height, temporal);
     if layers.is_empty() || rows.is_empty() {
         return None;
     }
@@ -263,7 +272,8 @@ pub fn group_video_plan(config: &serde_json::Value) -> Option<GroupVideoPlan> {
         .ok()
         .and_then(|value| value.parse::<i64>().ok())
         .unwrap_or(1);
-    let start = requested.clamp(0, rows.len() as i64 - 1) as usize;
+    let max_start = i64::try_from(rows.len().saturating_sub(1)).unwrap_or(i64::MAX);
+    let start = usize::try_from(requested.clamp(0, max_start)).unwrap_or_default();
     let (row, fps) = rows[start];
     let codec = number(group.get("codec")).unwrap_or(0.0) as i64;
     let (sfu_id, sfu_long) = if codec == 60 || codec == 61 {

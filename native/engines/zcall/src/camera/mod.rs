@@ -40,6 +40,132 @@ pub struct CameraCapture {
     worker: Mutex<Option<JoinHandle<()>>>,
 }
 
+#[cfg(target_os = "linux")]
+fn open_camera_device(
+    device_path: Option<&str>,
+    width: u32,
+    height: u32,
+) -> Result<(Device, String, usize, usize, usize), String> {
+    let path = device_path
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .or_else(first_camera_device)
+        .ok_or_else(|| "No V4L2 camera device was found".to_string())?;
+
+    if !Path::new(&path).exists() {
+        return Err(format!("Camera device does not exist: {path}"));
+    }
+
+    let device = Device::with_path(&path).map_err(|error| format!("Open {path}: {error}"))?;
+    let mut format = device
+        .format()
+        .map_err(|error| format!("Read camera format {path}: {error}"))?;
+    format.width = width.clamp(160, 1920) & !1;
+    format.height = height.clamp(120, 1080) & !1;
+    format.fourcc = FourCC::new(b"YUYV");
+    let format = device
+        .set_format(&format)
+        .map_err(|error| format!("Configure camera {path}: {error}"))?;
+
+    if format.fourcc != FourCC::new(b"YUYV") {
+        return Err(format!(
+            "Camera {path} did not accept YUYV (returned {:?})",
+            format.fourcc
+        ));
+    }
+    let actual_width = format.width as usize;
+    let actual_height = format.height as usize;
+    if actual_width < 2
+        || actual_height < 2
+        || !actual_width.is_multiple_of(2)
+        || !actual_height.is_multiple_of(2)
+        || (format.stride as usize) < actual_width * 2
+    {
+        return Err(format!(
+            "Invalid YUYV camera format {}x{} stride {}",
+            actual_width, actual_height, format.stride
+        ));
+    }
+
+    Ok((
+        device,
+        path,
+        actual_width,
+        actual_height,
+        format.stride as usize,
+    ))
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+struct CameraFrameContext {
+    config: EncoderConfig,
+    actual_width: usize,
+    actual_height: usize,
+    stride: usize,
+    frame_width: u32,
+    frame_height: u32,
+}
+
+#[cfg(target_os = "linux")]
+fn encode_camera_frame(
+    data: &[u8],
+    encoder: &mut Option<Encoder>,
+    force_keyframe: &AtomicBool,
+    context: &CameraFrameContext,
+    tx: &std::sync::mpsc::SyncSender<EncodedCameraFrame>,
+) -> bool {
+    if take_keyframe_request(force_keyframe) {
+        *encoder = None;
+    }
+    if encoder.is_none() {
+        *encoder =
+            match Encoder::with_api_config(openh264::OpenH264API::from_source(), context.config) {
+                Ok(encoder) => Some(encoder),
+                Err(error) => {
+                    crate::zcall_log!("[zcall-camera] OpenH264 reinit: {error}");
+                    return true;
+                }
+            };
+    }
+    let Some(yuv) = yuyv_to_i420(
+        data,
+        context.actual_width,
+        context.actual_height,
+        context.stride,
+    ) else {
+        crate::zcall_log!("[zcall-camera] Dropped malformed YUYV frame");
+        return true;
+    };
+    let Some(encoder) = encoder.as_mut() else {
+        return true;
+    };
+    match encoder.encode(&yuv) {
+        Ok(bitstream) => {
+            let key = matches!(
+                bitstream.frame_type(),
+                FrameType::IDR | FrameType::I | FrameType::IPMixed
+            );
+            let mut encoded_frame_data = Vec::new();
+            bitstream.write_vec(&mut encoded_frame_data);
+            if encoded_frame_data.is_empty() {
+                return true;
+            }
+            let frame = EncodedCameraFrame {
+                data: encoded_frame_data,
+                key,
+                width: context.frame_width,
+                height: context.frame_height,
+            };
+            !matches!(tx.try_send(frame), Err(TrySendError::Disconnected(_)))
+        }
+        Err(error) => {
+            crate::zcall_log!("[zcall-camera] OpenH264 encode: {error}");
+            true
+        }
+    }
+}
+
 impl CameraCapture {
     pub fn start(
         device_path: Option<&str>,
@@ -56,48 +182,24 @@ impl CameraCapture {
 
         #[cfg(target_os = "linux")]
         {
-            let path = device_path
-                .filter(|path| !path.is_empty())
-                .map(str::to_owned)
-                .or_else(first_camera_device)
-                .ok_or_else(|| "No V4L2 camera device was found".to_string())?;
+            let (device, path, actual_width, actual_height, stride) =
+                open_camera_device(device_path, width, height)?;
 
-            if !Path::new(&path).exists() {
-                return Err(format!("Camera device does not exist: {path}"));
-            }
-
-            let device =
-                Device::with_path(&path).map_err(|error| format!("Open {path}: {error}"))?;
-            let mut format = device
-                .format()
-                .map_err(|error| format!("Read camera format {path}: {error}"))?;
-            format.width = width.clamp(160, 1920) & !1;
-            format.height = height.clamp(120, 1080) & !1;
-            format.fourcc = FourCC::new(b"YUYV");
-            let format = device
-                .set_format(&format)
-                .map_err(|error| format!("Configure camera {path}: {error}"))?;
-
-            if format.fourcc != FourCC::new(b"YUYV") {
-                return Err(format!(
-                    "Camera {path} did not accept YUYV (returned {:?})",
-                    format.fourcc
-                ));
-            }
-            let actual_width = format.width as usize;
-            let actual_height = format.height as usize;
-            if actual_width < 2
-                || actual_height < 2
-                || !actual_width.is_multiple_of(2)
-                || !actual_height.is_multiple_of(2)
-                || (format.stride as usize) < actual_width * 2
-            {
-                return Err(format!(
-                    "Invalid YUYV camera format {}x{} stride {}",
-                    actual_width, actual_height, format.stride
-                ));
-            }
-
+            let frame_context = CameraFrameContext {
+                config: EncoderConfig::new()
+                    .bitrate(BitRate::from_bps(bitrate.clamp(80_000, 2_000_000)))
+                    .max_frame_rate(FrameRate::from_hz(f32::from(
+                        u8::try_from(fps.clamp(5, 30)).unwrap_or(30),
+                    )))
+                    .usage_type(UsageType::CameraVideoRealTime)
+                    .profile(Profile::Baseline)
+                    .intra_frame_period(IntraFramePeriod::from_num_frames(fps.clamp(5, 30) * 2)),
+                actual_width,
+                actual_height,
+                stride,
+                frame_width: actual_width as u32,
+                frame_height: actual_height as u32,
+            };
             let mut stream = MmapStream::with_buffers(&device, Type::VideoCapture, 4)
                 .map_err(|error| format!("Create V4L2 stream {path}: {error}"))?;
             let stop = Arc::new(AtomicBool::new(false));
@@ -105,81 +207,22 @@ impl CameraCapture {
             let force_keyframe = Arc::new(AtomicBool::new(false));
             let worker_force_keyframe = force_keyframe.clone();
             let (tx, frames) = sync_channel(2);
-            let frame_width = actual_width as u32;
-            let frame_height = actual_height as u32;
-            let stride = format.stride as usize;
-            let fps = fps.clamp(5, 30);
-
             let worker = thread::Builder::new()
                 .name("zcall-camera".into())
                 .spawn(move || {
-                    let config = EncoderConfig::new()
-                        .bitrate(BitRate::from_bps(bitrate.clamp(80_000, 2_000_000)))
-                        .max_frame_rate(FrameRate::from_hz(fps as f32))
-                        .usage_type(UsageType::CameraVideoRealTime)
-                        .profile(Profile::Baseline)
-                        .intra_frame_period(IntraFramePeriod::from_num_frames(fps * 2));
                     let mut encoder: Option<Encoder> = None;
 
                     while !worker_stop.load(Ordering::Relaxed) {
                         match stream.next() {
                             Ok((data, _metadata)) => {
-                                if take_keyframe_request(&worker_force_keyframe) {
-                                    encoder = None;
-                                }
-                                if encoder.is_none() {
-                                    encoder = match Encoder::with_api_config(
-                                        openh264::OpenH264API::from_source(),
-                                        config,
-                                    ) {
-                                        Ok(encoder) => Some(encoder),
-                                        Err(error) => {
-                                            crate::zcall_log!(
-                                                "[zcall-camera] OpenH264 reinit: {error}"
-                                            );
-                                            continue;
-                                        }
-                                    };
-                                }
-                                let Some(yuv) =
-                                    yuyv_to_i420(data, actual_width, actual_height, stride)
-                                else {
-                                    crate::zcall_log!(
-                                        "[zcall-camera] Dropped malformed YUYV frame"
-                                    );
-                                    continue;
-                                };
-                                let Some(encoder) = encoder.as_mut() else {
-                                    continue;
-                                };
-                                match encoder.encode(&yuv) {
-                                    Ok(bitstream) => {
-                                        let frame_type = bitstream.frame_type();
-                                        let key = matches!(
-                                            frame_type,
-                                            FrameType::IDR | FrameType::I | FrameType::IPMixed
-                                        );
-                                        let mut encoded_frame_data = Vec::new();
-                                        bitstream.write_vec(&mut encoded_frame_data);
-                                        if encoded_frame_data.is_empty() {
-                                            continue;
-                                        }
-                                        let frame = EncodedCameraFrame {
-                                            data: encoded_frame_data,
-                                            key,
-                                            width: frame_width,
-                                            height: frame_height,
-                                        };
-                                        match tx.try_send(frame) {
-                                            Ok(()) | Err(TrySendError::Full(_)) => {}
-                                            Err(TrySendError::Disconnected(_)) => break,
-                                        }
-                                    }
-                                    Err(error) => {
-                                        crate::zcall_log!(
-                                            "[zcall-camera] OpenH264 encode: {error}"
-                                        );
-                                    }
+                                if !encode_camera_frame(
+                                    data,
+                                    &mut encoder,
+                                    &worker_force_keyframe,
+                                    &frame_context,
+                                    &tx,
+                                ) {
+                                    break;
                                 }
                             }
                             Err(error) => {

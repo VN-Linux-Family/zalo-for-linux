@@ -44,7 +44,7 @@ fn group_video_header_matches_short_sfu_extension_layout() {
     );
     assert_eq!(header.len(), 36);
     assert_eq!(header[0], 0x90);
-    assert_eq!(header[1], 0x80 | 98);
+    assert_eq!(header[1], 0x80 | 0x62);
     assert_eq!(u16::from_be_bytes([header[2], header[3]]), 7);
     assert_eq!(u32::from_be_bytes(header[8..12].try_into().unwrap()), 42);
     assert_eq!(u16::from_be_bytes([header[12], header[13]]), 0xbede);

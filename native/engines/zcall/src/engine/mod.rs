@@ -12,7 +12,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::camera::CameraCapture;
-use crate::media::{GroupMediaEvent, MediaSessionParams, ZrtcMediaBackend};
+use crate::media::{GroupMediaEvent, MediaKind, MediaRole, MediaSessionParams, ZrtcMediaBackend};
 use crate::screen::ScreenCapture;
 use crate::ui::{UiAction, UiTransport};
 
@@ -66,6 +66,57 @@ struct GroupMember {
     cam_off: bool,
 }
 
+#[derive(Default)]
+struct GroupAudioFlags {
+    muted: bool,
+    speaker_off: bool,
+}
+
+#[derive(Default)]
+struct GroupCameraFlags {
+    on: bool,
+    was_on: bool,
+}
+
+#[derive(Default)]
+struct GroupCallFlags {
+    answered: bool,
+    sharing_screen: bool,
+}
+
+#[derive(Debug, Default)]
+struct CallAudioFlags {
+    muted: bool,
+    speaker_off: bool,
+}
+
+#[derive(Debug, Default)]
+struct CallCameraFlags {
+    on: bool,
+    was_on: bool,
+    sharing_screen: bool,
+}
+
+#[derive(Debug, Default)]
+struct PeerMediaFlags {
+    muted: bool,
+    camera_off: bool,
+    sharing: bool,
+}
+
+#[derive(Default)]
+struct EngineOptions {
+    send_udp: bool,
+    group_enabled: bool,
+}
+
+#[derive(Default)]
+struct ScreenLifecycle {
+    restart_pending: bool,
+    stop_ack_pending: bool,
+    first_frame_reported: bool,
+}
+
 #[allow(dead_code)]
 struct GroupCall {
     role: GroupRole,
@@ -93,13 +144,10 @@ struct GroupCall {
     next_ping_at: Option<Instant>,
     camera_state_reassert_at: Option<Instant>,
     ping_interval: Duration,
-    muted: bool,
-    speaker_off: bool,
-    camera_on: bool,
-    camera_was_on: bool,
-    answered: bool,
+    audio: GroupAudioFlags,
+    camera: GroupCameraFlags,
+    flags: GroupCallFlags,
     share_screen_id: u32,
-    sharing_screen: bool,
 }
 
 #[allow(dead_code)]
@@ -113,13 +161,13 @@ impl GroupCall {
 struct Call {
     role: CallRole,
     phase: CallPhase,
-    call_id: u32,
+    id: u32,
     peer_id: String,
     peer_uid: u32,
     local_uid: u32,
     peer_name: String,
     avatar: String,
-    call_type: u8,
+    kind: u8,
     session_id: String,
     server: Option<Value>,
     servers: Vec<Value>,
@@ -127,37 +175,289 @@ struct Call {
     media_config: Value,
     deadline: Option<Instant>,
     started_at: Option<Instant>,
-    muted: bool,
-    speaker_off: bool,
-    camera_on: bool,
-    camera_was_on: bool,
+    audio: CallAudioFlags,
+    camera: CallCameraFlags,
     camera_state_reassert_at: Option<Instant>,
-    peer_muted: bool,
-    peer_camera_off: bool,
-    peer_sharing: bool,
-    sharing_screen: bool,
+    peer_media: PeerMediaFlags,
 }
 
 pub struct EngineCore {
     phase: CallPhase,
-    send_udp: bool,
-    group_enabled: bool,
+    options: EngineOptions,
     local: Value,
     call: Option<Call>,
     group: Option<GroupCall>,
     media: Option<ZrtcMediaBackend>,
     camera: Option<CameraCapture>,
     screen: Option<ScreenCapture>,
-    screen_restart_pending: bool,
+    screen_lifecycle: ScreenLifecycle,
     screen_restart_source: Option<String>,
     screen_request_id: Option<String>,
     screen_restart_request_id: Option<String>,
-    screen_stop_ack_pending: bool,
-    screen_first_frame_reported: bool,
     ui: Option<Box<dyn UiTransport>>,
     outgoing_frames: Vec<Value>,
     last_ended_call: Option<u32>,
     group_notice_until: Option<Instant>,
+}
+
+fn build_outgoing_group(data: &Value) -> (GroupCall, u32, String, String, u32, Vec<String>) {
+    let info = data.get("groupInfo").unwrap_or(&Value::Null);
+    let partners = data
+        .get("partner")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let invited = partners
+        .iter()
+        .map(|partner| value_string(partner.get("id")))
+        .filter(|id| !id.is_empty())
+        .collect::<Vec<_>>();
+    let mut members = HashMap::new();
+    for (index, partner) in partners.iter().enumerate() {
+        let key = value_string(partner.get("id"));
+        let key = if key.is_empty() {
+            (index + 1).to_string()
+        } else {
+            key
+        };
+        members.insert(
+            key,
+            GroupMember {
+                name: string_at(partner, "name").unwrap_or_default(),
+                avatar: string_at(partner, "avatar").unwrap_or_default(),
+                state: "calling".into(),
+                muted: false,
+                cam_off: true,
+            },
+        );
+    }
+    let title = string_at(info, "name")
+        .or_else(|| string_at(info, "groupName"))
+        .unwrap_or_else(|| "Cuộc gọi nhóm".to_string());
+    let avatar = string_at(info, "avatar").unwrap_or_default();
+    let group_id = value_string(info.get("id"));
+    let call_type = u8::from(number_at(data, "type") == Some(6));
+    let max_users = number_at(info, "maxUsers").filter(|n| *n > 0).unwrap_or(8) as u32;
+    let call_id = new_call_id();
+    let group = GroupCall {
+        role: GroupRole::Caller,
+        phase: GroupPhase::Calling,
+        call_id,
+        host_call: 0,
+        group_id: 0,
+        group_id_str: group_id.clone(),
+        local_uid: 0,
+        call_type,
+        sess_id: String::new(),
+        servers: Vec::new(),
+        config: json!({}),
+        title: title.clone(),
+        avatar: avatar.clone(),
+        max_users,
+        invited: invited.clone(),
+        members,
+        member_id_aliases: HashMap::new(),
+        pending_member_ids: VecDeque::new(),
+        pending_sfu_uids: VecDeque::new(),
+        observed_sfu_uids: HashSet::new(),
+        deadline: Some(Instant::now() + Duration::from_secs(60)),
+        started_at: None,
+        next_ping_at: None,
+        camera_state_reassert_at: None,
+        ping_interval: Duration::from_secs(10),
+        audio: GroupAudioFlags::default(),
+        camera: GroupCameraFlags {
+            on: call_type == 1,
+            ..GroupCameraFlags::default()
+        },
+        flags: GroupCallFlags::default(),
+        share_screen_id: 0,
+    };
+    (group, call_id, group_id, title, max_users, invited)
+}
+
+struct GroupRequestAnswer {
+    host_call: u32,
+    call_id: u32,
+    group_id: u32,
+    ping_interval: Duration,
+    sess_id: String,
+    servers: Vec<Value>,
+    config: Value,
+}
+
+struct AcceptedGroupAnswer {
+    call_id: u32,
+    host_call: u32,
+    call_type: u8,
+    title: String,
+    avatar: String,
+    max_users: u32,
+    invited: Vec<String>,
+    group_id: u32,
+    sess_id: String,
+    server: Value,
+}
+
+fn parse_group_request_answer(data: &Value) -> Result<GroupRequestAnswer, String> {
+    let mut response = parse_json_value(data.get("data"));
+    merge_object(&mut response, &parse_json_value(data.get("params")));
+    let setting = parse_json_value(response.get("callSetting"));
+    let status = number_at(&response, "status")
+        .or_else(|| number_at(data, "status"))
+        .unwrap_or(0);
+    let host_call = number_at(data, "hostCall")
+        .or_else(|| number_at(&response, "hostCall"))
+        .unwrap_or(0)
+        .max(0) as u32;
+    let call_id = number_at(&response, "callId")
+        .or_else(|| number_at(data, "callId"))
+        .unwrap_or(0)
+        .max(0) as u32;
+    let group_id = number_at(&response, "groupId").unwrap_or(0).max(0) as u32;
+    let interval = number_at(&response, "interval").unwrap_or(10_000).max(1) as u64;
+    let ping_interval = if interval < 1000 {
+        Duration::from_millis(interval * 1000)
+    } else {
+        Duration::from_millis(interval)
+    };
+    let sess_id = string_at(&setting, "session")
+        .or_else(|| string_at(&response, "session"))
+        .unwrap_or_default();
+    let servers = setting
+        .get("servers")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let config = parse_json_value(setting.get("zrtcConfig"));
+    let group_key = config
+        .get("srtpKey")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let key_fp = crate::crypto::srtp::sha1(&[group_key.as_bytes()]);
+    let key_fp = hex::encode(&key_fp[..6]);
+    let config_fields = config.as_object().map_or_else(
+        || "not-object".into(),
+        |object| {
+            let mut fields = object.keys().cloned().collect::<Vec<_>>();
+            fields.sort_unstable();
+            fields.join(",")
+        },
+    );
+    EngineCore::log(&format!(
+        "group-config-boundary status={status} config_kind={} config_fields={} key_type={} key_bytes={} key_fp={key_fp}",
+        if setting.get("zrtcConfig").is_some_and(Value::is_string) {
+            "json-string"
+        } else if setting.get("zrtcConfig").is_some_and(Value::is_object) {
+            "object"
+        } else {
+            "missing-or-other"
+        },
+        config_fields,
+        config.get("srtpKey").map_or("missing", |value| match value {
+            Value::String(_) => "string",
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Number(_) => "number",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        }),
+        group_key.len()
+    ));
+
+    if status != 0 || host_call == 0 || sess_id.is_empty() || servers.is_empty() {
+        return Err(string_at(&response, "msg").unwrap_or_else(|| {
+            format!("group call request refused or incomplete (status={status})")
+        }));
+    }
+    Ok(GroupRequestAnswer {
+        host_call,
+        call_id,
+        group_id,
+        ping_interval,
+        sess_id,
+        servers,
+        config,
+    })
+}
+
+struct GroupControlActor {
+    user_tag: String,
+    from_tag: String,
+    invited_zalo_id: Option<String>,
+    explicit_sfu_uid: Option<u32>,
+    who_key: String,
+    who_uid: u32,
+    who_is_zero: bool,
+    who_is_local: bool,
+}
+
+fn resolve_group_control_actor(group: &GroupCall, data: &Value) -> GroupControlActor {
+    let user_id = value_string(data.get("userId"));
+    let from_id = value_string(data.get("fromId"));
+    let user_tag = EngineCore::group_debug_field(group, &user_id);
+    let from_tag = EngineCore::group_debug_field(group, &from_id);
+    let is_known_member_id = |candidate: &str| {
+        !candidate.is_empty()
+            && (group.invited.iter().any(|id| id == candidate)
+                || group.members.contains_key(candidate)
+                || group.member_id_aliases.contains_key(candidate))
+    };
+    let invited_zalo_id = if group.invited.iter().any(|id| id == &from_id) {
+        Some(from_id.clone())
+    } else if group.invited.iter().any(|id| id == &user_id) {
+        Some(user_id.clone())
+    } else {
+        None
+    };
+    let explicit_sfu_uid = if invited_zalo_id.is_some() {
+        [user_id.as_str(), from_id.as_str()]
+            .into_iter()
+            .filter(|candidate| !group.invited.iter().any(|id| id == candidate))
+            .find_map(|candidate| candidate.parse::<u32>().ok())
+            .filter(|uid| *uid != 0 && *uid != group.local_uid && *uid != group.share_screen_id)
+    } else {
+        None
+    };
+    let who_raw = invited_zalo_id
+        .clone()
+        .or_else(|| {
+            if is_known_member_id(&user_id) {
+                Some(user_id.clone())
+            } else if is_known_member_id(&from_id) {
+                Some(from_id.clone())
+            } else if !user_id.is_empty() && user_id != "0" {
+                Some(user_id.clone())
+            } else if !from_id.is_empty() {
+                Some(from_id.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    let who_uid = who_raw.parse::<u32>().unwrap_or(0);
+    let who_is_zero = who_raw.is_empty() || who_raw == "0";
+    let who_is_local = who_uid != 0 && who_uid == group.local_uid;
+    let raw_who_key = if who_uid != 0 {
+        who_uid.to_string()
+    } else {
+        who_raw
+    };
+    let who_key = group
+        .member_id_aliases
+        .get(&raw_who_key)
+        .cloned()
+        .unwrap_or(raw_who_key);
+    GroupControlActor {
+        user_tag,
+        from_tag,
+        invited_zalo_id,
+        explicit_sfu_uid,
+        who_key,
+        who_uid,
+        who_is_zero,
+        who_is_local,
+    }
 }
 
 impl EngineCore {
@@ -181,20 +481,20 @@ impl EngineCore {
         };
         Self {
             phase: CallPhase::Idle,
-            send_udp,
-            group_enabled,
+            options: EngineOptions {
+                send_udp,
+                group_enabled,
+            },
             local: json!({}),
             call: None,
             group: None,
             media,
             camera: None,
             screen: None,
-            screen_restart_pending: false,
+            screen_lifecycle: ScreenLifecycle::default(),
             screen_restart_source: None,
             screen_request_id: None,
             screen_restart_request_id: None,
-            screen_stop_ack_pending: false,
-            screen_first_frame_reported: false,
             ui,
             outgoing_frames: Vec::new(),
             last_ended_call: None,
@@ -204,7 +504,7 @@ impl EngineCore {
 
     pub fn start(&mut self) {
         self.emit(json!({"type":"update","command":"native-ready","data":{}}));
-        self.log("engine ready");
+        Self::log("engine ready");
     }
 
     pub fn poll_outgoing_frames(&mut self) -> Vec<Value> {
@@ -219,31 +519,43 @@ impl EngineCore {
             }
         }
         for action in actions {
-            self.log(&format!(
+            Self::log(&format!(
                 "UI action received: action={}, on={:?}, request_id={:?}, source={:?}, call_phase={:?}, call_type={:?}, group_phase={:?}, screen_worker_present={}, screen_worker_stopping={}, screen_worker_finished={}, restart_pending={}",
                 action.action,
                 action.on,
                 action.request_id,
                 action.source,
                 self.call.as_ref().map(|call| call.phase),
-                self.call.as_ref().map(|call| call.call_type),
+                self.call.as_ref().map(|call| call.kind),
                 self.group.as_ref().map(|group| group.phase),
                 self.screen.is_some(),
                 self.screen.as_ref().is_some_and(ScreenCapture::is_stopping),
                 self.screen.as_ref().is_some_and(ScreenCapture::is_finished),
-                self.screen_restart_pending
+                self.screen_lifecycle.restart_pending
             ));
-            self.on_ui_action(action);
+            self.on_ui_action(&action);
         }
         self.tick();
     }
 
     pub fn tick(&mut self) {
-        let now = Instant::now();
+        if self.tick_media_health(Instant::now()) {
+            return;
+        }
+        self.tick_screen_status();
+        self.tick_screen_completion();
+        self.tick_media_controls();
+        self.tick_screen_frames();
+        self.tick_camera_frames();
+        self.tick_remote_video_frames();
+        self.tick_deadlines();
+    }
+
+    fn tick_media_health(&mut self, now: Instant) -> bool {
         let camera_reassert = self.call.as_ref().and_then(|call| {
             call.camera_state_reassert_at
                 .filter(|deadline| now >= *deadline)
-                .map(|_| call.camera_on || call.sharing_screen)
+                .map(|_| call.camera.on || call.camera.sharing_screen)
         });
         if let Some(camera_on) = camera_reassert {
             if let Some(call) = self.call.as_mut() {
@@ -269,11 +581,15 @@ impl EngineCore {
                 .as_ref()
                 .is_some_and(ZrtcMediaBackend::media_timed_out);
         if media_timed_out {
-            self.log("peer media timed out after 20 seconds; ending call");
+            Self::log("peer media timed out after 20 seconds; ending call");
             self.hangup("media-timeout");
-            return;
+            return true;
         }
 
+        false
+    }
+
+    fn tick_screen_status(&mut self) {
         let screen_status = self.screen.as_ref().and_then(ScreenCapture::try_status);
         if let Some(status) = screen_status {
             match status {
@@ -300,47 +616,48 @@ impl EngineCore {
                     // Dismissing the system chooser is a normal stop. Preserve a
                     // newer start queued while this cancellation was in flight;
                     // stop_screen_capture normally clears retry state.
-                    let restart_pending = self.screen_restart_pending;
+                    let restart_pending = self.screen_lifecycle.restart_pending;
                     let restart_source = self.screen_restart_source.take();
                     let restart_request_id = self.screen_restart_request_id.take();
                     self.stop_screen_capture();
                     if restart_pending {
-                        self.screen_restart_pending = true;
+                        self.screen_lifecycle.restart_pending = true;
                         self.screen_restart_source = restart_source;
                         self.screen_restart_request_id = restart_request_id;
                     }
                     let request_id = self.screen_request_id.clone();
-                    let stop_was_requested = std::mem::take(&mut self.screen_stop_ack_pending);
+                    let stop_was_requested =
+                        std::mem::take(&mut self.screen_lifecycle.stop_ack_pending);
                     if !stop_was_requested {
-                        self.ui_message(json!({"type":"screenStopped","requestId":request_id}));
+                        self.ui_message(&json!({"type":"screenStopped","requestId":request_id}));
                     }
-                    self.log("screen chooser cancelled; capture worker is closing");
+                    Self::log("screen chooser cancelled; capture worker is closing");
                 }
                 Err(error) => {
                     // A terminal error may be queued by PipeWire while an old
                     // stream is being torn down. It must not erase a newer
                     // screen-start request waiting for this worker to exit.
-                    let restart_pending = self.screen_restart_pending;
+                    let restart_pending = self.screen_lifecycle.restart_pending;
                     let restart_source = self.screen_restart_source.take();
                     let restart_request_id = self.screen_restart_request_id.take();
                     let request_id = self.screen_request_id.clone();
                     self.stop_screen_capture();
-                    if restart_pending || self.screen_stop_ack_pending {
+                    if restart_pending || self.screen_lifecycle.stop_ack_pending {
                         if restart_pending {
-                            self.screen_restart_pending = true;
+                            self.screen_lifecycle.restart_pending = true;
                             self.screen_restart_source = restart_source;
                             self.screen_restart_request_id = restart_request_id;
                         }
-                        self.log(&format!(
+                        Self::log(&format!(
                             "previous screen worker ended while stopping/retrying; preserving terminal state: {error}"
                         ));
                     } else {
                         let notify_stop = self.call.as_mut().and_then(|call| {
-                            let was_sharing = call.sharing_screen;
-                            call.sharing_screen = false;
+                            let was_sharing = call.camera.sharing_screen;
+                            call.camera.sharing_screen = false;
                             was_sharing.then(|| {
                                 json!({
-                                    "callId":call.call_id,
+                                    "callId":call.id,
                                     "status":0,
                                     "uidTo":call.peer_id
                                 })
@@ -351,35 +668,40 @@ impl EngineCore {
                             self.restore_call_camera_after_screen_share();
                         }
                         self.ui_message(
-                            json!({"type":"screenError","message":error,"requestId":request_id}),
+                            &json!({"type":"screenError","message":error,"requestId":request_id}),
                         );
                     }
                 }
             }
         }
+    }
+
+    fn tick_screen_completion(&mut self) {
         // A stopped capture is retained until its worker has actually exited.
         // This prevents a rapid retry from opening a second portal while the
         // previous request is still being cancelled.
         if self.screen.as_ref().is_some_and(ScreenCapture::is_finished) {
             self.screen.take();
-            self.screen_stop_ack_pending = false;
-            if self.screen_restart_pending {
+            self.screen_lifecycle.stop_ack_pending = false;
+            if self.screen_lifecycle.restart_pending {
                 let source = self.screen_restart_source.take();
                 let request_id = self.screen_restart_request_id.take();
-                self.screen_restart_pending = false;
-                self.start_screen_capture(source, request_id);
+                self.screen_lifecycle.restart_pending = false;
+                self.start_screen_capture(source.as_deref(), request_id.as_deref());
             } else {
                 self.screen_request_id = None;
             }
         }
+    }
 
+    fn tick_media_controls(&mut self) {
         let rate_profile_changed = self
             .media
             .as_ref()
             .and_then(ZrtcMediaBackend::take_video_profile_change);
         if let Some(profile) = rate_profile_changed {
             if self.camera.is_some() {
-                self.log(&format!(
+                Self::log(&format!(
                     "adaptive video profile -> rung {}: {}x{} {}fps {}kbps",
                     profile.rung,
                     profile.width,
@@ -388,7 +710,7 @@ impl EngineCore {
                     profile.bitrate / 1000
                 ));
                 self.stop_camera_capture();
-                if !self.start_camera_capture() {
+                if !Self::start_camera_capture(self) {
                     self.camera_state(false);
                 }
             }
@@ -396,15 +718,15 @@ impl EngineCore {
 
         if let Some(media) = self.media.as_ref() {
             if let Some(level) = media.take_mic_level_update() {
-                self.ui_message(json!({"type":"micLevel","level":level}));
+                self.ui_message(&json!({"type":"micLevel","level":level}));
             }
             if let Some(volume) = media.take_mic_volume_update() {
-                self.ui_message(json!({"type":"micVolume","volume":volume}));
+                self.ui_message(&json!({"type":"micVolume","volume":volume}));
                 if let Some(call) = self.call.as_ref() {
                     let mut state =
                         self.ui_state_value(self.ui_phase(), self.ui_status_code(), call);
                     state["micVolume"] = json!(volume);
-                    self.ui_message(state);
+                    self.ui_message(&state);
                 }
             }
         }
@@ -414,7 +736,10 @@ impl EngineCore {
             .as_ref()
             .is_some_and(ZrtcMediaBackend::take_local_keyframe_request);
         if local_keyframe_requested {
-            let sharing_screen = self.call.as_ref().is_some_and(|call| call.sharing_screen);
+            let sharing_screen = self
+                .call
+                .as_ref()
+                .is_some_and(|call| call.camera.sharing_screen);
             if sharing_screen {
                 if let Some(screen) = self.screen.as_ref() {
                     screen.request_keyframe();
@@ -435,12 +760,14 @@ impl EngineCore {
             });
         if let Some(screen) = self.screen.as_ref().filter(|screen| !screen.is_stopping()) {
             if screen.set_target_fps(network_screen_fps) {
-                self.log(&format!(
+                Self::log(&format!(
                     "adaptive screen-share target -> {network_screen_fps} FPS (network profile)"
                 ));
             }
         }
+    }
 
+    fn tick_screen_frames(&mut self) {
         let mut screen_frames = Vec::new();
         if let Some(screen) = self.screen.as_ref().filter(|screen| !screen.is_stopping()) {
             while let Some(frame) = screen.try_recv() {
@@ -452,44 +779,43 @@ impl EngineCore {
                 let group_share = self
                     .group
                     .as_ref()
-                    .is_some_and(|group| group.sharing_screen);
+                    .is_some_and(|group| group.flags.sharing_screen);
                 let result = if group_share {
                     media.send_group_share_frame(frame.key, &frame.data, frame.width, frame.height)
                 } else {
                     media.send_video_frame(frame.key, &frame.data)
                 };
-                if !self.screen_first_frame_reported {
+                if !self.screen_lifecycle.first_frame_reported {
                     match &result {
                         Ok(packets) if *packets > 0 => {
-                            self.log(&format!(
+                            Self::log(&format!(
                                 "first screen H.264 frame transport: key={}, size={} bytes, {}x{}, packets={}, group_share={group_share}",
                                 frame.key, frame.data.len(), frame.width, frame.height, packets
                             ));
-                            self.screen_first_frame_reported = true;
+                            self.screen_lifecycle.first_frame_reported = true;
                         }
                         Err(error) => {
-                            self.log(&format!(
+                            Self::log(&format!(
                                 "first screen H.264 frame transport failed: key={}, size={} bytes, group_share={group_share}: {error}",
                                 frame.key, frame.data.len()
                             ));
-                            self.screen_first_frame_reported = true;
+                            self.screen_lifecycle.first_frame_reported = true;
                         }
                         Ok(_) => {}
                     }
                 }
                 if let Err(error) = &result {
-                    self.log(&format!("screen H.264 send failed: {error}"));
+                    Self::log(&format!("screen H.264 send failed: {error}"));
                 } else if !group_share
                     && frame.key
                     && matches!(&result, Ok(packets) if *packets > 0)
-                    && self
-                        .call
-                        .as_ref()
-                        .is_some_and(|call| call.phase == CallPhase::InCall && !call.sharing_screen)
+                    && self.call.as_ref().is_some_and(|call| {
+                        call.phase == CallPhase::InCall && !call.camera.sharing_screen
+                    })
                 {
                     // Do not interrupt the camera on encoder readiness alone.
                     // Switch only after at least one screen frame was sent.
-                    self.log("first screen frame sent; activating 1:1 screen share");
+                    Self::log("first screen frame sent; activating 1:1 screen share");
                     self.activate_screen_share();
                 }
             }
@@ -504,7 +830,9 @@ impl EngineCore {
                 ui.send_local_video_frame(frame.key, &codec, &frame.data);
             }
         }
+    }
 
+    fn tick_camera_frames(&mut self) {
         let mut camera_frames = Vec::new();
         if let Some(camera) = self.camera.as_ref() {
             while let Some(frame) = camera.try_recv() {
@@ -514,7 +842,7 @@ impl EngineCore {
         for frame in camera_frames {
             if let Some(media) = self.media.as_ref() {
                 if let Err(error) = media.send_video_frame(frame.key, &frame.data) {
-                    self.log(&format!("camera H.264 send failed: {error}"));
+                    Self::log(&format!("camera H.264 send failed: {error}"));
                 }
             }
             if let Some(ui) = self.ui.as_ref() {
@@ -528,7 +856,9 @@ impl EngineCore {
                 ui.send_local_video_frame(frame.key, &codec, &frame.data);
             }
         }
+    }
 
+    fn tick_remote_video_frames(&mut self) {
         if let Some(media) = self.media.as_ref() {
             for frame in media.drain_video_frames() {
                 if let Some(ui) = self.ui.as_ref() {
@@ -536,9 +866,12 @@ impl EngineCore {
                 }
             }
         }
+    }
+
+    fn tick_deadlines(&mut self) {
         if self.call.is_none() && self.group_notice_until.is_some_and(|t| Instant::now() >= t) {
             self.group_notice_until = None;
-            self.ui_message(json!({"type":"close","statusCode":"groupUnsupported"}));
+            self.ui_message(&json!({"type":"close","statusCode":"groupUnsupported"}));
         }
         let expired = self.call.as_ref().and_then(|call| {
             call.deadline
@@ -551,7 +884,7 @@ impl EngineCore {
                     // A timed-out outgoing call is still an outgoing call that
                     // ended before connection: mirror the user's local hangup
                     // at 00:00 rather than presenting it as a missed/failed call.
-                    self.log("outgoing call timed out before connection; ending at 00:00");
+                    Self::log("outgoing call timed out before connection; ending at 00:00");
                     self.hangup("timeout");
                 }
                 (CallPhase::Incoming, CallRole::Callee) => self.reject_call("no-answer"),
@@ -574,10 +907,9 @@ impl EngineCore {
                     self.group_finish(0, "groupJoinRejected", false);
                 }
                 GroupPhase::Connected => {
-                    let waiting_for_members = self
-                        .group
-                        .as_ref()
-                        .is_some_and(|group| group.role == GroupRole::Caller && !group.answered);
+                    let waiting_for_members = self.group.as_ref().is_some_and(|group| {
+                        group.role == GroupRole::Caller && !group.flags.answered
+                    });
                     if waiting_for_members {
                         self.group_cancel("no-answer");
                     } else if let Some(group) = self.group.as_mut() {
@@ -609,23 +941,23 @@ impl EngineCore {
             if let Some(group) = self.group.as_mut() {
                 group.camera_state_reassert_at = None;
             }
-            self.log("group member joined; reasserting local camera state");
+            Self::log("group member joined; reasserting local camera state");
             self.group_broadcast(12098);
         }
     }
 
-    pub fn on_zalo_frame(&mut self, frame: Value) {
+    pub fn on_zalo_frame(&mut self, frame: &Value) {
         if !frame.is_object() {
             return;
         }
-        let kind = string_at(&frame, "type").unwrap_or_default();
+        let kind = string_at(frame, "type").unwrap_or_default();
         let command = frame.get("command").cloned().unwrap_or(Value::Null);
         let data = frame
             .get("data")
             .cloned()
             .filter(Value::is_object)
             .unwrap_or_else(|| json!({}));
-        self.log(&format!(
+        Self::log(&format!(
             "Zalo event received: type={kind}, command={command}"
         ));
         match kind.as_str() {
@@ -641,7 +973,7 @@ impl EngineCore {
                     self.on_alias_name(&data);
                 }
             }
-            _ => self.log(&format!("unhandled frame type={kind} command={command}")),
+            _ => Self::log(&format!("unhandled frame type={kind} command={command}")),
         }
     }
 
@@ -656,19 +988,19 @@ impl EngineCore {
             "makeCall" => self.make_call(data),
             "endCall" => self.hangup("zalo"),
             "listDevice" | "ping" | "hide" => {}
-            other => self.log(&format!("unhandled request {other}")),
+            other => Self::log(&format!("unhandled request {other}")),
         }
     }
 
     fn make_call(&mut self, data: &Value) {
         if self.call.is_some() || self.group.is_some() {
-            self.log("makeCall while already in a call; ignored");
+            Self::log("makeCall while already in a call; ignored");
             return;
         }
         if data.get("groupInfo").is_some()
             || number_at(data, "type").is_some_and(|n| n == 5 || n == 6)
         {
-            if self.group_enabled {
+            if self.options.group_enabled {
                 self.group_outgoing(data);
             } else {
                 self.group_not_supported(data);
@@ -687,19 +1019,21 @@ impl EngineCore {
         let avatar = string_at(&partner, "avatar").unwrap_or_default();
         let raw_type = number_at(data, "type");
         let call_type = if raw_type == Some(3) { 3 } else { 1 };
-        self.log(&format!("outgoing call type map: protocol.type={raw_type:?} -> internal.call_type={call_type} (3=video, 1=voice)"));
+        Self::log(&format!(
+            "outgoing call type map: protocol.type={raw_type:?} -> internal.call_type={call_type} (3=video, 1=voice)"
+        ));
         let call_id = new_call_id();
 
         self.call = Some(Call {
             role: CallRole::Caller,
             phase: CallPhase::Outgoing,
-            call_id,
+            id: call_id,
             peer_id: peer_id.clone(),
             peer_uid: 0,
             local_uid: 0,
             peer_name,
             avatar,
-            call_type,
+            kind: call_type,
             session_id: String::new(),
             server: None,
             servers: Vec::new(),
@@ -707,15 +1041,13 @@ impl EngineCore {
             media_config: Value::Null,
             deadline: Some(Instant::now() + CALL_SETUP_TIMEOUT),
             started_at: None,
-            muted: false,
-            speaker_off: false,
-            camera_on: call_type == 3,
-            camera_was_on: false,
+            audio: CallAudioFlags::default(),
+            camera: CallCameraFlags {
+                on: call_type == 3,
+                ..CallCameraFlags::default()
+            },
             camera_state_reassert_at: None,
-            peer_muted: false,
-            peer_camera_off: false,
-            peer_sharing: false,
-            sharing_screen: false,
+            peer_media: PeerMediaFlags::default(),
         });
         self.phase = CallPhase::Outgoing;
         self.emit(json!({"type":"update","command":"callState","data":{"state":"incall"}}));
@@ -739,7 +1071,7 @@ impl EngineCore {
                 json!({"type":"request","command":"getAliasName","data":{"noisedId":peer_id}}),
             );
         }
-        self.log(&format!("outgoing call {call_id} to {peer_id}"));
+        Self::log(&format!("outgoing call {call_id} to {peer_id}"));
     }
 
     fn group_not_supported(&mut self, data: &Value) {
@@ -752,7 +1084,7 @@ impl EngineCore {
         );
         self.emit(json!({"type":"update","command":"callState","data":{"state":"free"}}));
         self.group_notice_until = Some(Instant::now() + Duration::from_secs(3));
-        self.ui_message(json!({
+        self.ui_message(&json!({
             "type":"state","phase":"outgoing","statusCode":"groupUnsupported",
             "name":name,"avatar":string_at(group,"avatar").unwrap_or_default(),
             "video":true,"group":true,"muted":false,"speakerOff":false
@@ -760,80 +1092,9 @@ impl EngineCore {
     }
 
     fn group_outgoing(&mut self, data: &Value) {
-        let info = data.get("groupInfo").unwrap_or(&Value::Null);
-        let partners = data
-            .get("partner")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let invited = partners
-            .iter()
-            .map(|partner| value_string(partner.get("id")))
-            .filter(|id| !id.is_empty())
-            .collect::<Vec<_>>();
-        let mut members = HashMap::new();
-        for (index, partner) in partners.iter().enumerate() {
-            let key = value_string(partner.get("id"));
-            let key = if key.is_empty() {
-                (index + 1).to_string()
-            } else {
-                key
-            };
-            members.insert(
-                key,
-                GroupMember {
-                    name: string_at(partner, "name").unwrap_or_default(),
-                    avatar: string_at(partner, "avatar").unwrap_or_default(),
-                    state: "calling".into(),
-                    muted: false,
-                    cam_off: true,
-                },
-            );
-        }
-        let title = string_at(info, "name")
-            .or_else(|| string_at(info, "groupName"))
-            .unwrap_or_else(|| "Cuộc gọi nhóm".to_string());
-        let avatar = string_at(info, "avatar").unwrap_or_default();
-        let group_id_str = value_string(info.get("id"));
-        let call_type = u8::from(number_at(data, "type") == Some(6));
-        let max_users = number_at(info, "maxUsers").filter(|n| *n > 0).unwrap_or(8) as u32;
-        let call_id = new_call_id();
-        self.group = Some(GroupCall {
-            role: GroupRole::Caller,
-            phase: GroupPhase::Calling,
-            call_id,
-            host_call: 0,
-            group_id: 0,
-            group_id_str: group_id_str.clone(),
-            local_uid: 0,
-            call_type,
-            sess_id: String::new(),
-            servers: Vec::new(),
-            config: json!({}),
-            title: title.clone(),
-            avatar: avatar.clone(),
-            max_users,
-            invited: invited.clone(),
-            members,
-            member_id_aliases: HashMap::new(),
-            pending_member_ids: VecDeque::new(),
-            pending_sfu_uids: VecDeque::new(),
-            observed_sfu_uids: HashSet::new(),
-            deadline: Some(Instant::now() + Duration::from_secs(60)),
-            started_at: None,
-            next_ping_at: None,
-            camera_state_reassert_at: None,
-            ping_interval: Duration::from_secs(10),
-            muted: false,
-            speaker_off: false,
-            // Group call type 1 is video; keep the caller's camera intent
-            // through SFU setup just as the incoming group-answer path does.
-            camera_on: call_type == 1,
-            camera_was_on: false,
-            answered: false,
-            share_screen_id: 0,
-            sharing_screen: false,
-        });
+        let (group, call_id, group_id_str, title, max_users, invited) = build_outgoing_group(data);
+        let avatar = group.avatar.clone();
+        self.group = Some(group);
         self.phase = CallPhase::Outgoing;
         self.emit(json!({"type":"update","command":"callState","data":{"state":"incall"}}));
         self.emit(
@@ -855,11 +1116,11 @@ impl EngineCore {
                 "typeRequest":1
             }
         }));
-        self.log(&format!(
+        Self::log(&format!(
             "outgoing group call {call_id}: {} invitee(s)",
             invited.len()
         ));
-        self.group_debug_reset();
+        Self::group_debug_reset();
         self.group_debug("outgoing-created");
         let (invite_total, named_invites, avatar_invites) =
             self.group.as_ref().map_or_default(|group| {
@@ -898,94 +1159,63 @@ impl EngineCore {
         }) {
             return;
         }
-
-        let mut response = parse_json_value(data.get("data"));
-        merge_object(&mut response, &parse_json_value(data.get("params")));
-        let setting = parse_json_value(response.get("callSetting"));
-        let status = number_at(&response, "status")
-            .or_else(|| number_at(data, "status"))
-            .unwrap_or(0);
-        let host_call = number_at(data, "hostCall")
-            .or_else(|| number_at(&response, "hostCall"))
-            .unwrap_or(0)
-            .max(0) as u32;
-        let call_id = number_at(&response, "callId")
-            .or_else(|| number_at(data, "callId"))
-            .unwrap_or(0)
-            .max(0) as u32;
-        let group_id = number_at(&response, "groupId").unwrap_or(0).max(0) as u32;
-        let interval = number_at(&response, "interval").unwrap_or(10_000).max(1) as u64;
-        let ping_interval = if interval < 1000 {
-            Duration::from_millis(interval * 1000)
-        } else {
-            Duration::from_millis(interval)
-        };
-        let sess_id = string_at(&setting, "session")
-            .or_else(|| string_at(&response, "session"))
-            .unwrap_or_default();
-        let servers = setting
-            .get("servers")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let config = parse_json_value(setting.get("zrtcConfig"));
-        let group_key = config
-            .get("srtpKey")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let key_fp = crate::crypto::srtp::sha1(&[group_key.as_bytes()]);
-        let key_fp = key_fp[..6]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        let config_fields = config.as_object().map_or_else(
-            || "not-object".into(),
-            |object| {
-                let mut fields = object.keys().cloned().collect::<Vec<_>>();
-                fields.sort_unstable();
-                fields.join(",")
-            },
-        );
-        self.log(&format!(
-            "group-config-boundary status={status} config_kind={} config_fields={} key_type={} key_bytes={} key_fp={key_fp}",
-            if setting.get("zrtcConfig").is_some_and(Value::is_string) { "json-string" } else if setting.get("zrtcConfig").is_some_and(Value::is_object) { "object" } else { "missing-or-other" },
-            config_fields,
-            config.get("srtpKey").map_or("missing", |value| match value {
-                Value::String(_) => "string",
-                Value::Null => "null",
-                Value::Bool(_) => "bool",
-                Value::Number(_) => "number",
-                Value::Array(_) => "array",
-                Value::Object(_) => "object",
-            }),
-            group_key.len()
-        ));
-
-        if status != 0 || host_call == 0 || sess_id.is_empty() || servers.is_empty() {
-            let reason = string_at(&response, "msg").unwrap_or_else(|| {
-                format!("group call request refused or incomplete (status={status})")
-            });
-            self.group_setup_failed("groupCallFailed", &reason);
-            return;
-        }
-
-        let (call_id, call_type, title, avatar, max_users, invited) = {
-            let Some(group) = self.group.as_mut() else {
+        let answer = match parse_group_request_answer(data) {
+            Ok(answer) => answer,
+            Err(reason) => {
+                self.group_setup_failed("groupCallFailed", &reason);
                 return;
-            };
-            if call_id != 0 {
-                group.call_id = call_id;
             }
-            group.host_call = host_call;
-            group.local_uid = host_call;
-            group.group_id = group_id;
-            group.sess_id = sess_id.clone();
-            group.servers = servers.clone();
-            group.config = config.clone();
-            group.ping_interval = ping_interval;
+        };
+        let Some(accepted) = self.prepare_group_answer(answer) else {
+            return;
+        };
+        let nested = json_cpp(&json!({
+            "groupAvatar":accepted.avatar,
+            "groupName":accepted.title,
+            "hostCall":accepted.host_call,
+            "maxUsers":accepted.max_users,
+            "noiseId":accepted.invited
+        }));
+        self.emit(json!({
+            "type":"sendSignal","command":12434,"data":{
+                "callId":accepted.call_id,
+                "callType":accepted.call_type,
+                "data":json_cpp(&json!({
+                    "codec":"",
+                    "data":nested,
+                    "extendData":"",
+                    "rtcpAddress":string_at(&accepted.server,"rtcpaddr").or_else(||string_at(&accepted.server,"rtcp")).unwrap_or_default(),
+                    "rtcpAddressIPv6":string_at(&accepted.server,"rtcpaddrIPv6").or_else(||string_at(&accepted.server,"rtcpIPv6")).unwrap_or_default(),
+                    "rtpAddress":string_at(&accepted.server,"rtpaddr").or_else(||string_at(&accepted.server,"rtp")).unwrap_or_default(),
+                    "rtpAddressIPv6":string_at(&accepted.server,"rtpaddrIPv6").or_else(||string_at(&accepted.server,"rtpIPv6")).unwrap_or_default()
+                })),
+                "groupId":accepted.group_id.to_string(),
+                "partners":json_cpp(&json!(accepted.invited)),
+                "session":accepted.sess_id
+            }
+        }));
+        self.group_broadcast(12098);
+        self.group_update_status();
+        Self::log(&format!(
+            "outgoing group call {} joined SFU relay {:?}",
+            accepted.call_id, accepted.server
+        ));
+    }
+
+    fn prepare_group_answer(&mut self, answer: GroupRequestAnswer) -> Option<AcceptedGroupAnswer> {
+        let (call_id, call_type, title, avatar, max_users, invited) = {
+            let group = self.group.as_mut()?;
+            if answer.call_id != 0 {
+                group.call_id = answer.call_id;
+            }
+            group.host_call = answer.host_call;
+            group.local_uid = answer.host_call;
+            group.group_id = answer.group_id;
+            group.sess_id.clone_from(&answer.sess_id);
+            group.servers.clone_from(&answer.servers);
+            group.config.clone_from(&answer.config);
+            group.ping_interval = answer.ping_interval;
             group.deadline = Some(Instant::now() + Duration::from_secs(60));
-            // Preserve the requested call mode. The SFU video transport is
-            // initialized below and camera capture is started after media.start().
             (
                 group.call_id,
                 group.call_type,
@@ -995,61 +1225,60 @@ impl EngineCore {
                 group.invited.clone(),
             )
         };
-
         self.group_debug("request-accepted");
-        let camera_on = self.group.as_ref().is_some_and(|group| group.camera_on);
+        let camera_on = self.group.as_ref().is_some_and(|group| group.camera.on);
         let params = MediaSessionParams {
             call_id,
-            host_call,
-            uid: host_call,
-            peer_uid: host_call,
-            sess_id: sess_id.as_bytes().to_vec(),
-            is_caller: true,
-            is_group: true,
-            send_udp: self.send_udp,
+            host_call: answer.host_call,
+            uid: answer.host_call,
+            peer_uid: answer.host_call,
+            sess_id: answer.sess_id.as_bytes().to_vec(),
+            role: MediaRole::Caller,
+            kind: MediaKind::Group,
+            send_udp: self.options.send_udp,
             video_enabled: camera_on,
-            video_config: config,
+            video_config: answer.config,
             p2p_candidates: Vec::new(),
         };
-        let addresses = parse_server_addresses(&servers);
+        let addresses = parse_server_addresses(&answer.servers);
         let selected = if let Some(media) = self.media.as_ref() {
             match media.prepare(params, &addresses) {
                 Ok(selected) => selected,
                 Err(error) => {
                     self.group_setup_failed("groupJoinRejected", &error);
-                    return;
+                    return None;
                 }
             }
         } else {
             self.group_setup_failed("groupJoinRejected", "media backend unavailable");
-            return;
+            return None;
         };
-        if self.send_udp && selected.is_none() {
+        if self.options.send_udp && selected.is_none() {
             self.group_setup_failed(
                 "groupJoinRejected",
                 "no group media relay accepted InitZRTP",
             );
-            return;
+            return None;
         }
-        let Some(server) = select_server(&servers, selected) else {
+        let Some(server) = select_server(&answer.servers, selected) else {
             self.group_setup_failed("groupJoinRejected", "no usable group media server");
-            return;
+            return None;
         };
 
         if let Some(media) = self.media.as_ref() {
             media.start();
             if let Err(error) = media.send_group_video_quality_config() {
-                self.log(&format!("group VidQualConfig failed: {error}"));
+                Self::log(&format!("group VidQualConfig failed: {error}"));
             }
         }
-        if self.group.as_ref().is_some_and(|group| group.camera_on) {
-            let camera_on = self.start_camera_capture();
+        if self.group.as_ref().is_some_and(|group| group.camera.on) {
+            let camera_on = Self::start_camera_capture(self);
             if let Some(group) = self.group.as_mut() {
-                group.camera_on = camera_on;
+                group.camera.on = camera_on;
             }
             if let Some(media) = self.media.as_ref() {
                 if let Err(error) = media.set_group_camera(camera_on) {
-                    self.log(&format!("group camera state update failed: {error}"));
+                    Self::log(&format!("group camera state update failed: {error}"));
                 }
             }
         }
@@ -1058,37 +1287,18 @@ impl EngineCore {
             group.started_at = Some(Instant::now());
             group.next_ping_at = Some(Instant::now() + group.ping_interval);
         }
-
-        let nested = json_cpp(&json!({
-            "groupAvatar":avatar,
-            "groupName":title,
-            "hostCall":host_call,
-            "maxUsers":max_users,
-            "noiseId":invited
-        }));
-        self.emit(json!({
-            "type":"sendSignal","command":12434,"data":{
-                "callId":call_id,
-                "callType":call_type,
-                "data":json_cpp(&json!({
-                    "codec":"",
-                    "data":nested,
-                    "extendData":"",
-                    "rtcpAddress":string_at(&server,"rtcpaddr").or_else(||string_at(&server,"rtcp")).unwrap_or_default(),
-                    "rtcpAddressIPv6":string_at(&server,"rtcpaddrIPv6").or_else(||string_at(&server,"rtcpIPv6")).unwrap_or_default(),
-                    "rtpAddress":string_at(&server,"rtpaddr").or_else(||string_at(&server,"rtp")).unwrap_or_default(),
-                    "rtpAddressIPv6":string_at(&server,"rtpaddrIPv6").or_else(||string_at(&server,"rtpIPv6")).unwrap_or_default()
-                })),
-                "groupId":group_id.to_string(),
-                "partners":json_cpp(&json!(invited)),
-                "session":sess_id
-            }
-        }));
-        self.group_broadcast(12098);
-        self.group_update_status();
-        self.log(&format!(
-            "outgoing group call {call_id} joined SFU relay {server:?}"
-        ));
+        Some(AcceptedGroupAnswer {
+            call_id,
+            host_call: answer.host_call,
+            call_type,
+            title,
+            avatar,
+            max_users,
+            invited,
+            group_id: answer.group_id,
+            sess_id: answer.sess_id,
+            server,
+        })
     }
 
     fn group_setup_failed(&mut self, status: &str, reason: &str) {
@@ -1097,7 +1307,7 @@ impl EngineCore {
             group.deadline = Some(Instant::now() + Duration::from_secs(3));
         }
         self.group_send_ui_state("failed", status, None);
-        self.log(&format!("group call setup failed: {reason}"));
+        Self::log(&format!("group call setup failed: {reason}"));
     }
 
     fn group_members_ui(&self) -> Vec<Value> {
@@ -1169,26 +1379,26 @@ impl EngineCore {
         let mut state = json!({
             "type":"state","phase":phase,"statusCode":status,
             "name":group.title,"avatar":group.avatar,
-            "video":true,"group":true,"sharing":group.sharing_screen,
-            "cameraOn":group.camera_on,"cameraWasOn":group.camera_was_on,"muted":group.muted,
-            "speakerOff":group.speaker_off,"members":members,
+            "video":true,"group":true,"sharing":group.flags.sharing_screen,
+            "cameraOn":group.camera.on,"cameraWasOn":group.camera.was_on,"muted":group.audio.muted,
+            "speakerOff":group.audio.speaker_off,"members":members,
             "selfAvatar":string_at(&self.local,"avatar").unwrap_or_default()
         });
         if let Some(since) = since {
             state["since"] = json!(since);
         }
-        self.ui_message(state);
+        self.ui_message(&state);
     }
 
     fn group_state_payload(&self) -> Value {
         let group = self.group.as_ref().expect("group state");
         json!({
-            "audioState":i32::from(group.muted),
+            "audioState":i32::from(group.audio.muted),
             "callId":group.call_id,
             "callState":3,
             "hostCall":group.host_call,
             "userId":group.local_uid,
-            "videoState":i32::from(!group.camera_on)
+            "videoState":i32::from(!group.camera.on)
         })
     }
 
@@ -1229,7 +1439,7 @@ impl EngineCore {
         });
         let status = if !names.is_empty() {
             "groupParticipants"
-        } else if group.role == GroupRole::Caller && !group.answered {
+        } else if group.role == GroupRole::Caller && !group.flags.answered {
             if ringing {
                 "groupRinging"
             } else {
@@ -1240,7 +1450,7 @@ impl EngineCore {
         };
         // The renderer's timer consumes an epoch-millisecond timestamp
         // (Date.now() - since), matching the legacy UI contract.
-        let since = if group.answered && !names.is_empty() {
+        let since = if group.flags.answered && !names.is_empty() {
             group.started_at.map(instant_to_unix_ms)
         } else {
             None
@@ -1248,7 +1458,7 @@ impl EngineCore {
         let mut ui = json!({
             "type":"state","phase":if group.phase == GroupPhase::Connected {"connected"} else {"outgoing"},
             "statusCode":status,"name":group.title,"avatar":group.avatar,
-            "video":true,"group":true,"muted":group.muted,"speakerOff":group.speaker_off,
+            "video":true,"group":true,"muted":group.audio.muted,"speakerOff":group.audio.speaker_off,
             "members":self.group_members_ui(),
             "selfAvatar":string_at(&self.local,"avatar").unwrap_or_default(),
             "statusParams":{"count":names.len()+1,"names":names}
@@ -1257,13 +1467,13 @@ impl EngineCore {
             ui["since"] = json!(seconds);
         }
         self.group_debug("ui-state");
-        self.ui_message(ui);
+        self.ui_message(&ui);
     }
 
     // Sanitized call-identity trace stored beside the executable so it can be
     // inspected without touching the user's existing native-engine log.
     // Account IDs, names and avatars are never written to this file.
-    fn group_debug_reset(&self) {
+    fn group_debug_reset() {
         if let Some(path) = std::env::current_exe()
             .ok()
             .and_then(|exe| exe.parent().map(|dir| dir.join("zcall-group-debug.log")))
@@ -1418,11 +1628,11 @@ impl EngineCore {
         }
         self.emit(json!({"type":"update","command":"callState","data":{"state":"free"}}));
         self.phase = CallPhase::Idle;
-        self.ui_message(json!({
+        self.ui_message(&json!({
             "type":"close","statusCode":close_code,
             "statusParams":{"duration":duration}
         }));
-        self.log(&format!(
+        Self::log(&format!(
             "group call {} finished ({duration}s)",
             group.call_id
         ));
@@ -1462,7 +1672,7 @@ impl EngineCore {
         };
         if group.phase == GroupPhase::Incoming {
             self.group_reject(why);
-        } else if group.role == GroupRole::Caller && !group.answered {
+        } else if group.role == GroupRole::Caller && !group.flags.answered {
             self.group_cancel(why);
         } else {
             let status = if group.phase == GroupPhase::Connected {
@@ -1502,7 +1712,7 @@ impl EngineCore {
         }
         self.group_send_answer(3);
         self.group_finish(0, "groupDeclined", false);
-        self.log(&format!("incoming group call rejected: {why}"));
+        Self::log(&format!("incoming group call rejected: {why}"));
     }
 
     fn group_answer(&mut self, cam_start_off: bool) {
@@ -1515,7 +1725,7 @@ impl EngineCore {
         }
         let (params, addresses, call_id) = {
             let group = self.group.as_mut().expect("group call");
-            group.camera_on = !cam_start_off;
+            group.camera.on = !cam_start_off;
             group.phase = GroupPhase::Connecting;
             group.deadline = Some(Instant::now() + CALL_SETUP_TIMEOUT);
             (
@@ -1525,10 +1735,10 @@ impl EngineCore {
                     uid: group.local_uid,
                     peer_uid: group.host_call,
                     sess_id: group.sess_id.as_bytes().to_vec(),
-                    is_caller: false,
-                    is_group: true,
-                    send_udp: self.send_udp,
-                    video_enabled: group.camera_on,
+                    role: MediaRole::Callee,
+                    kind: MediaKind::Group,
+                    send_udp: self.options.send_udp,
+                    video_enabled: group.camera.on,
                     video_config: group.config.clone(),
                     p2p_candidates: Vec::new(),
                 },
@@ -1548,7 +1758,7 @@ impl EngineCore {
         {
             return;
         }
-        if self.send_udp && selected.is_none() {
+        if self.options.send_udp && selected.is_none() {
             self.group_send_answer(3);
             self.group_finish(0, "groupJoinRejected", false);
             return;
@@ -1556,12 +1766,12 @@ impl EngineCore {
         if let Some(media) = self.media.as_ref() {
             media.start();
             if let Err(error) = media.send_group_video_quality_config() {
-                self.log(&format!("group VidQualConfig failed: {error}"));
+                Self::log(&format!("group VidQualConfig failed: {error}"));
             }
         }
         if let Some(group) = self.group.as_mut() {
             group.phase = GroupPhase::Connected;
-            group.answered = true;
+            group.flags.answered = true;
             group.started_at = Some(Instant::now());
             group.deadline = None;
             group.next_ping_at = Some(Instant::now() + group.ping_interval);
@@ -1569,20 +1779,20 @@ impl EngineCore {
         // Accept the room first, then make the local capture/send pipeline
         // authoritative before advertising videoState=0 to the other peers.
         self.group_send_answer(0);
-        if self.group.as_ref().is_some_and(|group| group.camera_on) {
-            let camera_on = self.start_camera_capture();
+        if self.group.as_ref().is_some_and(|group| group.camera.on) {
+            let camera_on = Self::start_camera_capture(self);
             if let Some(group) = self.group.as_mut() {
-                group.camera_on = camera_on;
+                group.camera.on = camera_on;
             }
             if let Some(media) = self.media.as_ref() {
                 if let Err(error) = media.set_group_camera(camera_on) {
-                    self.log(&format!(
+                    Self::log(&format!(
                         "incoming group camera state update failed: {error}"
                     ));
                 }
                 if camera_on {
                     if let Err(error) = media.send_group_video_quality_config() {
-                        self.log(&format!("incoming group VidQualConfig failed: {error}"));
+                        Self::log(&format!("incoming group VidQualConfig failed: {error}"));
                     }
                 }
             }
@@ -1650,7 +1860,7 @@ impl EngineCore {
                     if let Some(invitee) = group.members.remove(&invite_id) {
                         if matches!(invitee.state.as_str(), "calling" | "ringing") {
                             if update.name.is_empty() {
-                                update.name = invitee.name.clone();
+                                update.name.clone_from(&invitee.name);
                             }
                             if update.avatar.is_empty() {
                                 update.avatar = invitee.avatar;
@@ -1678,10 +1888,10 @@ impl EngineCore {
             // State-only roster/audio events must retain identity metadata.
             if let Some(existing) = group.members.get(&uid) {
                 if update.name.is_empty() {
-                    update.name = existing.name.clone();
+                    update.name.clone_from(&existing.name);
                 }
                 if update.avatar.is_empty() {
-                    update.avatar = existing.avatar.clone();
+                    update.avatar.clone_from(&existing.avatar);
                 }
             }
             if update.state == "left" {
@@ -1715,13 +1925,13 @@ impl EngineCore {
         if let Some(uid) = request_video_uid {
             if let Some(media) = self.media.as_ref() {
                 if let Err(error) = media.request_group_video(uid) {
-                    self.log(&format!("group video subscribe for {uid} failed: {error}"));
+                    Self::log(&format!("group video subscribe for {uid} failed: {error}"));
                 }
             }
         }
         if joined {
             if let Some(group) = self.group.as_mut() {
-                group.answered = true;
+                group.flags.answered = true;
                 group.deadline = None;
                 group.camera_state_reassert_at = Some(Instant::now() + Duration::from_secs(2));
             }
@@ -1817,7 +2027,7 @@ impl EngineCore {
                 invitee.muted |= existing.muted;
             }
             if invitee.state == "incall" {
-                group.answered = true;
+                group.flags.answered = true;
                 group.deadline = None;
             }
             group
@@ -1830,7 +2040,7 @@ impl EngineCore {
             true
         };
         if mapped {
-            self.log(&format!(
+            Self::log(&format!(
                 "group mapped Zalo participant {zalo_id} to explicit SFU UID {sfu_uid}"
             ));
             if let Some(group) = self.group.as_mut() {
@@ -1919,7 +2129,7 @@ impl EngineCore {
                     }
                 }
                 if merged.state == "incall" {
-                    group.answered = true;
+                    group.flags.answered = true;
                     group.deadline = None;
                 }
                 group.member_id_aliases.insert(zalo_id, sfu_key.clone());
@@ -1929,7 +2139,7 @@ impl EngineCore {
         }
         if !mapped_uids.is_empty() {
             self.group_debug("identity-pair-applied");
-            self.log(&format!(
+            Self::log(&format!(
                 "group mapped {} Zalo participant ID(s) to SFU media UID(s)",
                 mapped_uids.len()
             ));
@@ -1958,11 +2168,11 @@ impl EngineCore {
                     call.deadline = None;
                 }
                 self.phase = CallPhase::Connecting;
-                self.log("early media received before answer; entering connecting phase");
+                Self::log("early media received before answer; entering connecting phase");
                 self.ui_state("connecting", "connecting");
             }
             "connect" => {
-                self.log("sustained early media received; connecting caller media");
+                Self::log("sustained early media received; connecting caller media");
                 self.connect_caller(&Value::Null);
             }
             _ => {}
@@ -1973,7 +2183,7 @@ impl EngineCore {
         match event {
             GroupMediaEvent::Roster(uids) => self.group_roster(uids),
             GroupMediaEvent::MemberLeft(uid, reason) => {
-                self.log(&format!("group SFU member {uid} left (reason {reason})"));
+                Self::log(&format!("group SFU member {uid} left (reason {reason})"));
                 let update = self
                     .group
                     .as_ref()
@@ -2001,7 +2211,7 @@ impl EngineCore {
                 } else {
                     "groupEnded"
                 };
-                self.log(&format!("removed from group SFU room (reason {reason})"));
+                Self::log(&format!("removed from group SFU room (reason {reason})"));
                 self.group_finish(0, status, false);
             }
             GroupMediaEvent::ShareReady | GroupMediaEvent::ShareKeyframeRequested => {
@@ -2029,7 +2239,7 @@ impl EngineCore {
                 // after this source has delivered a valid video RTP packet.
                 if let Some(media) = self.media.as_ref() {
                     if let Err(error) = media.request_group_video(uid) {
-                        self.log(&format!(
+                        Self::log(&format!(
                             "group VidQualReq for video SSRC {uid} failed: {error}"
                         ));
                     }
@@ -2055,16 +2265,16 @@ impl EngineCore {
                 self.group_debug("audio-member-applied");
             }
             GroupMediaEvent::AudioFault(kind) => {
-                self.ui_message(json!({"type":"audioFault","kind":kind}));
+                self.ui_message(&json!({"type":"audioFault","kind":kind}));
             }
             GroupMediaEvent::EarlyAudio(phase) => self.on_early_audio(phase),
             GroupMediaEvent::MemberSpeaking(uid, on) => {
-                self.ui_message(json!({"type":"speaking","uid":uid,"on":on}));
+                self.ui_message(&json!({"type":"speaking","uid":uid,"on":on}));
             }
             GroupMediaEvent::ShareFailed(reason) => {
-                self.log(&format!("group screen-share peer failed: {reason}"));
+                Self::log(&format!("group screen-share peer failed: {reason}"));
                 self.stop_screen_capture();
-                self.ui_message(json!({"type":"screenError","message":reason}));
+                self.ui_message(&json!({"type":"screenError","message":reason}));
             }
         }
     }
@@ -2094,7 +2304,7 @@ impl EngineCore {
         // tiles before ROOM_UPDATED was delivered.
         if let Some(group) = self.group.as_mut() {
             if group.role == GroupRole::Caller {
-                group.observed_sfu_uids = present.clone();
+                group.observed_sfu_uids.clone_from(&present);
                 group.pending_sfu_uids.clear();
                 for uid in &ordered {
                     let key = uid.to_string();
@@ -2154,108 +2364,38 @@ impl EngineCore {
             self.group_incoming(data);
             return;
         }
+        let id = number_at(data, "id").or_else(|| number_at(data, "callId"));
+        let (phase, host_call, actor) = {
+            let Some(group) = self.group.as_ref() else {
+                return;
+            };
+            if id.is_some_and(|id| id as u32 != group.call_id) {
+                return;
+            }
+            (
+                group.phase,
+                group.host_call,
+                resolve_group_control_actor(group, data),
+            )
+        };
+        if self.handle_group_control_termination(act, phase, host_call, &actor) {
+            return;
+        }
+        if actor.who_is_zero || actor.who_is_local {
+            return;
+        }
         let Some(group) = self.group.as_ref() else {
             return;
         };
-        let id = number_at(data, "id").or_else(|| number_at(data, "callId"));
-        if id.is_some_and(|id| id as u32 != group.call_id) {
-            return;
-        }
-        let user_id = value_string(data.get("userId"));
-        let from_id = value_string(data.get("fromId"));
-        let user_tag = Self::group_debug_field(group, &user_id);
-        let from_tag = Self::group_debug_field(group, &from_id);
-        let is_known_member_id = |candidate: &str| {
-            !candidate.is_empty()
-                && (group.invited.iter().any(|id| id == candidate)
-                    || group.members.contains_key(candidate)
-                    || group.member_id_aliases.contains_key(candidate))
-        };
-        let invited_zalo_id = if group.invited.iter().any(|id| id == &from_id) {
-            Some(from_id.clone())
-        } else if group.invited.iter().any(|id| id == &user_id) {
-            Some(user_id.clone())
-        } else {
-            None
-        };
-        // userId in a group-state packet is the sender's SFU/media UID.
-        // Preserve it separately from fromId, which may be the long Zalo ID.
-        let explicit_sfu_uid = if invited_zalo_id.is_some() {
-            [user_id.as_str(), from_id.as_str()]
-                .into_iter()
-                .filter(|candidate| !group.invited.iter().any(|id| id == candidate))
-                .find_map(|candidate| candidate.parse::<u32>().ok())
-                .filter(|uid| *uid != 0 && *uid != group.local_uid && *uid != group.share_screen_id)
-        } else {
-            None
-        };
-        let who_raw = invited_zalo_id
-            .clone()
-            .or_else(|| {
-                if is_known_member_id(&user_id) {
-                    Some(user_id.clone())
-                } else if is_known_member_id(&from_id) {
-                    Some(from_id.clone())
-                } else if !user_id.is_empty() && user_id != "0" {
-                    Some(user_id.clone())
-                } else if !from_id.is_empty() {
-                    Some(from_id.clone())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default();
-        let who_uid = who_raw.parse::<u32>().unwrap_or(0);
-        let who_is_zero = who_raw.is_empty() || who_raw == "0";
-        let who_is_local = who_uid != 0 && who_uid == group.local_uid;
-        let raw_who_key = if who_uid != 0 {
-            who_uid.to_string()
-        } else {
-            who_raw
-        };
-        let who_key = group
-            .member_id_aliases
-            .get(&raw_who_key)
-            .cloned()
-            .unwrap_or(raw_who_key);
-        if act == "group_end_call" || act == "group_cancel" {
-            if group.phase == GroupPhase::Incoming
-                && (who_is_zero || who_uid == group.host_call || who_is_local)
-            {
-                self.group_finish(0, "groupEnded", false);
-            } else if who_is_local {
-                self.group_finish(
-                    if group.phase == GroupPhase::Connected {
-                        50
-                    } else {
-                        0
-                    },
-                    "groupEnded",
-                    false,
-                );
-            } else if !who_is_zero {
-                if let Some(group) = self.group.as_mut() {
-                    group.pending_member_ids.retain(|id| id != &who_key);
-                    if let Some(member) = group.members.get_mut(&who_key) {
-                        member.state = "left".into();
-                    }
-                }
-                self.group_update_status();
-                self.group_check_empty();
-            }
-            return;
-        }
-        if act == "group_answer"
-            && group.phase == GroupPhase::Incoming
-            && (who_is_zero || who_is_local)
-        {
-            self.group_finish(0, "groupEnded", false);
-            return;
-        }
-        if who_is_zero || who_is_local {
-            return;
-        }
-        let key = who_key;
+        let GroupControlActor {
+            user_tag,
+            from_tag,
+            invited_zalo_id,
+            explicit_sfu_uid,
+            who_key: key,
+            who_uid,
+            ..
+        } = actor;
         let current = self.group_member_for_sfu_uid(&key).unwrap_or(GroupMember {
             name: String::new(),
             avatar: String::new(),
@@ -2318,6 +2458,50 @@ impl EngineCore {
             self.group_note_zalo_member_join(&key);
             self.group_update_status();
         }
+    }
+
+    fn handle_group_control_termination(
+        &mut self,
+        act: &str,
+        phase: GroupPhase,
+        host_call: u32,
+        actor: &GroupControlActor,
+    ) -> bool {
+        if act == "group_end_call" || act == "group_cancel" {
+            if phase == GroupPhase::Incoming
+                && (actor.who_is_zero || actor.who_uid == host_call || actor.who_is_local)
+            {
+                self.group_finish(0, "groupEnded", false);
+            } else if actor.who_is_local {
+                self.group_finish(
+                    if phase == GroupPhase::Connected {
+                        50
+                    } else {
+                        0
+                    },
+                    "groupEnded",
+                    false,
+                );
+            } else if !actor.who_is_zero {
+                if let Some(group) = self.group.as_mut() {
+                    group.pending_member_ids.retain(|id| id != &actor.who_key);
+                    if let Some(member) = group.members.get_mut(&actor.who_key) {
+                        member.state = "left".into();
+                    }
+                }
+                self.group_update_status();
+                self.group_check_empty();
+            }
+            return true;
+        }
+        if act == "group_answer"
+            && phase == GroupPhase::Incoming
+            && (actor.who_is_zero || actor.who_is_local)
+        {
+            self.group_finish(0, "groupEnded", false);
+            return true;
+        }
+        false
     }
 
     fn group_incoming(&mut self, data: &Value) {
@@ -2391,13 +2575,10 @@ impl EngineCore {
             next_ping_at: None,
             camera_state_reassert_at: None,
             ping_interval,
-            muted: false,
-            speaker_off: false,
-            camera_on: false,
-            camera_was_on: false,
-            answered: false,
+            audio: GroupAudioFlags::default(),
+            camera: GroupCameraFlags::default(),
+            flags: GroupCallFlags::default(),
             share_screen_id: 0,
-            sharing_screen: false,
         };
         let call_id = group.call_id;
         let session = group.sess_id.clone();
@@ -2416,7 +2597,7 @@ impl EngineCore {
                 "hostCall":host_call,"session":session,"status":1
             }
         }));
-        self.ui_message(json!({
+        self.ui_message(&json!({
             "type":"state","phase":"incoming","statusCode":"incomingGroupInvite",
             "name":self.group.as_ref().unwrap().title,"avatar":self.group.as_ref().unwrap().avatar,
             "video":true,"group":true,"inviter":host_name,
@@ -2438,164 +2619,169 @@ impl EngineCore {
     }
 
     fn on_control(&mut self, act: &str, data: &Value) {
-        let d = data.get("data").cloned().unwrap_or_else(|| json!({}));
+        let payload = data.get("data").cloned().unwrap_or_else(|| json!({}));
         if act.starts_with("group_") {
-            self.group_control(act, &d);
+            self.group_control(act, &payload);
             return;
         }
-        let call_id = d
+        let call_id = payload
             .get("callId")
-            .or_else(|| d.get("id"))
+            .or_else(|| payload.get("id"))
             .or_else(|| data.get("callId"))
-            .or_else(|| data.get("id"));
-        let current_id = self.call.as_ref().map(|c| c.call_id);
+            .or_else(|| data.get("id"))
+            .and_then(number_value)
+            .map(|id| id as u32);
+        let current_id = self.call.as_ref().map(|call| call.id);
         match act {
-            "request" => self.incoming_call(&d),
-            "ring_ring" => {
-                if call_id
-                    .and_then(number_value)
-                    .is_some_and(|id| current_id != Some(id as u32))
-                {
-                    self.log("ignoring stale ring notification");
-                    return;
-                }
-                if let Some(media) = self.media.as_ref() {
-                    let phase = self
-                        .call
-                        .as_ref()
-                        .map_or_else(|| "none".into(), |call| format!("{:?}", call.phase));
-                    media.note_debug_event(&format!(
-                        "peer-control act=ring_ring phase={phase} audioState={:?} videoState={:?}",
-                        number_at(&d, "audioState"),
-                        number_at(&d, "videoState")
-                    ));
-                }
-                if let Some(call) = self.call.as_mut() {
-                    if call.role == CallRole::Caller && call.phase == CallPhase::Outgoing {
-                        call.phase = CallPhase::Ringing;
-                        call.deadline = Some(Instant::now() + RING_TIMEOUT);
-                        self.phase = CallPhase::Ringing;
-                        self.ui_state("outgoing", "ringing");
-                    }
-                }
-            }
-            "answer" => {
-                if let Some(id) = call_id.and_then(number_value).map(|n| n as u32) {
-                    self.last_ended_call = Some(id);
-                    if current_id.is_some_and(|current| current != id) {
-                        return;
-                    }
-                }
-                let Some(call) = self.call.as_ref() else {
-                    return;
-                };
-                if call.role == CallRole::Callee && call.phase == CallPhase::Incoming {
-                    self.log("incoming call answered on another device");
-                    self.finish(0, None, false);
-                    return;
-                }
-                if call.role != CallRole::Caller || call.phase == CallPhase::InCall {
-                    return;
-                }
-                let params = parse_json_value(d.get("params"));
-                let status = number_at(&d, "status")
-                    .or_else(|| number_at(&params, "status"))
-                    .unwrap_or(0);
-                if status != 0 {
-                    if status == 6 {
-                        // Zalo reports a no-answer/handshake timeout through
-                        // control.answer status 6. This is not an explicit
-                        // receiver rejection: record it as caller-cancelled,
-                        // with the same zero-duration semantics as local hangup.
-                        self.log(
-                            "outgoing call timed out remotely (answer status 6); sending end signal and recording 00:00",
-                        );
-                        let close_code = if call.phase == CallPhase::Outgoing {
-                            "recipientUnreachable"
-                        } else {
-                            "recipientNoAnswer"
-                        };
-                        if let Some(call) = self.call.as_ref() {
-                            self.emit(json!({"type":"sendSignal","command":405,"data":{
-                                "callId":call.call_id,
-                                "callType":i32::from(call.call_type == 3),
-                                "status":0,
-                                "toId":call.peer_id
-                            }}));
-                        }
-                        self.finish(103, Some(close_code), true);
-                    } else {
-                        self.log(&format!("peer declined call (status {status})"));
-                        let code = if status == 3 {
-                            "recipientDeclined"
-                        } else {
-                            "recipientUnreachable"
-                        };
-                        self.finish(160, Some(code), true);
-                    }
-                    return;
-                }
-                self.connect_caller(&params);
-            }
+            "request" => self.incoming_call(&payload),
+            "ring_ring" => self.on_ring_ring(&payload, call_id, current_id),
+            "answer" => self.on_answer_control(&payload, call_id, current_id),
             "end_call" | "cancel" | "reject" | "busy" => {
-                if call_id.is_some()
-                    && current_id.is_some()
-                    && call_id.and_then(number_value).map(|n| n as u32) != current_id
-                {
-                    return;
-                }
-                if self
-                    .call
-                    .as_ref()
-                    .is_some_and(|c| c.phase == CallPhase::Incoming)
-                {
-                    self.finish(0, None, false);
-                } else {
-                    self.peer_ended(act);
-                }
+                self.on_end_control(act, call_id, current_id);
             }
             "onoff_camera" | "mute_audio" | "share_screen" => {
-                if call_id
-                    .and_then(number_value)
-                    .is_some_and(|id| current_id != Some(id as u32))
-                {
-                    self.log("ignoring peer media-state notification for another call");
-                    return;
-                }
-                let params = parse_json_value(d.get("params"));
-                let kind = number_at(&params, "type")
-                    .or_else(|| number_at(&params, "status"))
-                    .unwrap_or(0);
-                let phase = self
-                    .call
-                    .as_ref()
-                    .map_or_else(|| "none".into(), |call| format!("{:?}", call.phase));
-                if let Some(media) = self.media.as_ref() {
-                    media.note_debug_event(&format!(
-                        "peer-control act={act} phase={phase} value={kind}"
-                    ));
-                }
-                if let Some(call) = self.call.as_mut() {
-                    match act {
-                        "onoff_camera" => call.peer_camera_off = kind == 0,
-                        "mute_audio" => call.peer_muted = kind == 1,
-                        _ => call.peer_sharing = kind == 1,
-                    }
-                    self.ui_peer_state();
-                }
+                self.on_peer_media_control(act, &payload, call_id, current_id);
             }
             _ => {}
         }
     }
 
+    fn on_ring_ring(&mut self, data: &Value, call_id: Option<u32>, current_id: Option<u32>) {
+        if call_id.is_some_and(|id| current_id != Some(id)) {
+            Self::log("ignoring stale ring notification");
+            return;
+        }
+        if let Some(media) = self.media.as_ref() {
+            let phase = self
+                .call
+                .as_ref()
+                .map_or_else(|| "none".into(), |call| format!("{:?}", call.phase));
+            media.note_debug_event(&format!(
+                "peer-control act=ring_ring phase={phase} audioState={:?} videoState={:?}",
+                number_at(data, "audioState"),
+                number_at(data, "videoState")
+            ));
+        }
+        if let Some(call) = self.call.as_mut() {
+            if call.role == CallRole::Caller && call.phase == CallPhase::Outgoing {
+                call.phase = CallPhase::Ringing;
+                call.deadline = Some(Instant::now() + RING_TIMEOUT);
+                self.phase = CallPhase::Ringing;
+                self.ui_state("outgoing", "ringing");
+            }
+        }
+    }
+
+    fn on_answer_control(&mut self, data: &Value, call_id: Option<u32>, current_id: Option<u32>) {
+        if let Some(id) = call_id {
+            self.last_ended_call = Some(id);
+            if current_id.is_some_and(|current| current != id) {
+                return;
+            }
+        }
+        let Some(call) = self.call.as_ref() else {
+            return;
+        };
+        if call.role == CallRole::Callee && call.phase == CallPhase::Incoming {
+            Self::log("incoming call answered on another device");
+            self.finish(0, None, false);
+            return;
+        }
+        if call.role != CallRole::Caller || call.phase == CallPhase::InCall {
+            return;
+        }
+        let params = parse_json_value(data.get("params"));
+        let status = number_at(data, "status")
+            .or_else(|| number_at(&params, "status"))
+            .unwrap_or(0);
+        if status != 0 {
+            if status == 6 {
+                Self::log(
+                    "outgoing call timed out remotely (answer status 6); sending end signal and recording 00:00",
+                );
+                let close_code = if call.phase == CallPhase::Outgoing {
+                    "recipientUnreachable"
+                } else {
+                    "recipientNoAnswer"
+                };
+                self.emit(json!({"type":"sendSignal","command":405,"data":{
+                    "callId":call.id,
+                    "callType":i32::from(call.kind == 3),
+                    "status":0,
+                    "toId":call.peer_id
+                }}));
+                self.finish(103, Some(close_code), true);
+            } else {
+                Self::log(&format!("peer declined call (status {status})"));
+                let code = if status == 3 {
+                    "recipientDeclined"
+                } else {
+                    "recipientUnreachable"
+                };
+                self.finish(160, Some(code), true);
+            }
+            return;
+        }
+        self.connect_caller(&params);
+    }
+
+    fn on_end_control(&mut self, act: &str, call_id: Option<u32>, current_id: Option<u32>) {
+        if call_id.is_some() && current_id.is_some() && call_id != current_id {
+            return;
+        }
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|call| call.phase == CallPhase::Incoming)
+        {
+            self.finish(0, None, false);
+        } else {
+            self.peer_ended(act);
+        }
+    }
+
+    fn on_peer_media_control(
+        &mut self,
+        act: &str,
+        data: &Value,
+        call_id: Option<u32>,
+        current_id: Option<u32>,
+    ) {
+        if call_id.is_some_and(|id| current_id != Some(id)) {
+            Self::log("ignoring peer media-state notification for another call");
+            return;
+        }
+        let params = parse_json_value(data.get("params"));
+        let kind = number_at(&params, "type")
+            .or_else(|| number_at(&params, "status"))
+            .unwrap_or(0);
+        let phase = self
+            .call
+            .as_ref()
+            .map_or_else(|| "none".into(), |call| format!("{:?}", call.phase));
+        if let Some(media) = self.media.as_ref() {
+            media.note_debug_event(&format!(
+                "peer-control act={act} phase={phase} value={kind}"
+            ));
+        }
+        if let Some(call) = self.call.as_mut() {
+            match act {
+                "onoff_camera" => call.peer_media.camera_off = kind == 0,
+                "mute_audio" => call.peer_media.muted = kind == 1,
+                _ => call.peer_media.sharing = kind == 1,
+            }
+            self.ui_peer_state();
+        }
+    }
+
     fn incoming_call(&mut self, data: &Value) {
         if self.call.is_some() || self.group.is_some() {
-            self.log("incoming call while busy; ignored");
+            Self::log("incoming call while busy; ignored");
             return;
         }
         let call_id = number_at(data, "callId").unwrap_or(0).max(0) as u32;
         if self.last_ended_call == Some(call_id) {
-            self.log("late incoming event for ended call; ignored");
+            Self::log("late incoming event for ended call; ignored");
             return;
         }
         let params = parse_json_value(data.get("params"));
@@ -2608,7 +2794,7 @@ impl EngineCore {
             .unwrap_or_else(|| json!({}));
         let raw_call_type = number_at(&extend, "callType");
         let call_type = if raw_call_type == Some(1) { 3 } else { 1 };
-        self.log(&format!("incoming call type map: extendData.callType={raw_call_type:?} -> internal.call_type={call_type} (1=video, otherwise voice)"));
+        Self::log(&format!("incoming call type map: extendData.callType={raw_call_type:?} -> internal.call_type={call_type} (1=video, otherwise voice)"));
         let p2p_candidates = parse_p2p_candidates(extend.get("p2p"));
         let media_config = parse_json_value(
             params
@@ -2628,13 +2814,13 @@ impl EngineCore {
         self.call = Some(Call {
             role: CallRole::Callee,
             phase: CallPhase::Incoming,
-            call_id,
+            id: call_id,
             peer_id: peer_id.clone(),
             peer_uid: peer_media_uid,
             local_uid,
             peer_name,
             avatar,
-            call_type,
+            kind: call_type,
             session_id: sess,
             server: Some(json!({
                 "rtpaddr": data.get("rtpAddress").cloned().unwrap_or(Value::Null),
@@ -2647,19 +2833,14 @@ impl EngineCore {
             media_config,
             deadline: Some(Instant::now() + RING_TIMEOUT),
             started_at: None,
-            muted: false,
-            speaker_off: false,
-            camera_on: false,
-            camera_was_on: false,
+            audio: CallAudioFlags::default(),
+            camera: CallCameraFlags::default(),
             camera_state_reassert_at: None,
-            peer_muted: false,
-            peer_camera_off: false,
-            peer_sharing: false,
-            sharing_screen: false,
+            peer_media: PeerMediaFlags::default(),
         });
         self.phase = CallPhase::Incoming;
         if crate::devices::should_block_incoming() {
-            self.log("rejecting incoming call because required audio devices are unavailable");
+            Self::log("rejecting incoming call because required audio devices are unavailable");
             self.reject_call("no-device");
             return;
         }
@@ -2676,7 +2857,7 @@ impl EngineCore {
                 "incomingVoice"
             },
         );
-        self.log(&format!("incoming call {call_id}"));
+        Self::log(&format!("incoming call {call_id}"));
     }
 
     fn on_recv_signal(&mut self, command: &Value, data: &Value) {
@@ -2687,20 +2868,20 @@ impl EngineCore {
                 if self.group.as_ref().is_some_and(|group| {
                     number_at(data, "callId").is_some_and(|id| id as u32 != group.call_id)
                 }) {
-                    self.log("ignoring stale group screen-share response");
+                    Self::log("ignoring stale group screen-share response");
                     return;
                 }
                 self.group_share_response(data);
             }
             "405" | "409" => {
-                let Some(current_id) = self.call.as_ref().map(|call| call.call_id) else {
+                let Some(current_id) = self.call.as_ref().map(|call| call.id) else {
                     return;
                 };
                 let signal_id = number_at(data, "callId")
                     .or_else(|| number_at(data, "id"))
                     .map(|value| value as u32);
                 if signal_id != Some(current_id) {
-                    self.log(&format!(
+                    Self::log(&format!(
                         "ignoring stale/unmatched recvSignal {command} for call {signal_id:?}; active call is {current_id}"
                     ));
                     return;
@@ -2708,7 +2889,7 @@ impl EngineCore {
                 self.peer_ended("server-end");
             }
             "402" | "407" | "408" | "416" | "406" | "12006" | "12064" => {}
-            other => self.log(&format!("unhandled recvSignal {other}")),
+            other => Self::log(&format!("unhandled recvSignal {other}")),
         }
     }
 
@@ -2743,13 +2924,13 @@ impl EngineCore {
         let peer_uid = number_at(data, "toId").unwrap_or(0).max(0) as u32;
         let media_config =
             parse_json_value(data.get("zrtc_config").or_else(|| data.get("zrtcConfig")));
-        let call_id = self.call.as_ref().map_or(0, |c| c.call_id);
-        let call_type = self.call.as_ref().map_or(1, |c| c.call_type);
+        let call_id = self.call.as_ref().map_or(0, |c| c.id);
+        let call_type = self.call.as_ref().map_or(1, |c| c.kind);
         if let Some(call) = self.call.as_mut() {
-            call.session_id = sess.clone();
+            call.session_id.clone_from(&sess);
             call.local_uid = local_uid;
             call.peer_uid = peer_uid;
-            call.servers = servers.clone();
+            call.servers.clone_from(&servers);
             call.media_config = media_config.clone();
         }
         let addresses = parse_server_addresses(&servers);
@@ -2759,9 +2940,9 @@ impl EngineCore {
             uid: local_uid,
             peer_uid,
             sess_id: sess.as_bytes().to_vec(),
-            is_caller: true,
-            is_group: false,
-            send_udp: self.send_udp,
+            role: MediaRole::Caller,
+            kind: MediaKind::OneToOne,
+            send_udp: self.options.send_udp,
             video_enabled: call_type == 3,
             video_config: media_config,
             p2p_candidates: Vec::new(),
@@ -2770,14 +2951,14 @@ impl EngineCore {
             Some(media) => match media.prepare(params, &addresses) {
                 Ok(addr) => addr,
                 Err(err) => {
-                    self.log(&format!("media prepare failed: {err}"));
+                    Self::log(&format!("media prepare failed: {err}"));
                     None
                 }
             },
             None => None,
         };
         let selected_server = select_server(&servers, selected).or_else(|| {
-            if self.send_udp {
+            if self.options.send_udp {
                 None
             } else {
                 servers.first().cloned()
@@ -2801,7 +2982,7 @@ impl EngineCore {
             .media
             .as_ref()
             .map_or_default(|media| media.p2p_candidates(false));
-        let extend = extend_data(&server, call_type, false, p2p, false);
+        let extend = extend_data(&server, call_type, false, &p2p, false);
         self.emit(json!({
             "type":"sendSignal","command":416,"data":{
                 "callId":call_id,
@@ -2813,7 +2994,7 @@ impl EngineCore {
                 "session":sess
             }
         }));
-        self.log("call-v2 401 handled; sent 416");
+        Self::log("call-v2 401 handled; sent 416");
     }
 
     fn connect_caller(&mut self, params: &Value) {
@@ -2834,9 +3015,9 @@ impl EngineCore {
         if !candidates.is_empty() {
             if let Some(media) = self.media.as_ref() {
                 if let Err(error) = media.set_p2p_candidates(candidates.clone()) {
-                    self.log(&format!("could not install callee P2P candidates: {error}"));
+                    Self::log(&format!("could not install callee P2P candidates: {error}"));
                 } else {
-                    self.log(&format!(
+                    Self::log(&format!(
                         "installed {} callee P2P candidate(s)",
                         candidates.len()
                     ));
@@ -2849,7 +3030,7 @@ impl EngineCore {
         call.phase = CallPhase::InCall;
         call.deadline = None;
         call.started_at = Some(Instant::now());
-        let call_id = call.call_id;
+        let call_id = call.id;
         let peer_id = call.peer_id.clone();
         if let Some(media) = self.media.as_ref() {
             media.start();
@@ -2887,13 +3068,13 @@ impl EngineCore {
         ) = {
             let c = self.call.as_ref().expect("checked above");
             (
-                c.call_id,
+                c.id,
                 c.peer_id.clone(),
                 c.peer_uid,
                 c.local_uid,
                 c.session_id.clone(),
                 c.server.clone().unwrap_or_else(|| json!({})),
-                c.call_type,
+                c.kind,
                 c.p2p_candidates.clone(),
                 c.media_config.clone(),
             )
@@ -2902,8 +3083,8 @@ impl EngineCore {
             c.phase = CallPhase::Connecting;
             c.deadline = None;
             c.started_at = Some(answer_started_at);
-            if c.call_type == 3 {
-                c.camera_on = !camera_off;
+            if c.kind == 3 {
+                c.camera.on = !camera_off;
             }
         }
         self.phase = CallPhase::Connecting;
@@ -2915,9 +3096,9 @@ impl EngineCore {
             uid: local_uid,
             peer_uid: remote_media_uid,
             sess_id: sess.as_bytes().to_vec(),
-            is_caller: false,
-            is_group: false,
-            send_udp: self.send_udp,
+            role: MediaRole::Callee,
+            kind: MediaKind::OneToOne,
+            send_udp: self.options.send_udp,
             video_enabled: call_type == 3,
             video_config: media_config,
             p2p_candidates,
@@ -2926,7 +3107,7 @@ impl EngineCore {
             Some(media) => media.prepare(params, &addresses).ok().flatten(),
             None => None,
         };
-        if selected.is_none() && self.send_udp {
+        if selected.is_none() && self.options.send_udp {
             self.emit(json!({"type":"sendSignal","command":402,"data":{
                 "callId":call_id,"callerId":peer_id,"codec":EMPTY_CODEC,"extendData":json_cpp(&json!({})),
                 "rtcpAddress":"","rtpAddress":"","session":sess,"status":3
@@ -2944,7 +3125,7 @@ impl EngineCore {
             .media
             .as_ref()
             .map_or_default(|media| media.p2p_candidates(true));
-        let extend = extend_data(&chosen, call_type, true, p2p, true);
+        let extend = extend_data(&chosen, call_type, true, &p2p, true);
         self.emit(json!({
             "type":"sendSignal","command":402,"data":{
                 "callId":call_id,"callerId":peer_id,"codec":CODEC,
@@ -2972,8 +3153,7 @@ impl EngineCore {
             self.finish(0, None, false);
             return;
         }
-        let (call_id, peer_id, sess) =
-            (call.call_id, call.peer_id.clone(), call.session_id.clone());
+        let (call_id, peer_id, sess) = (call.id, call.peer_id.clone(), call.session_id.clone());
         self.emit(json!({"type":"request","command":"action","data":{"id":8}}));
         self.emit(json!({
             "type":"sendSignal","command":402,"data":{
@@ -2992,7 +3172,7 @@ impl EngineCore {
                 }}));
                 self.finish(50, Some("ended"), true);
             } else {
-                self.log(&format!("peer ended during setup ({reason})"));
+                Self::log(&format!("peer ended during setup ({reason})"));
                 self.finish(103, Some("ended"), true);
             }
         }
@@ -3006,12 +3186,8 @@ impl EngineCore {
             self.reject_call(reason);
             return;
         }
-        let (call_id, peer_id, call_type, phase) = (
-            call.call_id,
-            call.peer_id.clone(),
-            call.call_type,
-            call.phase,
-        );
+        let (call_id, peer_id, call_type, phase) =
+            (call.id, call.peer_id.clone(), call.kind, call.phase);
         if phase == CallPhase::InCall {
             self.emit(
                 json!({"type":"sendSignal","command":409,"data":{"callId":call_id,"toId":peer_id}}),
@@ -3040,7 +3216,7 @@ impl EngineCore {
         let Some(call) = self.call.take() else {
             return;
         };
-        self.last_ended_call = Some(call.call_id);
+        self.last_ended_call = Some(call.id);
         let connected = call.phase == CallPhase::InCall;
         let duration = if connected {
             elapsed_seconds_rounded(call.started_at)
@@ -3069,10 +3245,10 @@ impl EngineCore {
                 "role":call.role == CallRole::Caller,
                 "missed":outgoing_timeout,
                 "reason":if outgoing_timeout {missed_reason} else {0},
-                "callType":i32::from(call.call_type == 3)
+                "callType":i32::from(call.kind == 3)
             }}));
             self.emit(json!({"type":"sendSignal","command":406,"data":{
-                "callId":call.call_id,
+                "callId":call.id,
                 "data":json!({
                     "Codec":["opus/16000/1","20"],"NewZRTC":1,
                     "RxTotalPkt":rx_total,"SrtpMode":1,"TxTotalPkt":tx_total,"sysInfo":"native-engine"
@@ -3085,14 +3261,14 @@ impl EngineCore {
         self.phase = CallPhase::Idle;
         if let Some(code) = close_code {
             self.ui_message(
-                json!({"type":"close","statusCode":code,"statusParams":{"duration":duration}}),
+                &json!({"type":"close","statusCode":code,"statusParams":{"duration":duration}}),
             );
         } else {
-            self.ui_message(json!({"type":"close","statusCode":if connected {"endedWithDuration"} else {"ended"},"statusParams":{"duration":duration}}));
+            self.ui_message(&json!({"type":"close","statusCode":if connected {"endedWithDuration"} else {"ended"},"statusParams":{"duration":duration}}));
         }
-        self.log(&format!(
+        Self::log(&format!(
             "call {} finished (status {status}, {duration}s)",
-            call.call_id
+            call.id
         ));
     }
 
@@ -3108,12 +3284,33 @@ impl EngineCore {
         }
     }
 
-    fn on_ui_action(&mut self, action: UiAction) {
+    fn on_ui_action(&mut self, action: &UiAction) {
+        if self.on_ui_call_action(action)
+            || self.on_ui_audio_action(action)
+            || self.on_ui_camera_action(action)
+            || self.on_ui_sources_action(action)
+            || self.on_ui_screen_action(action)
+            || self.on_ui_device_action(action)
+            || self.on_ui_device_list_action(action)
+            || self.on_ui_zalo_device_config_action(action)
+        {
+            return;
+        }
+        self.on_ui_misc_action(action);
+    }
+
+    fn on_ui_call_action(&mut self, action: &UiAction) -> bool {
+        if !matches!(
+            action.action.as_str(),
+            "log" | "accept" | "reject" | "hangup"
+        ) {
+            return false;
+        }
         match action.action.as_str() {
             "log" => {
                 if let Some(message) = action.text.as_deref() {
                     let bounded: String = message.chars().take(512).collect();
-                    self.log(&format!("[ui] {bounded}"));
+                    Self::log(&format!("[ui] {bounded}"));
                 }
             }
             "accept" => {
@@ -3137,6 +3334,20 @@ impl EngineCore {
                     self.hangup("local");
                 }
             }
+
+            _ => {}
+        }
+        true
+    }
+
+    fn on_ui_audio_action(&mut self, action: &UiAction) -> bool {
+        if !matches!(
+            action.action.as_str(),
+            "micAutoGain" | "micVolume" | "mute" | "speaker"
+        ) {
+            return false;
+        }
+        match action.action.as_str() {
             "micAutoGain" => {
                 if let Some(on) = action.on {
                     if let Some(media) = self.media.as_ref() {
@@ -3157,10 +3368,10 @@ impl EngineCore {
             "mute" => {
                 if let Some(on) = action.on {
                     if let Some(call) = self.call.as_mut() {
-                        call.muted = on;
+                        call.audio.muted = on;
                     }
                     if let Some(group) = self.group.as_mut() {
-                        group.muted = on;
+                        group.audio.muted = on;
                     }
                     if let Some(media) = self.media.as_ref() {
                         media.set_mute(on);
@@ -3177,10 +3388,10 @@ impl EngineCore {
             "speaker" => {
                 if let Some(on) = action.on {
                     if let Some(call) = self.call.as_mut() {
-                        call.speaker_off = on;
+                        call.audio.speaker_off = on;
                     }
                     if let Some(group) = self.group.as_mut() {
-                        group.speaker_off = on;
+                        group.audio.speaker_off = on;
                     }
                     if let Some(media) = self.media.as_ref() {
                         media.set_speaker_off(on);
@@ -3192,243 +3403,303 @@ impl EngineCore {
                     }
                 }
             }
-            "camera" => {
-                if self.group.is_some() {
-                    if let Some(on) = action.on {
-                        let effective_on = if on {
-                            self.start_camera_capture()
-                        } else {
-                            self.stop_camera_capture();
-                            false
-                        };
-                        if let Some(group) = self.group.as_mut() {
-                            group.camera_on = effective_on;
-                            group.camera_was_on = false;
-                        }
-                        if let Some(media) = self.media.as_ref() {
-                            if let Err(error) = media.set_group_camera(effective_on) {
-                                self.log(&format!("group camera state update failed: {error}"));
-                            }
-                            if let Err(error) = media.send_group_video_quality_config() {
-                                self.log(&format!("group VidQualConfig failed: {error}"));
-                            }
-                        }
-                        self.group_broadcast(12098);
-                        self.group_update_status();
-                        if effective_on {
-                            if let Some(camera) = self.camera.as_ref() {
-                                camera.request_keyframe();
-                            }
-                        }
-                    }
-                    return;
-                }
+
+            _ => {}
+        }
+        true
+    }
+
+    fn on_ui_camera_action(&mut self, action: &UiAction) -> bool {
+        if !matches!(action.action.as_str(), "camera") {
+            return false;
+        }
+        if action.action.as_str() == "camera" {
+            if self.group.is_some() {
                 if let Some(on) = action.on {
-                    let screen_sharing = self.call.as_ref().is_some_and(|call| call.sharing_screen);
-                    let effective_on = if on && !screen_sharing {
-                        self.start_camera_capture()
+                    let effective_on = if on {
+                        Self::start_camera_capture(self)
                     } else {
                         self.stop_camera_capture();
                         false
                     };
-                    if let Some(call) = self.call.as_mut() {
-                        call.camera_on = effective_on;
-                        call.camera_was_on = false;
+                    if let Some(group) = self.group.as_mut() {
+                        group.camera.on = effective_on;
+                        group.camera.was_on = false;
                     }
-                    self.sync_ui_state();
-                    self.camera_state(effective_on);
+                    if let Some(media) = self.media.as_ref() {
+                        if let Err(error) = media.set_group_camera(effective_on) {
+                            Self::log(&format!("group camera state update failed: {error}"));
+                        }
+                        if let Err(error) = media.send_group_video_quality_config() {
+                            Self::log(&format!("group VidQualConfig failed: {error}"));
+                        }
+                    }
+                    self.group_broadcast(12098);
+                    self.group_update_status();
                     if effective_on {
                         if let Some(camera) = self.camera.as_ref() {
                             camera.request_keyframe();
                         }
                     }
                 }
+                return true;
             }
-            "listScreenSources" => {
-                if crate::screen::is_x11_session() {
-                    match crate::screen::list_x11_windows() {
-                        Ok(windows) => self.ui_message(json!({
-                            "type":"screenSources",
-                            "windows":windows.iter().map(|(id, label)| json!({"id":id,"label":label})).collect::<Vec<_>>()
-                        })),
-                        Err(error) => self.ui_message(json!({"type":"screenError","message":error})),
-                    }
+            if let Some(on) = action.on {
+                let screen_sharing = self
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.camera.sharing_screen);
+                let effective_on = if on && !screen_sharing {
+                    Self::start_camera_capture(self)
                 } else {
-                    self.log("window source requested on Wayland; delegating selection to XDG ScreenCast portal");
-                    self.ui_message(json!({"type":"screenSourceMode","source":"window"}));
+                    self.stop_camera_capture();
+                    false
+                };
+                if let Some(call) = self.call.as_mut() {
+                    call.camera.on = effective_on;
+                    call.camera.was_on = false;
+                }
+                self.sync_ui_state();
+                self.camera_state(effective_on);
+                if effective_on {
+                    if let Some(camera) = self.camera.as_ref() {
+                        camera.request_keyframe();
+                    }
                 }
             }
-            "screen" => {
-                if let Some(on) = action.on {
-                    if on {
-                        let group_config = self
-                            .group
-                            .as_ref()
-                            .filter(|group| group.phase == GroupPhase::Connected)
-                            .map(|group| group.config.clone());
-                        let in_call = self.call.as_ref().is_some_and(|call| {
-                            call.phase == CallPhase::InCall && call.call_type == 3
-                        });
-                        self.log(&format!(
-                            "screen capture request received (video_call={in_call}, group_call={})",
-                            group_config.is_some()
-                        ));
-                        if !in_call && group_config.is_none() {
-                            self.log("screen capture rejected: no active video/group call");
-                            self.ui_message(json!({
+        }
+        true
+    }
+
+    fn on_ui_sources_action(&mut self, action: &UiAction) -> bool {
+        if !matches!(action.action.as_str(), "listScreenSources") {
+            return false;
+        }
+        if action.action.as_str() == "listScreenSources" {
+            if crate::screen::is_x11_session() {
+                match crate::screen::list_x11_windows() {
+                    Ok(windows) => self.ui_message(&json!({
+                        "type":"screenSources",
+                        "windows":windows.iter().map(|(id, label)| json!({"id":id,"label":label})).collect::<Vec<_>>()
+                    })),
+                    Err(error) => self.ui_message(&json!({"type":"screenError","message":error})),
+                }
+            } else {
+                Self::log("window source requested on Wayland; delegating selection to XDG ScreenCast portal");
+                self.ui_message(&json!({"type":"screenSourceMode","source":"window"}));
+            }
+        }
+        true
+    }
+
+    fn on_ui_screen_action(&mut self, action: &UiAction) -> bool {
+        if !matches!(action.action.as_str(), "screen") {
+            return false;
+        }
+        if action.action.as_str() == "screen" {
+            if let Some(on) = action.on {
+                if on {
+                    let group_config = self
+                        .group
+                        .as_ref()
+                        .filter(|group| group.phase == GroupPhase::Connected)
+                        .map(|group| group.config.clone());
+                    let in_call = self
+                        .call
+                        .as_ref()
+                        .is_some_and(|call| call.phase == CallPhase::InCall && call.kind == 3);
+                    Self::log(&format!(
+                        "screen capture request received (video_call={in_call}, group_call={})",
+                        group_config.is_some()
+                    ));
+                    if !in_call && group_config.is_none() {
+                        Self::log("screen capture rejected: no active video/group call");
+                        self.ui_message(&json!({
+                            "type":"screenError",
+                            "message":"Screen sharing requires an active call",
+                            "requestId":action.request_id
+                        }));
+                    } else {
+                        if self.screen.as_ref().is_some_and(ScreenCapture::is_finished) {
+                            self.screen.take();
+                        }
+                        if self.screen.as_ref().is_some_and(ScreenCapture::is_stopping) {
+                            // A user can retry while the cancelled portal
+                            // request is still closing its session. Queue the
+                            // latest request and start it after worker exit.
+                            self.screen_lifecycle.restart_pending = true;
+                            self.screen_restart_source.clone_from(&action.source);
+                            self.screen_restart_request_id
+                                .clone_from(&action.request_id);
+                            Self::log("queued screen-share retry until previous capture exits");
+                            return true;
+                        }
+                        if self.screen.is_some() {
+                            Self::log(
+                                "screen capture rejected: a capture worker is already active",
+                            );
+                            self.ui_message(&json!({
                                 "type":"screenError",
-                                "message":"Screen sharing requires an active call",
+                                "message":"Screen capture is already active",
                                 "requestId":action.request_id
                             }));
+                            return true;
+                        }
+                        self.start_screen_capture(
+                            action.source.as_deref(),
+                            action.request_id.as_deref(),
+                        );
+                    }
+                } else {
+                    self.screen_lifecycle.restart_pending = false;
+                    self.screen_restart_source = None;
+                    self.screen_restart_request_id = None;
+                    let request_id = action
+                        .request_id
+                        .clone()
+                        .or_else(|| self.screen_request_id.clone());
+                    self.screen_lifecycle.stop_ack_pending = self.screen.is_some();
+                    self.stop_screen_capture();
+                    let call_data = self.call.as_mut().and_then(|call| {
+                        if !call.camera.sharing_screen {
+                            return None;
+                        }
+                        call.camera.sharing_screen = false;
+                        Some(json!({
+                            "callId":call.id,
+                            "status":0,
+                            "uidTo":call.peer_id
+                        }))
+                    });
+                    if let Some(data) = call_data {
+                        self.emit(json!({"type":"sendSignal","command":12064,"data":data}));
+                        self.restore_call_camera_after_screen_share();
+                    }
+                    self.ui_message(&json!({"type":"screenStopped","requestId":request_id}));
+                }
+            }
+        }
+        true
+    }
+
+    fn on_ui_device_action(&mut self, action: &UiAction) -> bool {
+        if !matches!(action.action.as_str(), "device" | "zaloDeviceConfig") {
+            return false;
+        }
+        if action.action.as_str() == "device" {
+            if let (Some(kind), Some(id)) = (action.kind.as_deref(), action.id.as_deref()) {
+                if let Err(error) = crate::devices::set_device(kind, id) {
+                    Self::log(&format!("could not persist device selection: {error}"));
+                }
+                if let Some(media) = self.media.as_ref() {
+                    media.set_device(kind, id);
+                }
+                if kind == "camera" {
+                    let restart = self.call.as_ref().is_some_and(|call| {
+                        call.phase == CallPhase::InCall
+                            && call.camera.on
+                            && !call.camera.sharing_screen
+                    }) || self.group.as_ref().is_some_and(|group| {
+                        group.phase == GroupPhase::Connected && group.camera.on
+                    });
+                    if restart {
+                        self.stop_camera_capture();
+                        if Self::start_camera_capture(self) {
+                            Self::log("camera source switched in the active call");
                         } else {
-                            if self.screen.as_ref().is_some_and(ScreenCapture::is_finished) {
-                                self.screen.take();
-                            }
-                            if self.screen.as_ref().is_some_and(ScreenCapture::is_stopping) {
-                                // A user can retry while the cancelled portal
-                                // request is still closing its session. Queue the
-                                // latest request and start it after worker exit.
-                                self.screen_restart_pending = true;
-                                self.screen_restart_source = action.source.clone();
-                                self.screen_restart_request_id = action.request_id.clone();
-                                self.log("queued screen-share retry until previous capture exits");
-                                return;
-                            }
-                            if self.screen.is_some() {
-                                self.log(
-                                    "screen capture rejected: a capture worker is already active",
-                                );
-                                self.ui_message(json!({
-                                    "type":"screenError",
-                                    "message":"Screen capture is already active",
-                                    "requestId":action.request_id
-                                }));
-                                return;
-                            }
-                            self.start_screen_capture(
-                                action.source.clone(),
-                                action.request_id.clone(),
-                            );
+                            self.camera_state(false);
                         }
-                    } else {
-                        self.screen_restart_pending = false;
-                        self.screen_restart_source = None;
-                        self.screen_restart_request_id = None;
-                        let request_id = action
-                            .request_id
-                            .clone()
-                            .or_else(|| self.screen_request_id.clone());
-                        self.screen_stop_ack_pending = self.screen.is_some();
-                        self.stop_screen_capture();
-                        let call_data = self.call.as_mut().and_then(|call| {
-                            if !call.sharing_screen {
-                                return None;
-                            }
-                            call.sharing_screen = false;
-                            Some(json!({
-                                "callId":call.call_id,
-                                "status":0,
-                                "uidTo":call.peer_id
-                            }))
-                        });
-                        if let Some(data) = call_data {
-                            self.emit(json!({"type":"sendSignal","command":12064,"data":data}));
-                            self.restore_call_camera_after_screen_share();
-                        }
-                        self.ui_message(json!({"type":"screenStopped","requestId":request_id}));
                     }
                 }
             }
-            "device" => {
-                if let (Some(kind), Some(id)) = (action.kind.as_deref(), action.id.as_deref()) {
-                    if let Err(error) = crate::devices::set_device(kind, id) {
-                        self.log(&format!("could not persist device selection: {error}"));
-                    }
+        }
+        true
+    }
+
+    fn on_ui_zalo_device_config_action(&mut self, action: &UiAction) -> bool {
+        if action.action != "zaloDeviceConfig" {
+            return false;
+        }
+        if let Some(data) = action.data.as_ref() {
+            let previous_camera = crate::devices::load_prefs().camera.map(|camera| camera.id);
+            if let Err(error) = crate::devices::update_from_zalo(data) {
+                Self::log(&format!("could not persist Zalo device config: {error}"));
+            }
+            let prefs = crate::devices::load_prefs();
+            let (microphone, speaker) = zalo_audio_device_selection(data, &prefs);
+            if let Some(media) = self.media.as_ref() {
+                media.set_device("mic", &microphone);
+                media.set_device("speaker", &speaker);
+            }
+
+            let current_camera = prefs.camera.map(|camera| camera.id);
+            let camera_changed = previous_camera != current_camera;
+            let camera_active = self.call.as_ref().is_some_and(|call| {
+                call.phase == CallPhase::InCall && call.camera.on && !call.camera.sharing_screen
+            }) || self
+                .group
+                .as_ref()
+                .is_some_and(|group| group.phase == GroupPhase::Connected && group.camera.on);
+            if camera_changed && camera_active {
+                self.stop_camera_capture();
+                let camera_on = Self::start_camera_capture(self);
+                if let Some(call) = self.call.as_mut() {
+                    call.camera.on = camera_on;
+                }
+                if let Some(group) = self.group.as_mut() {
+                    group.camera.on = camera_on;
+                }
+                if self.group.is_some() {
                     if let Some(media) = self.media.as_ref() {
-                        media.set_device(kind, id);
+                        let _ = media.set_group_camera(camera_on);
                     }
-                    if kind == "camera" {
-                        let restart = self.call.as_ref().is_some_and(|call| {
-                            call.phase == CallPhase::InCall
-                                && call.camera_on
-                                && !call.sharing_screen
-                        }) || self.group.as_ref().is_some_and(|group| {
-                            group.phase == GroupPhase::Connected && group.camera_on
-                        });
-                        if restart {
-                            self.stop_camera_capture();
-                            if self.start_camera_capture() {
-                                self.log("camera source switched in the active call");
-                            } else {
-                                self.camera_state(false);
-                            }
-                        }
-                    }
+                    self.group_broadcast(12098);
+                    self.group_update_status();
+                } else {
+                    self.sync_ui_state();
+                    self.camera_state(camera_on);
                 }
             }
+        }
+        true
+    }
+
+    fn on_ui_device_list_action(&mut self, action: &UiAction) -> bool {
+        match action.action.as_str() {
             "listDevices" => {
                 let devices = crate::devices::list_devices();
-                self.ui_message(json!({
+                self.ui_message(&json!({
                     "type":"devices",
                     "requestId":action.request_id,
                     "data":devices
                 }));
+                true
             }
             "zaloListDevices" => {
                 let devices = crate::devices::zalo_device_list();
-                self.ui_message(json!({
+                self.ui_message(&json!({
                     "type":"zaloDeviceList",
                     "requestId":action.request_id,
                     "data":devices
                 }));
+                true
             }
-            "zaloDeviceConfig" => {
-                if let Some(data) = action.data.as_ref() {
-                    let previous_camera =
-                        crate::devices::load_prefs().camera.map(|camera| camera.id);
-                    if let Err(error) = crate::devices::update_from_zalo(data) {
-                        self.log(&format!("could not persist Zalo device config: {error}"));
-                    }
-                    let prefs = crate::devices::load_prefs();
-                    let (microphone, speaker) = zalo_audio_device_selection(data, &prefs);
-                    if let Some(media) = self.media.as_ref() {
-                        media.set_device("mic", &microphone);
-                        media.set_device("speaker", &speaker);
-                    }
+            _ => false,
+        }
+    }
 
-                    let current_camera = prefs.camera.map(|camera| camera.id);
-                    let camera_changed = previous_camera != current_camera;
-                    let camera_active = self.call.as_ref().is_some_and(|call| {
-                        call.phase == CallPhase::InCall && call.camera_on && !call.sharing_screen
-                    }) || self.group.as_ref().is_some_and(|group| {
-                        group.phase == GroupPhase::Connected && group.camera_on
-                    });
-                    if camera_changed && camera_active {
-                        self.stop_camera_capture();
-                        let camera_on = self.start_camera_capture();
-                        if let Some(call) = self.call.as_mut() {
-                            call.camera_on = camera_on;
-                        }
-                        if let Some(group) = self.group.as_mut() {
-                            group.camera_on = camera_on;
-                        }
-                        if self.group.is_some() {
-                            if let Some(media) = self.media.as_ref() {
-                                let _ = media.set_group_camera(camera_on);
-                            }
-                            self.group_broadcast(12098);
-                            self.group_update_status();
-                        } else {
-                            self.sync_ui_state();
-                            self.camera_state(camera_on);
-                        }
-                    }
-                }
-            }
+    fn on_ui_misc_action(&mut self, action: &UiAction) -> bool {
+        if !matches!(
+            action.action.as_str(),
+            "listDevices" | "zaloListDevices" | "advancedOptions" | "tile" | "needkey" | "keyframe"
+        ) {
+            return false;
+        }
+        match action.action.as_str() {
             "advancedOptions" => {
                 if let Some(data) = action.data.as_ref() {
                     if let Err(error) = crate::devices::update_advanced_options(data) {
-                        self.log(&format!("could not persist call options: {error}"));
+                        Self::log(&format!("could not persist call options: {error}"));
                     }
                 }
             }
@@ -3436,7 +3707,7 @@ impl EngineCore {
                 if let (Some(src), Some(width)) = (action.src, action.width) {
                     if let Some(media) = self.media.as_ref() {
                         if let Err(error) = media.set_group_member_render_width(src, width) {
-                            self.log(&format!("group tile quality update failed: {error}"));
+                            Self::log(&format!("group tile quality update failed: {error}"));
                         }
                     }
                 }
@@ -3444,16 +3715,19 @@ impl EngineCore {
             "needkey" => {
                 if let Some(media) = self.media.as_ref() {
                     if let Err(error) = media.request_peer_keyframe(action.src) {
-                        self.log(&format!("could not send peer keyframe request: {error}"));
+                        Self::log(&format!("could not send peer keyframe request: {error}"));
                     }
                 }
             }
             "keyframe" => {
-                let sharing_screen = self.call.as_ref().is_some_and(|call| call.sharing_screen)
+                let sharing_screen = self
+                    .call
+                    .as_ref()
+                    .is_some_and(|call| call.camera.sharing_screen)
                     || self
                         .group
                         .as_ref()
-                        .is_some_and(|group| group.sharing_screen);
+                        .is_some_and(|group| group.flags.sharing_screen);
                 if sharing_screen {
                     if let Some(screen) = self.screen.as_ref() {
                         screen.request_keyframe();
@@ -3464,10 +3738,11 @@ impl EngineCore {
             }
             _ => {}
         }
+        true
     }
 
     #[cfg(test)]
-    const fn start_camera_capture(&mut self) -> bool {
+    const fn start_camera_capture(_this: &mut Self) -> bool {
         // Engine unit tests assert signaling/state transitions, not exclusive
         // access to the user's physical V4L2 device. Real capture is covered by
         // the explicitly ignored camera integration test.
@@ -3475,15 +3750,15 @@ impl EngineCore {
     }
 
     #[cfg(not(test))]
-    fn start_camera_capture(&mut self) -> bool {
-        if self.camera.is_some() {
+    fn start_camera_capture(this: &mut Self) -> bool {
+        if this.camera.is_some() {
             return true;
         }
         let device = crate::devices::load_prefs()
             .camera
             .map(|preference| preference.id)
             .filter(|value| !value.is_empty());
-        let profile = self
+        let profile = this
             .media
             .as_ref()
             .and_then(ZrtcMediaBackend::video_profile);
@@ -3493,28 +3768,28 @@ impl EngineCore {
             });
         match CameraCapture::start(device.as_deref(), width, height, fps, bitrate) {
             Ok(capture) => {
-                self.camera = Some(capture);
-                self.log("native V4L2/OpenH264 camera capture started");
-                if let Some(media) = self.media.as_ref() {
+                this.camera = Some(capture);
+                Self::log("native V4L2/OpenH264 camera capture started");
+                if let Some(media) = this.media.as_ref() {
                     media.note_debug_event("camera-capture started");
                 }
                 true
             }
             Err(error) => {
-                self.log(&format!("camera capture unavailable: {error}"));
-                if let Some(media) = self.media.as_ref() {
+                Self::log(&format!("camera capture unavailable: {error}"));
+                if let Some(media) = this.media.as_ref() {
                     media.note_debug_event("camera-capture failed");
                 }
-                if let Some(call) = self.call.as_mut() {
-                    call.camera_on = false;
+                if let Some(call) = this.call.as_mut() {
+                    call.camera.on = false;
                 }
-                if let Some(group) = self.group.as_mut() {
-                    group.camera_on = false;
+                if let Some(group) = this.group.as_mut() {
+                    group.camera.on = false;
                 }
-                if let Some(media) = self.media.as_ref() {
+                if let Some(media) = this.media.as_ref() {
                     let _ = media.set_group_camera(false);
                 }
-                self.ui_message(json!({"type":"cameraError","message":error}));
+                this.ui_message(&json!({"type":"cameraError","message":error}));
                 false
             }
         }
@@ -3522,35 +3797,35 @@ impl EngineCore {
 
     fn start_call_camera(&mut self) {
         let Some(wanted) = self.call.as_ref().and_then(|call| {
-            (call.phase == CallPhase::InCall && call.call_type == 3).then_some(call.camera_on)
+            (call.phase == CallPhase::InCall && call.kind == 3).then_some(call.camera.on)
         }) else {
             return;
         };
         let camera_on = if wanted {
-            self.start_camera_capture()
+            Self::start_camera_capture(self)
         } else {
             self.stop_camera_capture();
             false
         };
         if let Some(call) = self.call.as_mut() {
-            call.camera_on = camera_on;
+            call.camera.on = camera_on;
             call.camera_state_reassert_at = Some(Instant::now() + Duration::from_secs(2));
         }
         self.camera_state(camera_on);
     }
 
     fn restore_call_camera_after_screen_share(&mut self) {
-        let restore_camera = self.call.as_ref().is_some_and(|call| call.camera_was_on);
+        let restore_camera = self.call.as_ref().is_some_and(|call| call.camera.was_on);
         let camera_on = if restore_camera {
-            self.start_camera_capture()
+            Self::start_camera_capture(self)
         } else {
             self.stop_camera_capture();
             false
         };
         if let Some(call) = self.call.as_mut() {
-            call.sharing_screen = false;
-            call.camera_on = camera_on;
-            call.camera_was_on = false;
+            call.camera.sharing_screen = false;
+            call.camera.on = camera_on;
+            call.camera.was_on = false;
         }
         self.camera_state(camera_on);
         self.sync_ui_state();
@@ -3559,7 +3834,7 @@ impl EngineCore {
     fn stop_camera_capture(&mut self) {
         if let Some(capture) = self.camera.take() {
             capture.stop();
-            self.log("native camera capture stopped");
+            Self::log("native camera capture stopped");
         }
     }
 
@@ -3568,7 +3843,7 @@ impl EngineCore {
             return;
         };
         if number_at(data, "callId").is_some_and(|id| id as u32 != current_call_id) {
-            self.log("ignoring group screen-share response for another call");
+            Self::log("ignoring group screen-share response for another call");
             return;
         }
         let mut response = parse_json_value(data.get("data"));
@@ -3593,20 +3868,20 @@ impl EngineCore {
             group.share_screen_id = share_uid;
             group.members.remove(&share_uid.to_string());
             (
-                group.sharing_screen && changed,
+                group.flags.sharing_screen && changed,
                 group.call_id,
                 group.host_call,
                 group.local_uid,
-                i32::from(group.muted),
-                i32::from(!group.camera_on),
+                i32::from(group.audio.muted),
+                i32::from(!group.camera.on),
             )
         };
         if should_start {
             if let Some(media) = self.media.as_ref() {
                 if let Err(error) = media.start_group_share(share_uid) {
-                    self.log(&format!("could not start group share peer: {error}"));
+                    Self::log(&format!("could not start group share peer: {error}"));
                     self.stop_screen_capture();
-                    self.ui_message(json!({"type":"screenError","message":error}));
+                    self.ui_message(&json!({"type":"screenError","message":error}));
                     return;
                 }
             }
@@ -3621,29 +3896,29 @@ impl EngineCore {
                     "videoState":video_state
                 }
             }));
-            self.log(&format!("group share peer {share_uid} requested"));
+            Self::log(&format!("group share peer {share_uid} requested"));
         }
         self.group_update_status();
     }
 
     fn stop_group_screen_share(&mut self) {
         let stopped = self.group.as_mut().and_then(|group| {
-            if !group.sharing_screen {
+            if !group.flags.sharing_screen {
                 return None;
             }
-            group.sharing_screen = false;
+            group.flags.sharing_screen = false;
             group.members.remove(&group.share_screen_id.to_string());
             let stop_signal = json!({
-                "audioState":i32::from(group.muted),
+                "audioState":i32::from(group.audio.muted),
                 "callId":group.call_id,
                 "data":json_cpp(&json!({"shareScreenId":group.share_screen_id})),
                 "hostCall":group.host_call,
                 "status":0,
                 "userId":group.local_uid,
-                "videoState":i32::from(!group.camera_on)
+                "videoState":i32::from(!group.camera.on)
             });
-            let restore_camera = group.camera_was_on;
-            group.camera_was_on = false;
+            let restore_camera = group.camera.was_on;
+            group.camera.was_on = false;
             Some((stop_signal, restore_camera))
         });
 
@@ -3658,20 +3933,20 @@ impl EngineCore {
         self.emit(json!({"type":"sendSignal","command":12044,"data":data}));
 
         let camera_on = if restore_camera {
-            self.start_camera_capture()
+            Self::start_camera_capture(self)
         } else {
             self.stop_camera_capture();
             false
         };
         if let Some(group) = self.group.as_mut() {
-            group.camera_on = camera_on;
+            group.camera.on = camera_on;
         }
         if let Some(media) = self.media.as_ref() {
             if let Err(error) = media.set_group_camera(camera_on) {
-                self.log(&format!("group camera restore failed: {error}"));
+                Self::log(&format!("group camera restore failed: {error}"));
             }
             if let Err(error) = media.send_group_video_quality_config() {
-                self.log(&format!(
+                Self::log(&format!(
                     "group VidQualConfig after screen share failed: {error}"
                 ));
             }
@@ -3682,106 +3957,122 @@ impl EngineCore {
 
     fn activate_screen_share(&mut self) {
         if self.group.is_some() {
-            let details = self.group.as_mut().and_then(|group| {
-                if group.phase != GroupPhase::Connected {
-                    return None;
-                }
-                group.sharing_screen = true;
-                group.camera_was_on = group.camera_on;
-                // The legacy renderer stopped its camera track first, then
-                // requested the share, then reasserted video-on. Preserve that
-                // signaling order while Rust owns the actual capture worker.
-                group.camera_on = false;
-                Some((
-                    group.share_screen_id,
-                    group.call_id,
-                    group.host_call,
-                    group.local_uid,
-                    group.camera_was_on,
-                    i32::from(group.muted),
-                    1,
-                ))
-            });
-            let Some((
-                share_uid,
-                call_id,
-                host_call,
-                local_uid,
-                camera_was_on,
-                audio_state,
-                video_state,
-            )) = details
-            else {
-                self.stop_screen_capture();
-                return;
-            };
-            self.stop_camera_capture();
-            if let Some(media) = self.media.as_ref() {
-                if let Err(error) = media.set_group_camera(false) {
-                    self.log(&format!(
-                        "group camera pause for screen share failed: {error}"
-                    ));
-                }
-                if let Err(error) = media.send_group_video_quality_config() {
-                    self.log(&format!(
-                        "group VidQualConfig before screen share failed: {error}"
-                    ));
-                }
-            }
-            self.group_broadcast(12098);
-            self.emit(json!({
-                "type":"sendSignal","command":12044,"data":{
-                    "audioState":audio_state,
-                    "callId":call_id,
-                    "data":json_cpp(&json!({"shareScreenId":share_uid})),
-                    "hostCall":host_call,
-                    "status":1,
-                    "userId":local_uid,
-                    "videoState":video_state
-                }
-            }));
-            if let Some(group) = self.group.as_mut() {
-                group.camera_on = true;
-            }
-            if let Some(media) = self.media.as_ref() {
-                if let Err(error) = media.set_group_camera(true) {
-                    self.log(&format!(
-                        "group camera video-on during screen share failed: {error}"
-                    ));
-                }
-                if let Err(error) = media.send_group_video_quality_config() {
-                    self.log(&format!(
-                        "group VidQualConfig during screen share failed: {error}"
-                    ));
-                }
-            }
-            self.group_broadcast(12098);
-            if share_uid > 0 {
-                if let Some(media) = self.media.as_ref() {
-                    if let Err(error) = media.start_group_share(share_uid) {
-                        self.log(&format!("could not start group share peer: {error}"));
-                        self.stop_screen_capture();
-                        self.ui_message(json!({"type":"screenError","message":error,"requestId":self.screen_request_id}));
-                    }
-                }
-            }
-            self.group_update_status();
-            self.ui_message(json!({"type":"screenStarted","cameraWasOn":camera_was_on,"requestId":self.screen_request_id}));
-            self.log("native group screen capture started");
-            return;
+            self.activate_group_screen_share();
+        } else {
+            self.activate_call_screen_share();
         }
+    }
+
+    fn activate_group_screen_share(&mut self) {
+        let details = self.group.as_mut().and_then(|group| {
+            if group.phase != GroupPhase::Connected {
+                return None;
+            }
+            group.flags.sharing_screen = true;
+            group.camera.was_on = group.camera.on;
+            // The legacy renderer stopped its camera track first, then
+            // requested the share, then reasserted video-on. Preserve that
+            // signaling order while Rust owns the actual capture worker.
+            group.camera.on = false;
+            Some((
+                group.share_screen_id,
+                group.call_id,
+                group.host_call,
+                group.local_uid,
+                group.camera.was_on,
+                i32::from(group.audio.muted),
+                1,
+            ))
+        });
+        let Some((
+            share_uid,
+            call_id,
+            host_call,
+            local_uid,
+            camera_was_on,
+            audio_state,
+            video_state,
+        )) = details
+        else {
+            self.stop_screen_capture();
+            return;
+        };
+        self.stop_camera_capture();
+        if let Some(media) = self.media.as_ref() {
+            if let Err(error) = media.set_group_camera(false) {
+                Self::log(&format!(
+                    "group camera pause for screen share failed: {error}"
+                ));
+            }
+            if let Err(error) = media.send_group_video_quality_config() {
+                Self::log(&format!(
+                    "group VidQualConfig before screen share failed: {error}"
+                ));
+            }
+        }
+        self.group_broadcast(12098);
+        self.emit(json!({
+            "type":"sendSignal","command":12044,"data":{
+                "audioState":audio_state,
+                "callId":call_id,
+                "data":json_cpp(&json!({"shareScreenId":share_uid})),
+                "hostCall":host_call,
+                "status":1,
+                "userId":local_uid,
+                "videoState":video_state
+            }
+        }));
+        if let Some(group) = self.group.as_mut() {
+            group.camera.on = true;
+        }
+        if let Some(media) = self.media.as_ref() {
+            if let Err(error) = media.set_group_camera(true) {
+                Self::log(&format!(
+                    "group camera video-on during screen share failed: {error}"
+                ));
+            }
+            if let Err(error) = media.send_group_video_quality_config() {
+                Self::log(&format!(
+                    "group VidQualConfig during screen share failed: {error}"
+                ));
+            }
+        }
+        self.group_broadcast(12098);
+        if share_uid > 0 {
+            if let Some(media) = self.media.as_ref() {
+                if let Err(error) = media.start_group_share(share_uid) {
+                    Self::log(&format!("could not start group share peer: {error}"));
+                    self.stop_screen_capture();
+                    self.ui_message(&json!({
+                        "type":"screenError",
+                        "message":error,
+                        "requestId":self.screen_request_id
+                    }));
+                }
+            }
+        }
+        self.group_update_status();
+        self.ui_message(&json!({
+            "type":"screenStarted",
+            "cameraWasOn":camera_was_on,
+            "requestId":self.screen_request_id
+        }));
+        Self::log("native group screen capture started");
+    }
+
+    fn activate_call_screen_share(&mut self) {
         self.stop_camera_capture();
         let (camera_was_on, data) = self.call.as_mut().map_or((false, None), |call| {
             if call.phase != CallPhase::InCall {
                 return (false, None);
             }
-            let camera_was_on = call.camera_on;
-            call.camera_was_on = camera_was_on;
-            call.camera_on = false;
+            let camera_was_on = call.camera.on;
+            call.camera.was_on = camera_was_on;
+            call.camera.on = false;
             (
                 camera_was_on,
                 Some(json!({
-                    "callId":call.call_id,
+                    "callId":call.id,
                     "status":1,
                     "uidTo":call.peer_id
                 })),
@@ -3795,23 +4086,23 @@ impl EngineCore {
                 self.camera_state(false);
             }
             if let Some(call) = self.call.as_mut() {
-                call.sharing_screen = true;
+                call.camera.sharing_screen = true;
             }
             self.emit(json!({"type":"sendSignal","command":12064,"data":data}));
             self.camera_state(true);
             self.sync_ui_state();
-            self.ui_message(json!({
+            self.ui_message(&json!({
                 "type":"screenStarted",
                 "cameraWasOn":camera_was_on,
                 "requestId":self.screen_request_id
             }));
-            self.log("native screen capture started");
+            Self::log("native screen capture started");
         }
     }
 
-    fn start_screen_capture(&mut self, source: Option<String>, request_id: Option<String>) {
-        self.screen_request_id = request_id.clone();
-        self.screen_first_frame_reported = false;
+    fn start_screen_capture(&mut self, source: Option<&str>, request_id: Option<&str>) {
+        self.screen_request_id = request_id.map(str::to_owned);
+        self.screen_lifecycle.first_frame_reported = false;
         let group_config = self
             .group
             .as_ref()
@@ -3820,9 +4111,9 @@ impl EngineCore {
         let in_call = self
             .call
             .as_ref()
-            .is_some_and(|call| call.phase == CallPhase::InCall && call.call_type == 3);
+            .is_some_and(|call| call.phase == CallPhase::InCall && call.kind == 3);
         if !in_call && group_config.is_none() {
-            self.ui_message(json!({
+            self.ui_message(&json!({
                 "type":"screenError",
                 "message":"Screen sharing requires an active call",
                 "requestId":request_id
@@ -3830,14 +4121,14 @@ impl EngineCore {
             return;
         }
         let x11_session = crate::screen::is_x11_session();
-        let source = match (x11_session, source.as_deref()) {
+        let source = match (x11_session, source) {
             (true, Some("monitor")) => Some("screen:0".to_string()),
-            (true, Some("window")) => return self.ui_message(json!({"type":"screenError","message":"Window selection requires choosing an X11 window first","requestId":request_id})),
+            (true, Some("window")) => return self.ui_message(&json!({"type":"screenError","message":"Window selection requires choosing an X11 window first","requestId":request_id})),
             (false, Some("screen:0")) => Some("monitor".to_string()),
             (false, Some("window:select")) => Some("window".to_string()),
             (_, value) => value.map(str::to_owned),
         };
-        self.log(&format!("starting screen capture: backend={}, source={:?}, request_id={:?}, call_phase={:?}, call_type={:?}", if x11_session {"x11"} else {"wayland-portal"}, source, request_id, self.call.as_ref().map(|call| call.phase), self.call.as_ref().map(|call| call.call_type)));
+        Self::log(&format!("starting screen capture: backend={}, source={:?}, request_id={:?}, call_phase={:?}, call_type={:?}", if x11_session {"x11"} else {"wayland-portal"}, source, request_id, self.call.as_ref().map(|call| call.phase), self.call.as_ref().map(|call| call.kind)));
         let screen = if let Some(config) = group_config {
             let bitrate = number_at(&config, "maxShrScreenBr")
                 .filter(|value| *value > 0)
@@ -3855,33 +4146,33 @@ impl EngineCore {
         match screen {
             Ok(screen) => {
                 self.screen = Some(screen);
-                self.log(
+                Self::log(
                     "screen-capture worker spawned; notifying UI to compact after Rust acceptance",
                 );
-                self.ui_message(json!({"type":"screenCaptureAccepted","requestId":request_id}));
+                self.ui_message(&json!({"type":"screenCaptureAccepted","requestId":request_id}));
             }
             Err(error) => {
-                self.log(&format!("screen-capture worker spawn failed: {error}"));
+                Self::log(&format!("screen-capture worker spawn failed: {error}"));
                 self.ui_message(
-                    json!({"type":"screenError","message":error,"requestId":request_id}),
+                    &json!({"type":"screenError","message":error,"requestId":request_id}),
                 );
             }
         }
     }
 
     fn stop_screen_capture(&mut self) {
-        self.screen_restart_pending = false;
+        self.screen_lifecycle.restart_pending = false;
         self.screen_restart_source = None;
         if self
             .group
             .as_ref()
-            .is_some_and(|group| group.sharing_screen)
+            .is_some_and(|group| group.flags.sharing_screen)
         {
             self.stop_group_screen_share();
         }
         if let Some(screen) = self.screen.as_ref() {
             screen.stop();
-            self.log("native screen capture stop requested");
+            Self::log("native screen capture stop requested");
         }
     }
 
@@ -3889,17 +4180,17 @@ impl EngineCore {
         let Some(call) = self.call.as_ref() else {
             return;
         };
-        if call.phase != CallPhase::InCall || call.call_type != 3 {
+        if call.phase != CallPhase::InCall || call.kind != 3 {
             return;
         }
         let requested_camera_on = camera_on;
-        let camera_on = camera_on || call.sharing_screen;
-        self.log(&format!(
+        let camera_on = camera_on || call.camera.sharing_screen;
+        Self::log(&format!(
             "outgoing camera state: call_id={}, requested={}, sharing_screen={}, effective={}",
-            call.call_id, requested_camera_on, call.sharing_screen, camera_on
+            call.id, requested_camera_on, call.camera.sharing_screen, camera_on
         ));
         self.emit(json!({"type":"sendSignal","command":12006,"data":{
-            "callId":call.call_id,"calleeId":call.peer_id,"data":"",
+            "callId":call.id,"calleeId":call.peer_id,"data":"",
             "isOnCam":i32::from(camera_on),"isOnMic":-1
         }}));
     }
@@ -3912,7 +4203,7 @@ impl EngineCore {
             return;
         }
         self.emit(json!({"type":"sendSignal","command":12006,"data":{
-            "callId":call.call_id,"calleeId":call.peer_id,"data":"",
+            "callId":call.id,"calleeId":call.peer_id,"data":"",
             "isOnCam":-1,"isOnMic":i32::from(!mic_on)
         }}));
     }
@@ -3920,11 +4211,11 @@ impl EngineCore {
     fn ui_state_value(&self, phase: &str, status: &str, call: &Call) -> Value {
         let mut state = json!({
             "type":"state","phase":phase,"statusCode":status,
-            "name":call.peer_name,"avatar":call.avatar,"video":call.call_type == 3,
-            "muted":call.muted,"speakerOff":call.speaker_off,
-            "peerMuted":call.peer_muted,"peerCamOff":call.peer_camera_off,
-            "peerSharing":call.peer_sharing,"sharing":call.sharing_screen,
-            "cameraOn":call.camera_on,"cameraWasOn":call.camera_was_on,
+            "name":call.peer_name,"avatar":call.avatar,"video":call.kind == 3,
+            "muted":call.audio.muted,"speakerOff":call.audio.speaker_off,
+            "peerMuted":call.peer_media.muted,"peerCamOff":call.peer_media.camera_off,
+            "peerSharing":call.peer_media.sharing,"sharing":call.camera.sharing_screen,
+            "cameraOn":call.camera.on,"cameraWasOn":call.camera.was_on,
             "micVolume":self.media.as_ref().map_or(100, ZrtcMediaBackend::mic_volume),
             "micAutoGain":self.media.as_ref().is_none_or(ZrtcMediaBackend::mic_auto_gain)
         });
@@ -3938,19 +4229,19 @@ impl EngineCore {
 
     fn ui_peer_state(&self) {
         if let Some(call) = self.call.as_ref() {
-            self.ui_message(self.ui_state_value(self.ui_phase(), self.ui_status_code(), call));
+            self.ui_message(&self.ui_state_value(self.ui_phase(), self.ui_status_code(), call));
         }
     }
 
     fn sync_ui_state(&self) {
         if let Some(call) = self.call.as_ref() {
-            self.ui_message(self.ui_state_value(self.ui_phase(), self.ui_status_code(), call));
+            self.ui_message(&self.ui_state_value(self.ui_phase(), self.ui_status_code(), call));
         }
     }
 
     fn ui_state(&self, phase: &str, status: &str) {
         if let Some(call) = self.call.as_ref() {
-            self.ui_message(self.ui_state_value(phase, status, call));
+            self.ui_message(&self.ui_state_value(phase, status, call));
         }
     }
 
@@ -3963,8 +4254,7 @@ impl EngineCore {
     const fn ui_phase(&self) -> &'static str {
         match self.phase {
             CallPhase::Idle => "ended",
-            CallPhase::Outgoing => "outgoing",
-            CallPhase::Ringing => "outgoing",
+            CallPhase::Outgoing | CallPhase::Ringing => "outgoing",
             CallPhase::Incoming => "incoming",
             CallPhase::Connecting => "connecting",
             CallPhase::InCall => "connected",
@@ -3982,9 +4272,9 @@ impl EngineCore {
         }
     }
 
-    fn ui_message(&self, message: Value) {
+    fn ui_message(&self, message: &Value) {
         if let Some(ui) = self.ui.as_ref() {
-            ui.send_message(&message);
+            ui.send_message(message);
         }
     }
 
@@ -3992,7 +4282,7 @@ impl EngineCore {
         self.outgoing_frames.push(frame);
     }
 
-    fn log(&self, message: &str) {
+    fn log(message: &str) {
         crate::zcall_log!("{message}");
     }
 }
@@ -4073,7 +4363,7 @@ fn extend_data(
     server: &Value,
     call_type: u8,
     callee: bool,
-    p2p: Vec<Value>,
+    p2p: &[Value],
     enable_p2p: bool,
 ) -> Value {
     let rtp_address = server

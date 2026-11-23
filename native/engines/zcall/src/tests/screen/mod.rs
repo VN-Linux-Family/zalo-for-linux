@@ -45,18 +45,18 @@ fn encodes_odd_sized_window_frames_after_cropping_to_even_dimensions() {
     let worker_stop = stop.clone();
     let worker = thread::spawn(move || {
         encode_frames(
-            raw_rx,
-            encoded_tx,
-            worker_stop,
-            ScreenEncodeConfig {
+            &raw_rx,
+            &encoded_tx,
+            &worker_stop,
+            &ScreenEncodeConfig {
                 bitrate: 500_000,
                 max_short: 0,
                 force_keyframe: Arc::new(AtomicBool::new(false)),
                 target_fps: Arc::new(AtomicU32::new(15)),
                 capture_fps: Arc::new(AtomicU32::new(15)),
             },
-            status_tx,
-            worker_encoded_frame_seen,
+            &status_tx,
+            &worker_encoded_frame_seen,
         )
         .unwrap();
     });

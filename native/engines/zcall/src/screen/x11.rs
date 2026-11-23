@@ -188,7 +188,7 @@ fn parse_target(source: Option<&str>) -> Result<Target, String> {
     }
 }
 
-/// MIT-SHM 1.2 FD-backed capture. No GetImage fallback: capture fails if the
+/// MIT-SHM 1.2 FD-backed capture. No `GetImage` fallback: capture fails if the
 /// server cannot provide a shared-memory segment.
 struct PersistentShm<'a> {
     conn: &'a RustConnection,
@@ -581,7 +581,7 @@ fn capture_with_shm<'a>(
             {
                 overlay_cursor_reply(&cursor, origin, frame);
             }
-            (Some(Ok(_)), Ok(_)) => {}
+            (Some(Ok(_)), Ok(_)) | (None, _) => {}
             (Some(Err(error)), _) => {
                 let count = CURSOR_IMAGE_ERRORS.fetch_add(1, Ordering::Relaxed) + 1;
                 if count == 1 || count.is_multiple_of(60) {
@@ -590,7 +590,6 @@ fn capture_with_shm<'a>(
                     );
                 }
             }
-            (None, _) => {}
             (_, Err(error)) => {
                 let count = CURSOR_POSITION_ERRORS.fetch_add(1, Ordering::Relaxed) + 1;
                 if count == 1 || count.is_multiple_of(60) {
@@ -605,7 +604,7 @@ fn capture_with_shm<'a>(
 }
 
 /// Keeps an off-screen Composite pixmap for a selected window. Reading the
-/// window drawable directly with GetImage only guarantees valid pixels for
+/// window drawable directly with `GetImage` only guarantees valid pixels for
 /// unobscured regions; the named pixmap remains independent of occlusion.
 struct CompositeWindowPixmap<'a> {
     conn: &'a RustConnection,
@@ -844,12 +843,12 @@ pub(super) fn capture_worker(
         .name("zcall-x11-screen-encoder".into())
         .spawn(move || {
             if let Err(error) = super::encode_frames(
-                encoder_raw_frames,
-                tx,
-                enc_stop.clone(),
-                enc_settings,
-                enc_status.clone(),
-                encoder_encoded_frame_seen,
+                &encoder_raw_frames,
+                &tx,
+                &enc_stop,
+                &enc_settings,
+                &enc_status,
+                &encoder_encoded_frame_seen,
             ) {
                 crate::zcall_log!("[zcall-screen] X11 encoder failed: {error}");
                 let _ = enc_status.try_send(Err(error));

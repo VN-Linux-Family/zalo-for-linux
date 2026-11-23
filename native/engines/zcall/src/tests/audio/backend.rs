@@ -30,7 +30,7 @@ fn live_pulse_queries_read_default_source_and_own_capture_stream() {
     assert!(source.channels > 0);
     assert!(source.average_volume <= PA_VOLUME_NORM * 3);
 
-    let _own_stream = source_output_for_pid(&mut connection, std::process::id() as i64)
+    let _own_stream = source_output_for_pid(&mut connection, i64::from(std::process::id()))
         .expect("query source-output list for current process");
 }
 
@@ -39,10 +39,10 @@ fn live_pulse_queries_read_default_source_and_own_capture_stream() {
 fn live_pulse_native_control_roundtrips_preserve_current_source_state() {
     let mut connection = pulse_connection().expect("connect to PulseAudio-compatible server");
     let _: protocol::SinkInfoList = connection
-        .roundtrip(protocol::Command::GetSinkInfoList)
+        .roundtrip(&protocol::Command::GetSinkInfoList)
         .expect("query sink inventory");
     let _: protocol::CardInfoList = connection
-        .roundtrip(protocol::Command::GetCardInfoList)
+        .roundtrip(&protocol::Command::GetCardInfoList)
         .expect("query card and active-profile inventory");
     let inventory = pulse_device_inventory().expect("enumerate audio devices and defaults");
     assert!(
@@ -62,13 +62,13 @@ fn live_pulse_native_control_roundtrips_preserve_current_source_state() {
     )
     .expect("valid source name");
     let current: protocol::SourceInfo = connection
-        .roundtrip(protocol::Command::GetSourceInfo(protocol::GetSourceInfo {
+        .roundtrip(&protocol::Command::GetSourceInfo(protocol::GetSourceInfo {
             index: None,
             name: Some(source_name),
         }))
         .expect("read current source state");
     connection
-        .acknowledge(protocol::Command::SetSourceVolume(
+        .acknowledge(&protocol::Command::SetSourceVolume(
             protocol::SetDeviceVolumeParams {
                 device_index: Some(current.index),
                 device_name: None,
@@ -77,7 +77,7 @@ fn live_pulse_native_control_roundtrips_preserve_current_source_state() {
         ))
         .expect("write unchanged per-channel source volume");
     connection
-        .acknowledge(protocol::Command::SetSourceMute(
+        .acknowledge(&protocol::Command::SetSourceMute(
             protocol::SetDeviceMuteParams {
                 device_index: Some(current.index),
                 device_name: None,
@@ -87,7 +87,7 @@ fn live_pulse_native_control_roundtrips_preserve_current_source_state() {
         .expect("write unchanged source mute state");
     let _recorder = PulseRecorder::new(None).expect("create a temporary own capture stream");
     let outputs: protocol::SourceOutputInfoList = connection
-        .roundtrip(protocol::Command::GetSourceOutputInfoList)
+        .roundtrip(&protocol::Command::GetSourceOutputInfoList)
         .expect("query source-output inventory");
     let own_output = outputs
         .into_iter()
@@ -97,12 +97,12 @@ fn live_pulse_native_control_roundtrips_preserve_current_source_state() {
                 .get(protocol::Prop::ApplicationProcessId)
                 .and_then(|value| std::str::from_utf8(value).ok())
                 .map(|value| parse_pid_like_atoi(value.trim_end_matches('\0')))
-                == Some(std::process::id() as i64)
+                == Some(i64::from(std::process::id()))
         })
         .expect("find this process's capture stream");
     if own_output.has_volume && own_output.volume_writable {
         connection
-            .acknowledge(protocol::Command::SetSourceOutputVolume(
+            .acknowledge(&protocol::Command::SetSourceOutputVolume(
                 protocol::SetStreamVolumeParams {
                     index: own_output.index,
                     volume: own_output.cvolume,
@@ -111,14 +111,14 @@ fn live_pulse_native_control_roundtrips_preserve_current_source_state() {
             .expect("write unchanged per-channel source-output volume");
     }
     connection
-        .acknowledge(protocol::Command::SetSourceOutputMute(
+        .acknowledge(&protocol::Command::SetSourceOutputMute(
             protocol::SetStreamMuteParams {
                 index: own_output.index,
                 mute: own_output.muted,
             },
         ))
         .expect("write unchanged source-output mute state");
-    let _own_stream = source_output_for_pid(&mut connection, std::process::id() as i64)
+    let _own_stream = source_output_for_pid(&mut connection, i64::from(std::process::id()))
         .expect("query own source-output snapshot");
 }
 
@@ -160,9 +160,7 @@ fn invalid_or_default_source_names_resolve_through_server_info() {
 }
 
 fn source_name_uses_default(source: Option<&str>) -> bool {
-    source
-        .filter(|name| {
-            !name.is_empty() && !name.as_bytes().contains(&0) && *name != "@DEFAULT_SOURCE@"
-        })
-        .is_none()
+    source.is_none_or(|name| {
+        name.is_empty() || name.as_bytes().contains(&0) || name == "@DEFAULT_SOURCE@"
+    })
 }

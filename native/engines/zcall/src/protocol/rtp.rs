@@ -141,7 +141,7 @@ pub fn build_group_video_rtp_header(
     let mut o = 16;
     h[o] = (ABS_SEND_TIME_EXT_ID << 4) | 2;
     o += 1;
-    let abs = ((send_ms as f64 * 262.144) as u64) % 0x0100_0000;
+    let abs = (u128::from(send_ms) * 262_144 / 1000 % 0x0100_0000) as u32;
     h[o] = ((abs >> 16) & 0xff) as u8;
     h[o + 1] = ((abs >> 8) & 0xff) as u8;
     h[o + 2] = (abs & 0xff) as u8;
@@ -169,14 +169,14 @@ pub fn build_group_video_rtp_header(
 fn write_capture_ntp(h: &mut [u8], mut o: usize, capture_ms: u64) {
     h[o] = (CAPTURE_NTP_EXT_ID << 4) | 6;
     o += 1;
-    let ntp = (capture_ms as f64 / 1000.0) + NTP_UNIX_OFFSET as f64;
-    let sec = ntp.floor() as u64;
-    let frac = (((ntp - ntp.floor()) * 4_294_967_296.0).floor() as u64) & 0xffff_ffff;
+    let sec = capture_ms / 1000 + NTP_UNIX_OFFSET;
+    let millis = capture_ms % 1000;
+    let frac = (u128::from(millis) * 4_294_967_296 / 1000) as u32;
     h[o] = ((sec >> 16) & 0xff) as u8;
     h[o + 1] = ((sec >> 8) & 0xff) as u8;
     h[o + 2] = (sec & 0xff) as u8;
     o += 3;
-    h[o..o + 4].copy_from_slice(&(frac as u32).to_be_bytes());
+    h[o..o + 4].copy_from_slice(&frac.to_be_bytes());
 }
 
 #[must_use]

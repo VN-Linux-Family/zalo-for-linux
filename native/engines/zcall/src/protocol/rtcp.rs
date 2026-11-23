@@ -3,7 +3,7 @@
 //! Supports RFC 3550 SR/RR/SDES, RFC 4585 PLI/NACK and the transport-wide
 //! congestion-control feedback format used by `ZaloCall`. RTCP is plain on the
 //! Zalo relay (srtcp=0), and the same compound packets are used on direct P2P.
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 pub const TWCC_EXT_ID: u8 = 5;
 pub const NTP_EPOCH_OFFSET: u64 = 2_208_988_800;
@@ -13,6 +13,12 @@ const NACK_RETRY_MS: u64 = 40;
 const NACK_MAX_TRIES: u8 = 5;
 const NACK_DROP_MS: u64 = 400;
 const NACK_KEEP: usize = 128;
+
+fn u64_to_f64(value: u64) -> f64 {
+    let high = u32::try_from(value >> 32).unwrap_or_default();
+    let low = u32::try_from(value & u64::from(u32::MAX)).unwrap_or_default();
+    f64::from(high) * 4_294_967_296.0 + f64::from(low)
+}
 
 #[must_use]
 pub fn read_tw_seq(rtp: &[u8]) -> Option<u16> {
@@ -98,7 +104,10 @@ impl TwccRecorder {
         if unwrapped < next || self.arrivals.contains_key(&unwrapped) {
             return;
         }
-        let arrival_q = (now_ms.min(i64::MAX as u64) as i64).saturating_mul(4);
+        let arrival_q = now_ms
+            .min(i64::MAX.cast_unsigned())
+            .cast_signed()
+            .saturating_mul(4);
         self.arrivals.insert(unwrapped, arrival_q);
         self.top = Some(self.top.map_or(unwrapped, |top| top.max(unwrapped)));
     }
@@ -392,9 +401,9 @@ fn parse_report_block(packet: &[u8]) -> Option<ReportBlock> {
     let lost_raw =
         (u32::from(packet[5]) << 16) | (u32::from(packet[6]) << 8) | u32::from(packet[7]);
     let cumulative_lost = if lost_raw & 0x80_0000 != 0 {
-        (lost_raw | 0xff00_0000) as i32
+        (lost_raw | 0xff00_0000).cast_signed()
     } else {
-        lost_raw as i32
+        lost_raw.cast_signed()
     };
     Some(ReportBlock {
         ssrc: u32::from_be_bytes(packet[0..4].try_into().ok()?),
@@ -662,7 +671,7 @@ pub struct RxStats {
     jitter: f64,
     transit: Option<f64>,
     seen: VecDeque<u32>,
-    seen_set: HashMap<u32, ()>,
+    seen_set: HashSet<u32>,
     lsr: u32,
     lsr_at_ms: u64,
 }
@@ -697,18 +706,18 @@ impl RxStats {
             self.max_seq = seq;
         }
         let extended = self.cycles.wrapping_add(u32::from(seq));
-        if self.seen_set.contains_key(&extended) {
+        if self.seen_set.contains(&extended) {
             return;
         }
         self.seen.push_back(extended);
-        self.seen_set.insert(extended, ());
+        self.seen_set.insert(extended);
         if self.seen.len() > 512 {
             if let Some(oldest) = self.seen.pop_front() {
                 self.seen_set.remove(&oldest);
             }
         }
         self.received += 1;
-        let arrival = (now_ms as f64) * (f64::from(self.clock_hz) / 1000.0);
+        let arrival = u64_to_f64(now_ms) * (f64::from(self.clock_hz) / 1000.0);
         let transit = arrival - f64::from(timestamp);
         if let Some(previous) = self.transit {
             self.jitter += ((transit - previous).abs() - self.jitter) / 16.0;
@@ -732,16 +741,16 @@ impl RxStats {
         }
         let extended_highest = self.cycles.wrapping_add(u32::from(self.max_seq));
         let expected = u64::from(extended_highest.saturating_sub(u32::from(self.base_seq))) + 1;
-        let lost = expected as i64 - self.received as i64;
+        let lost = expected.cast_signed() - self.received.cast_signed();
         let expected_interval = expected.saturating_sub(self.expected_prior);
         let received_interval = self.received.saturating_sub(self.received_prior);
         self.expected_prior = expected;
         self.received_prior = self.received;
-        let lost_interval = expected_interval as i64 - received_interval as i64;
+        let lost_interval = expected_interval.cast_signed() - received_interval.cast_signed();
         let fraction_lost = if expected_interval == 0 || lost_interval <= 0 {
             0
         } else {
-            ((lost_interval * 256) / expected_interval as i64).clamp(0, 255) as u8
+            ((lost_interval * 256) / expected_interval.cast_signed()).clamp(0, 255) as u8
         };
         let dlsr = if self.lsr_at_ms > 0 {
             (u128::from(now_ms.saturating_sub(self.lsr_at_ms)) * 65_536 / 1000) as u32
@@ -773,8 +782,8 @@ impl RxStats {
             None
         } else {
             Some(
-                (interval_expected.saturating_sub(interval_received) as f64)
-                    / interval_expected as f64,
+                u64_to_f64(interval_expected.saturating_sub(interval_received))
+                    / u64_to_f64(interval_expected),
             )
         }
     }

@@ -81,6 +81,18 @@ pub fn apply_soft_limiter(samples: &mut [i16]) {
     }
 }
 
+#[derive(Default)]
+struct ClipGuardConfig {
+    enabled: bool,
+    apply_os: bool,
+}
+
+#[derive(Default)]
+struct ClipGuardState {
+    was_manual: bool,
+    os_muted: bool,
+}
+
 /// `ClipGuard` monitors raw captured PCM samples for near-clipping (>= 28500),
 /// sustained hot speech (> -12 dBFS), and sustained quiet near-end speech (< -28 dBFS),
 /// adjusting hardware source volume bidirectionally (35%..100%) and syncing DE changes.
@@ -89,10 +101,8 @@ pub struct ClipGuard {
     current_vol: Arc<AtomicU8>,
     far_active: Option<Arc<AtomicBool>>,
     manual: Arc<AtomicBool>,
-    was_manual: bool,
-    enabled: bool,
-    apply_os: bool,
-    os_muted: bool,
+    config: ClipGuardConfig,
+    state: ClipGuardState,
     last_resolved_default: Option<String>,
     backend: Arc<dyn VolumeBackend>,
     last_os_sync: std::time::Instant,
@@ -125,10 +135,11 @@ impl ClipGuard {
             current_vol,
             far_active: None,
             manual: Arc::new(AtomicBool::new(false)),
-            was_manual: false,
-            enabled,
-            apply_os: cfg!(not(test)),
-            os_muted: false,
+            config: ClipGuardConfig {
+                enabled,
+                apply_os: cfg!(not(test)),
+            },
+            state: ClipGuardState::default(),
             last_resolved_default: None,
             backend,
             last_os_sync: past,
@@ -148,10 +159,10 @@ impl ClipGuard {
 
     pub fn initialize_device(&mut self) {
         if let Some(state) = self.backend.get_source_state(self.device.as_deref()) {
-            self.os_muted = state.muted;
+            self.state.os_muted = state.muted;
             self.last_resolved_default = state.resolved_name;
             let mut actual = state.pct.min(100);
-            if self.enabled
+            if self.config.enabled
                 && !self.manual.load(Ordering::Relaxed)
                 && actual > 80
                 && self.backend.set_source_volume(self.device.as_deref(), 70)
@@ -162,12 +173,13 @@ impl ClipGuard {
                     .map_or(70, |value| value.pct.min(100));
             }
             self.current_vol.store(actual, Ordering::Relaxed);
-            if self.enabled && !self.manual.load(Ordering::Relaxed) {
+            if self.config.enabled && !self.manual.load(Ordering::Relaxed) {
                 self.backend.normalize_own_stream();
             }
         }
     }
 
+    #[must_use]
     pub fn with_controls(
         mut self,
         far_active: Option<Arc<AtomicBool>>,
@@ -186,19 +198,20 @@ impl ClipGuard {
 
     #[must_use]
     pub const fn is_os_muted(&self) -> bool {
-        self.os_muted
+        self.state.os_muted
     }
 
+    #[must_use]
     pub fn with_backend(mut self, backend: Arc<dyn VolumeBackend>, apply_os: bool) -> Self {
         self.backend = backend;
-        self.apply_os = apply_os;
+        self.config.apply_os = apply_os;
         self
     }
 
     /// Syncs external DE/WirePlumber volume, mute state, and default-source hot-plugs.
     /// Returns `true` when `device` is `None` (`@DEFAULT_SOURCE@`) and the resolved default source changed.
     pub fn sync_os_volume(&mut self) -> bool {
-        if !self.apply_os {
+        if !self.config.apply_os {
             return false;
         }
 
@@ -206,7 +219,7 @@ impl ClipGuard {
         // Otherwise the first capture frame could consume the transition while the
         // OS sync is throttled, leaving the hardware source muted indefinitely.
         let manual_now = self.manual.load(Ordering::Relaxed);
-        let entering_auto = self.was_manual && !manual_now;
+        let entering_auto = self.state.was_manual && !manual_now;
         if entering_auto {
             self.clipped_frames_in_window = 0;
             self.window_frame_count = 0;
@@ -216,12 +229,12 @@ impl ClipGuard {
                 .checked_sub(std::time::Duration::from_secs(2))
                 .unwrap();
             if self.backend.set_source_mute(self.device.as_deref(), false) {
-                self.os_muted = false;
+                self.state.os_muted = false;
             }
             self.backend.normalize_own_stream();
             // PR #220 restores a useful capture floor when Auto is explicitly
             // re-enabled; startup and device switches do not boost low levels.
-            if self.enabled {
+            if self.config.enabled {
                 if let Some(state) = self.backend.get_source_state(self.device.as_deref()) {
                     if state.pct < 20 && self.backend.set_source_volume(self.device.as_deref(), 50)
                     {
@@ -230,7 +243,7 @@ impl ClipGuard {
                 }
             }
         }
-        self.was_manual = manual_now;
+        self.state.was_manual = manual_now;
 
         if self.last_os_sync.elapsed() < std::time::Duration::from_millis(500) {
             return false;
@@ -262,8 +275,8 @@ impl ClipGuard {
             }
         }
 
-        if state.muted != self.os_muted {
-            self.os_muted = state.muted;
+        if state.muted != self.state.os_muted {
+            self.state.os_muted = state.muted;
             if state.muted {
                 crate::zcall_log!("[audio-io] warn: OS microphone source is muted");
             } else {
@@ -277,7 +290,7 @@ impl ClipGuard {
             crate::zcall_log!("[audio-io] mic volume: {}%", actual);
         }
 
-        if self.enabled && !self.manual.load(Ordering::Relaxed) && !default_changed {
+        if self.config.enabled && !self.manual.load(Ordering::Relaxed) && !default_changed {
             self.backend.normalize_own_stream();
         }
 
@@ -286,7 +299,7 @@ impl ClipGuard {
 
     pub fn set_device(&mut self, device: Option<String>) {
         self.device = device;
-        self.os_muted = false;
+        self.state.os_muted = false;
         self.last_resolved_default = None;
         self.clipped_frames_in_window = 0;
         self.window_frame_count = 0;
@@ -298,7 +311,7 @@ impl ClipGuard {
     }
 
     fn apply_step(&mut self, new_vol: u8) {
-        if self.apply_os {
+        if self.config.apply_os {
             if !self
                 .backend
                 .set_source_volume(self.device.as_deref(), new_vol)
@@ -349,7 +362,7 @@ impl ClipGuard {
         }
 
         let is_manual = self.manual.load(Ordering::Relaxed);
-        if self.was_manual && !is_manual {
+        if self.state.was_manual && !is_manual {
             // Re-entering auto mode: clear stale counters so AGC reacts cleanly.
             self.clipped_frames_in_window = 0;
             self.window_frame_count = 0;
@@ -359,8 +372,8 @@ impl ClipGuard {
                 .checked_sub(std::time::Duration::from_secs(2))
                 .unwrap();
         }
-        self.was_manual = is_manual;
-        let agc_active = self.enabled && !is_manual;
+        self.state.was_manual = is_manual;
+        let agc_active = self.config.enabled && !is_manual;
 
         if self.window_frame_count >= 10 {
             if agc_active
@@ -406,7 +419,7 @@ impl ClipGuard {
         }
         self.hot_speech_frames = self.hot_speech_frames.saturating_sub(1);
 
-        if self.os_muted {
+        if self.state.os_muted {
             return;
         }
 

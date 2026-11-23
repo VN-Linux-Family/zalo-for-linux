@@ -12,13 +12,13 @@ fn test_call(phase: CallPhase) -> Call {
     Call {
         role: CallRole::Caller,
         phase,
-        call_id: 1,
+        id: 1,
         peer_id: "peer".into(),
         peer_uid: 2,
         local_uid: 1,
         peer_name: "Peer".into(),
         avatar: String::new(),
-        call_type: 3,
+        kind: 3,
         session_id: String::new(),
         server: None,
         servers: Vec::new(),
@@ -26,15 +26,14 @@ fn test_call(phase: CallPhase) -> Call {
         media_config: Value::Null,
         deadline: None,
         started_at: Some(Instant::now().checked_sub(Duration::from_secs(3)).unwrap()),
-        muted: false,
-        speaker_off: false,
-        camera_on: true,
-        camera_was_on: true,
+        audio: CallAudioFlags::default(),
+        camera: CallCameraFlags {
+            on: true,
+            was_on: true,
+            ..CallCameraFlags::default()
+        },
         camera_state_reassert_at: None,
-        peer_muted: false,
-        peer_camera_off: false,
-        peer_sharing: false,
-        sharing_screen: false,
+        peer_media: PeerMediaFlags::default(),
     }
 }
 
@@ -113,7 +112,7 @@ fn ignores_peer_camera_state_for_a_stale_call_id() {
     let mut engine = engine();
     engine.call = Some(test_call(CallPhase::InCall));
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control",
         "data":{
             "act":"onoff_camera",
@@ -121,7 +120,7 @@ fn ignores_peer_camera_state_for_a_stale_call_id() {
         }
     }));
 
-    assert!(!engine.call.as_ref().unwrap().peer_camera_off);
+    assert!(!engine.call.as_ref().unwrap().peer_media.camera_off);
 }
 
 #[test]
@@ -130,7 +129,7 @@ fn stale_answer_with_string_call_id_does_not_connect_current_call() {
     engine.call = Some(test_call(CallPhase::Outgoing));
     engine.phase = CallPhase::Outgoing;
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control",
         "data":{
             "act":"answer",
@@ -155,10 +154,10 @@ fn command<'a>(frames: &'a [Value], kind: &str, command: u64) -> &'a Value {
 #[test]
 fn sustained_early_audio_connects_a_ringing_caller_before_answer_signal() {
     let mut engine = engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"request","command":"makeCall",
         "data":{"type":1,"partner":[{"id":"peer-123","name":"Peer","avatar":"avatar"}]}
     }));
@@ -167,14 +166,14 @@ fn sustained_early_audio_connects_a_ringing_caller_before_answer_signal() {
         .as_u64()
         .unwrap();
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"recvSignal","command":401,"data":{
             "status":0,"sessId":"012345678901234567890123456789",
             "fromId":111,"toId":222,
             "servers":[{"rtpaddr":"127.0.0.1:9000","rtcpaddr":"127.0.0.1:9001"}]
         }
     }));
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"ring_ring","data":{"callId":call_id}}
     }));
     engine.on_early_audio("first");
@@ -193,10 +192,10 @@ fn sustained_early_audio_connects_a_ringing_caller_before_answer_signal() {
 #[test]
 fn outgoing_call_negotiates_relay_and_finishes_over_call_v2() {
     let mut engine = engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"request","command":"makeCall",
         "data":{"type":1,"partner":[{"id":"peer-123","name":"Peer","avatar":"avatar"}]}
     }));
@@ -211,7 +210,7 @@ fn outgoing_call_negotiates_relay_and_finishes_over_call_v2() {
         .iter()
         .any(|frame| frame["type"] == "request" && frame["command"] == "getAliasName"));
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"recvSignal","command":401,"data":{
             "status":0,"sessId":"012345678901234567890123456789",
             "fromId":111,"toId":222,
@@ -229,10 +228,10 @@ fn outgoing_call_negotiates_relay_and_finishes_over_call_v2() {
     assert_eq!(extend["sP2P"], 0);
     assert_eq!(extend["select2side"], 0);
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"ring_ring","data":{"callId":call_id}}
     }));
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{
             "act":"answer",
             "data":{"callId":call_id,"params":{"status":0,"rtpSerIp":"127.0.0.1:9000"}}
@@ -245,7 +244,7 @@ fn outgoing_call_negotiates_relay_and_finishes_over_call_v2() {
     );
     assert_eq!(engine.phase, CallPhase::InCall);
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"recvSignal","command":409,"data":{"callId":call_id + 1}
     }));
     assert_eq!(
@@ -254,11 +253,11 @@ fn outgoing_call_negotiates_relay_and_finishes_over_call_v2() {
         "a late end signal for an old call must be ignored"
     );
     assert_eq!(
-        engine.call.as_ref().map(|call| call.call_id),
+        engine.call.as_ref().map(|call| call.id),
         Some(call_id as u32)
     );
 
-    engine.on_zalo_frame(json!({"type":"request","command":"endCall","data":{}}));
+    engine.on_zalo_frame(&json!({"type":"request","command":"endCall","data":{}}));
     let ended = engine.poll_outgoing_frames();
     assert_eq!(
         command(&ended, "sendSignal", 409)["data"]["callId"],
@@ -274,11 +273,11 @@ fn outgoing_remote_timeout_status_six_sends_legacy_unanswered_cancel_signal() {
         for status in [6, 3] {
             let mut engine = engine();
             let call = test_call(phase);
-            let call_id = call.call_id;
+            let call_id = call.id;
             engine.call = Some(call);
             engine.phase = phase;
 
-            engine.on_zalo_frame(json!({
+            engine.on_zalo_frame(&json!({
                 "type":"control","data":{"act":"answer","data":{
                     "callId":call_id,"params":{"status":status}
                 }}
@@ -316,10 +315,10 @@ fn outgoing_remote_timeout_status_six_sends_legacy_unanswered_cancel_signal() {
 #[test]
 fn video_call_reasserts_camera_state_after_peer_connects() {
     let mut engine = engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"request","command":"makeCall",
         "data":{"type":3,"partner":[{"id":"peer-video","name":"Peer"}]}
     }));
@@ -329,7 +328,7 @@ fn video_call_reasserts_camera_state_after_peer_connects() {
         .as_u64()
         .unwrap();
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"recvSignal","command":401,"data":{
             "status":0,"sessId":"012345678901234567890123456789",
             "fromId":111,"toId":222,
@@ -337,7 +336,7 @@ fn video_call_reasserts_camera_state_after_peer_connects() {
         }
     }));
     engine.poll_outgoing_frames();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"answer","data":{
             "callId":call_id,"params":{"status":0,"rtpSerIp":"127.0.0.1:9000"}
         }}
@@ -360,7 +359,7 @@ fn video_call_reasserts_camera_state_after_peer_connects() {
 
     {
         let call = engine.call.as_mut().unwrap();
-        call.camera_on = true;
+        call.camera.on = true;
         call.camera_state_reassert_at = Some(
             Instant::now()
                 .checked_sub(Duration::from_millis(1))
@@ -377,7 +376,7 @@ fn video_call_reasserts_camera_state_after_peer_connects() {
 #[test]
 fn incoming_video_answer_reports_camera_on_and_schedules_reassertion() {
     let mut engine = engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"request","data":{
             "callId":654_321,"uidN":"caller-video","uidFrom":222,"uidTo":111,
             "session":"012345678901234567890123456789",
@@ -392,7 +391,7 @@ fn incoming_video_answer_reports_camera_on_and_schedules_reassertion() {
         command(&answered, "sendSignal", 12006)["data"]["isOnCam"],
         1
     );
-    assert!(engine.call.as_ref().unwrap().camera_on);
+    assert!(engine.call.as_ref().unwrap().camera.on);
     assert!(engine
         .call
         .as_ref()
@@ -404,7 +403,7 @@ fn incoming_video_answer_reports_camera_on_and_schedules_reassertion() {
 #[test]
 fn incoming_call_answers_with_callers_relay_and_session() {
     let mut engine = engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{
             "act":"request",
             "data":{
@@ -466,7 +465,7 @@ fn incoming_call_answers_with_callers_relay_and_session() {
 #[test]
 fn screen_share_is_signalled_only_after_native_capture_is_ready() {
     let mut engine = engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{
             "act":"request","data":{
                 "callId":123_456,"uidN":"caller-zalo","uidFrom":222,"uidTo":111,
@@ -482,8 +481,8 @@ fn screen_share_is_signalled_only_after_native_capture_is_ready() {
     {
         let call = engine.call.as_mut().unwrap();
         call.phase = CallPhase::InCall;
-        call.call_type = 3;
-        call.camera_on = true;
+        call.kind = 3;
+        call.camera.on = true;
         engine.phase = CallPhase::InCall;
     }
 
@@ -505,15 +504,15 @@ fn screen_share_is_signalled_only_after_native_capture_is_ready() {
         .map(|frame| frame["data"]["isOnCam"].as_i64().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(camera_states, vec![0, 1]);
-    assert!(engine.call.as_ref().unwrap().sharing_screen);
-    assert!(engine.call.as_ref().unwrap().camera_was_on);
-    assert!(!engine.call.as_ref().unwrap().camera_on);
+    assert!(engine.call.as_ref().unwrap().camera.sharing_screen);
+    assert!(engine.call.as_ref().unwrap().camera.was_on);
+    assert!(!engine.call.as_ref().unwrap().camera.on);
 }
 
 #[test]
 fn screen_share_keeps_peer_video_enabled_when_camera_was_off() {
     let mut engine = engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{
             "act":"request","data":{
                 "callId":123_456,"uidN":"caller-zalo","uidFrom":222,"uidTo":111,
@@ -529,8 +528,8 @@ fn screen_share_keeps_peer_video_enabled_when_camera_was_off() {
     {
         let call = engine.call.as_mut().unwrap();
         call.phase = CallPhase::InCall;
-        call.call_type = 3;
-        call.camera_on = false;
+        call.kind = 3;
+        call.camera.on = false;
         engine.phase = CallPhase::InCall;
     }
 
@@ -538,9 +537,9 @@ fn screen_share_keeps_peer_video_enabled_when_camera_was_off() {
     let frames = engine.poll_outgoing_frames();
     assert_eq!(command(&frames, "sendSignal", 12006)["data"]["isOnCam"], 1);
     let call = engine.call.as_ref().unwrap();
-    assert!(call.sharing_screen);
-    assert!(!call.camera_was_on);
-    assert!(!call.camera_on);
+    assert!(call.camera.sharing_screen);
+    assert!(!call.camera.was_on);
+    assert!(!call.camera.on);
 
     // The delayed connect reassertion must not overwrite the screen's
     // peer-visible video bit with the internal (camera capture) state.
@@ -560,7 +559,7 @@ fn screen_share_keeps_peer_video_enabled_when_camera_was_off() {
 #[test]
 fn incoming_one_to_one_call_does_not_replace_an_active_group_call() {
     let mut engine = group_engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -568,7 +567,7 @@ fn incoming_one_to_one_call_does_not_replace_an_active_group_call() {
         "partner":[{"id":"222","name":"Member"}]
     }));
     let group_call_id = engine.group.as_ref().unwrap().call_id;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"request","data":{
             "callId":987_654,"uidN":"caller","uidFrom":333,"uidTo":111,
             "session":"012345678901234567890123456789",
@@ -587,7 +586,7 @@ fn incoming_one_to_one_call_does_not_replace_an_active_group_call() {
 fn group_single_invitee_is_rekeyed_to_sfu_uid_without_duplicate_tile() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -636,7 +635,7 @@ fn group_single_invitee_is_rekeyed_to_sfu_uid_without_duplicate_tile() {
 fn group_control_uid_rekeys_the_only_invitee_without_a_ghost_member() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -651,17 +650,17 @@ fn group_control_uid_rekeys_the_only_invitee_without_a_ghost_member() {
         group.host_call = 111;
     }
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_ring_ring","data":{
             "id":call_id,"fromId":222
         }}
     }));
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_answer","data":{
             "id":call_id,"fromId":222
         }}
     }));
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_broadcast","data":{
             "id":call_id,"userId":222,"callState":3,"audioState":1,"videoState":0
         }}
@@ -701,7 +700,7 @@ fn group_two_invitees_do_not_duplicate_uid_members_with_named_placeholders() {
         group.host_call = 999;
     }
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_ring_ring","data":{
             "id":call_id,"fromId":463_951_353
         }}
@@ -720,7 +719,7 @@ fn group_two_invitees_do_not_duplicate_uid_members_with_named_placeholders() {
     }));
     assert!(one_joined.iter().all(|member| member["src"] != "463951353"));
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_ring_ring","data":{
             "id":call_id,"fromId":319_623_368
         }}
@@ -743,7 +742,7 @@ fn group_two_invitees_do_not_duplicate_uid_members_with_named_placeholders() {
 
     // Without an identity pair, keep the original invite metadata visible
     // even after one anonymous SFU UID departs.
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_end_call","data":{
             "id":call_id,"fromId":463_951_353
         }}
@@ -758,7 +757,7 @@ fn group_two_invitees_do_not_duplicate_uid_members_with_named_placeholders() {
 fn group_video_ssrc_rekeys_invitee_after_early_control_broadcast() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -771,7 +770,7 @@ fn group_video_ssrc_rekeys_invitee_after_early_control_broadcast() {
         group.local_uid = 111;
         group.host_call = 111;
     }
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_broadcast","data":{
             "id":engine.group.as_ref().unwrap().call_id,
             "userId":0,"fromId":"123456789012345678",
@@ -814,7 +813,7 @@ fn group_video_ssrc_rekeys_invitee_after_early_control_broadcast() {
 fn group_sequential_invitees_pair_with_unique_media_sources_without_roster() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -833,7 +832,7 @@ fn group_sequential_invitees_pair_with_unique_media_sources_without_roster() {
 
     // First participant's audio arrives before their Zalo broadcast.
     engine.on_group_media_event(GroupMediaEvent::MemberAudio(222));
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_broadcast","data":{
             "id":engine.group.as_ref().unwrap().call_id,
             "userId":111,"fromId":"zalo-a-long-id",
@@ -847,7 +846,7 @@ fn group_sequential_invitees_pair_with_unique_media_sources_without_roster() {
 
     // The second participant's broadcast arrives first. The userId field
     // points at the local endpoint; fromId is the actual invited member.
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_broadcast","data":{
             "id":engine.group.as_ref().unwrap().call_id,
             "userId":111,"fromId":"zalo-b-long-id",
@@ -888,7 +887,7 @@ fn group_broadcast_explicitly_maps_each_long_zalo_id_to_its_sfu_user_id() {
     }
 
     for (id, uid) in [("zalo-a-long-id", 222), ("zalo-b-long-id", 333)] {
-        engine.on_zalo_frame(json!({
+        engine.on_zalo_frame(&json!({
             "type":"control","data":{"act":"group_broadcast","data":{
                 "id":engine.group.as_ref().unwrap().call_id,
                 "userId":uid,"fromId":id,
@@ -918,7 +917,7 @@ fn group_broadcast_explicitly_maps_each_long_zalo_id_to_its_sfu_user_id() {
 fn group_multiple_invitees_are_rekeyed_from_explicit_broadcast_uids() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -935,7 +934,7 @@ fn group_multiple_invitees_are_rekeyed_from_explicit_broadcast_uids() {
         group.host_call = 111;
     }
     for (id, audio_state, video_state) in [("zalo-a-long-id", 1, 0), ("zalo-b-long-id", 0, 1)] {
-        engine.on_zalo_frame(json!({
+        engine.on_zalo_frame(&json!({
             "type":"control","data":{"act":"group_broadcast","data":{
                 "id":engine.group.as_ref().unwrap().call_id,
                 "userId":if id == "zalo-a-long-id" {222} else {333},
@@ -962,7 +961,7 @@ fn group_multiple_invitees_are_rekeyed_from_explicit_broadcast_uids() {
     assert_eq!(engine.group_members_ui().len(), 2);
 
     // Subsequent Zalo broadcasts keep targeting the SFU-backed member.
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_broadcast","data":{
             "id":group.call_id,"fromId":"zalo-b-long-id",
             "callState":3,"audioState":1,"videoState":0
@@ -1042,7 +1041,7 @@ fn multiple_sfu_media_sources_are_paired_when_zalo_broadcasts_arrive_later() {
     }
     engine.group_roster(vec![111, 222, 333]);
     for (id, audio_state, video_state) in [("zalo-a-long-id", 1, 0), ("zalo-b-long-id", 0, 1)] {
-        engine.on_zalo_frame(json!({
+        engine.on_zalo_frame(&json!({
             "type":"control","data":{"act":"group_broadcast","data":{
                 "id":engine.group.as_ref().unwrap().call_id,
                 "userId":if id == "zalo-a-long-id" {222} else {333},
@@ -1099,7 +1098,7 @@ fn group_roster_pairs_invitees_after_anonymous_media_tiles_already_exist() {
     assert_eq!(engine.group_members_ui().len(), 2); // one visible tile per observed participant
 
     for (id, uid) in [("zalo-a-long-id", 222), ("zalo-b-long-id", 333)] {
-        engine.on_zalo_frame(json!({
+        engine.on_zalo_frame(&json!({
             "type":"control","data":{"act":"group_broadcast","data":{
                 "id":engine.group.as_ref().unwrap().call_id,
                 "userId":uid,"fromId":id,"callState":3,"audioState":0,"videoState":1
@@ -1181,7 +1180,7 @@ fn group_sfu_uid_arriving_before_zalo_broadcast_is_paired_later() {
         },
     );
     engine.group_roster(vec![111, 222]);
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{"act":"group_broadcast","data":{
             "id":engine.group.as_ref().unwrap().call_id,
             "fromId":"zalo-a-long-id","callState":3,"audioState":1,"videoState":1
@@ -1199,7 +1198,7 @@ fn group_sfu_uid_arriving_before_zalo_broadcast_is_paired_later() {
 fn group_sfu_roster_adds_members_and_removes_departed_members() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -1217,7 +1216,7 @@ fn group_sfu_roster_adds_members_and_removes_departed_members() {
 
     engine.group_roster(vec![111, 222, 333]);
     let group = engine.group.as_ref().unwrap();
-    assert!(group.answered);
+    assert!(group.flags.answered);
     assert!(group.deadline.is_none());
     assert_eq!(group.members["222"].state, "incall");
     assert_eq!(group.members["333"].state, "incall");
@@ -1236,7 +1235,7 @@ fn group_sfu_roster_adds_members_and_removes_departed_members() {
 fn group_member_join_reasserts_local_camera_state_after_delay() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -1249,7 +1248,7 @@ fn group_member_join_reasserts_local_camera_state_after_delay() {
         group.phase = GroupPhase::Connected;
         group.local_uid = 111;
         group.host_call = 111;
-        group.camera_on = true;
+        group.camera.on = true;
         group.deadline = None;
         group.next_ping_at = Some(Instant::now() + Duration::from_secs(60));
     }
@@ -1299,7 +1298,7 @@ fn group_member_join_reasserts_local_camera_state_after_delay() {
 fn first_group_audio_from_member_marks_them_in_call() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -1356,7 +1355,7 @@ fn zalo_device_config_maps_auto_and_explicit_audio_devices() {
 fn group_screen_share_uses_12044_to_allocate_and_release_share_uid() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -1369,14 +1368,14 @@ fn group_screen_share_uses_12044_to_allocate_and_release_share_uid() {
         group.local_uid = 111;
         group.host_call = 111;
         group.call_id = 1234;
-        group.camera_on = true;
+        group.camera.on = true;
         group.members.get_mut("777").unwrap().state = "incall".into();
     }
 
     engine.activate_screen_share();
-    assert!(engine.group.as_ref().unwrap().sharing_screen);
-    assert!(engine.group.as_ref().unwrap().camera_was_on);
-    assert!(engine.group.as_ref().unwrap().camera_on);
+    assert!(engine.group.as_ref().unwrap().flags.sharing_screen);
+    assert!(engine.group.as_ref().unwrap().camera.was_on);
+    assert!(engine.group.as_ref().unwrap().camera.on);
     let initial = engine.poll_outgoing_frames();
     assert!(initial.iter().any(|event| {
         event["type"] == "sendSignal"
@@ -1408,9 +1407,9 @@ fn group_screen_share_uses_12044_to_allocate_and_release_share_uid() {
     }));
 
     engine.stop_group_screen_share();
-    assert!(!engine.group.as_ref().unwrap().sharing_screen);
-    assert!(engine.group.as_ref().unwrap().camera_on);
-    assert!(!engine.group.as_ref().unwrap().camera_was_on);
+    assert!(!engine.group.as_ref().unwrap().flags.sharing_screen);
+    assert!(engine.group.as_ref().unwrap().camera.on);
+    assert!(!engine.group.as_ref().unwrap().camera.was_on);
     assert!(!engine.group.as_ref().unwrap().members.contains_key("777"));
     let stopped = engine.poll_outgoing_frames();
     assert!(stopped.iter().any(|event| {
@@ -1422,7 +1421,7 @@ fn group_screen_share_uses_12044_to_allocate_and_release_share_uid() {
 fn group_screen_share_restores_an_initially_off_camera_bit() {
     let mut engine = group_engine();
     engine.media = None;
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"update","command":"init","data":{"local":{"id":111}}
     }));
     engine.group_outgoing(&json!({
@@ -1435,15 +1434,15 @@ fn group_screen_share_restores_an_initially_off_camera_bit() {
         group.local_uid = 111;
         group.host_call = 111;
         group.call_id = 1234;
-        group.camera_on = false;
+        group.camera.on = false;
     }
 
     engine.activate_screen_share();
-    assert!(engine.group.as_ref().unwrap().camera_on);
-    assert!(!engine.group.as_ref().unwrap().camera_was_on);
+    assert!(engine.group.as_ref().unwrap().camera.on);
+    assert!(!engine.group.as_ref().unwrap().camera.was_on);
     engine.stop_group_screen_share();
-    assert!(!engine.group.as_ref().unwrap().camera_on);
-    assert!(!engine.group.as_ref().unwrap().camera_was_on);
+    assert!(!engine.group.as_ref().unwrap().camera.on);
+    assert!(!engine.group.as_ref().unwrap().camera.was_on);
 }
 
 #[test]
@@ -1456,13 +1455,13 @@ fn outgoing_group_video_call_preserves_camera_intent() {
     }));
     let group = engine.group.as_ref().unwrap();
     assert_eq!(group.call_type, 1);
-    assert!(group.camera_on);
+    assert!(group.camera.on);
 }
 
 #[test]
 fn outgoing_group_call_negotiates_sfu_and_sends_group_join_signal() {
     let mut engine = group_engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"request","command":"makeCall",
         "data":{
             "type":5,
@@ -1480,7 +1479,7 @@ fn outgoing_group_call_negotiates_sfu_and_sends_group_join_signal() {
     assert_eq!(request_payload["noiseId"][0], "zalo-2");
     assert_eq!(engine.group.as_ref().unwrap().phase, GroupPhase::Calling);
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"recvSignal","command":12433,
         "data":{
             "callId":123_456,
@@ -1515,7 +1514,7 @@ fn outgoing_group_call_negotiates_sfu_and_sends_group_join_signal() {
         .iter()
         .any(|frame| frame["type"] == "sendSignal" && frame["command"] == 12098));
     assert_eq!(engine.group.as_ref().unwrap().phase, GroupPhase::Connected);
-    assert!(!engine.group.as_ref().unwrap().camera_on);
+    assert!(!engine.group.as_ref().unwrap().camera.on);
 
     engine.group.as_mut().unwrap().next_ping_at =
         Some(Instant::now().checked_sub(Duration::from_secs(1)).unwrap());
@@ -1526,14 +1525,14 @@ fn outgoing_group_call_negotiates_sfu_and_sends_group_join_signal() {
         123_456
     );
 
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{
             "act":"group_broadcast",
             "data":{"id":123_456,"fromId":222,"callState":3,"audioState":1,"videoState":1}
         }
     }));
     let group = engine.group.as_ref().unwrap();
-    assert!(group.answered);
+    assert!(group.flags.answered);
     assert!(group.deadline.is_none());
     assert!(group.members["222"].muted);
 
@@ -1551,7 +1550,7 @@ fn outgoing_group_call_negotiates_sfu_and_sends_group_join_signal() {
 #[test]
 fn incoming_group_call_can_be_accepted_or_rejected_through_ui_actions() {
     let mut engine = group_engine();
-    engine.on_zalo_frame(json!({
+    engine.on_zalo_frame(&json!({
         "type":"control","data":{
             "act":"group_request",
             "data":{
@@ -1584,14 +1583,14 @@ fn incoming_group_call_can_be_accepted_or_rejected_through_ui_actions() {
         "action":"accept","camStartOff":true
     }))
     .unwrap();
-    engine.on_ui_action(accept);
+    engine.on_ui_action(&accept);
     let accepted = engine.poll_outgoing_frames();
     assert_eq!(command(&accepted, "sendSignal", 12436)["data"]["status"], 0);
     assert!(accepted
         .iter()
         .any(|frame| frame["type"] == "sendSignal" && frame["command"] == 12098));
     assert_eq!(engine.group.as_ref().unwrap().phase, GroupPhase::Connected);
-    assert!(!engine.group.as_ref().unwrap().camera_on);
+    assert!(!engine.group.as_ref().unwrap().camera.on);
 
     engine.group_hangup("local");
     let ended = engine.poll_outgoing_frames();
@@ -1601,7 +1600,7 @@ fn incoming_group_call_can_be_accepted_or_rejected_through_ui_actions() {
     );
 
     let mut rejected = group_engine();
-    rejected.on_zalo_frame(json!({
+    rejected.on_zalo_frame(&json!({
         "type":"control","data":{
             "act":"group_request",
             "data":{
@@ -1616,7 +1615,7 @@ fn incoming_group_call_can_be_accepted_or_rejected_through_ui_actions() {
     }));
     rejected.poll_outgoing_frames();
     let reject: UiAction = serde_json::from_value(json!({"action":"reject"})).unwrap();
-    rejected.on_ui_action(reject);
+    rejected.on_ui_action(&reject);
     let declined = rejected.poll_outgoing_frames();
     assert_eq!(command(&declined, "sendSignal", 12436)["data"]["status"], 3);
     assert!(rejected.group.is_none());

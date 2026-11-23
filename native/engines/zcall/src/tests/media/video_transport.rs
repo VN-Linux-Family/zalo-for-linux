@@ -1,5 +1,6 @@
 use super::*;
 use crate::crypto::srtp::{session_keys, unprotect_rtp};
+use crate::media::{MediaKind, MediaRole};
 use crate::protocol::rtp::build_group_audio_rtp_header;
 
 #[test]
@@ -66,8 +67,8 @@ fn group_prepare_tries_next_init_layout_only_after_server_refusal() {
                 uid: 111,
                 peer_uid: 222,
                 sess_id: b"this-session-is-not-used-for-group-srtp".to_vec(),
-                is_caller: true,
-                is_group: true,
+                role: MediaRole::Caller,
+                kind: MediaKind::Group,
                 send_udp: true,
                 video_enabled: true,
                 video_config: serde_json::json!({ "srtpKey": "" }),
@@ -83,8 +84,43 @@ fn group_prepare_tries_next_init_layout_only_after_server_refusal() {
         Some((relay_addr, 0xaabb_ccdd))
     );
     assert!(backend.keys.lock().unwrap().is_none());
-    assert!(backend.params.lock().unwrap().as_ref().unwrap().is_group);
+    assert_eq!(
+        backend.params.lock().unwrap().as_ref().unwrap().kind,
+        MediaKind::Group
+    );
     backend.stop();
+}
+
+fn assert_group_camera_packets(relay: &UdpSocket) {
+    use crate::protocol::zrtp::msg_types as zrtp_types;
+
+    let mut saw_config = false;
+    let mut requested_quality = Vec::new();
+    let mut video_header = None;
+    for _ in 0..8 {
+        let mut packet = [0u8; 1500];
+        let Ok((len, _)) = relay.recv_from(&mut packet) else {
+            break;
+        };
+        let packet = &packet[..len];
+        if packet.first() == Some(&zrtp_types::CONTROL) && packet.len() >= 24 {
+            match packet[20] {
+                0x0c => saw_config = true,
+                0x0d if packet.len() >= 29 => requested_quality.push(packet[28]),
+                _ => {}
+            }
+        } else if packet.first() == Some(&zrtp_types::VIDEO_RTP) {
+            video_header = Some(packet[5..].to_vec());
+        }
+    }
+    assert!(saw_config, "SFU layer configuration should be announced");
+    assert!(requested_quality.contains(&0));
+    assert!(requested_quality.contains(&3));
+    let rtp = video_header.expect("group H.264 RTP should reach the SFU");
+    assert_eq!(rtp[0], 0x90);
+    assert_eq!(rtp[23] >> 4, 12);
+    assert_eq!(rtp[24], 0x03);
+    assert_eq!(u16::from_be_bytes([rtp[25], rtp[26]]), 1);
 }
 
 #[test]
@@ -146,8 +182,8 @@ fn group_camera_uses_sfu_rtp_header_and_announces_quality_layers() {
                 uid: 111,
                 peer_uid: 222,
                 sess_id: b"group-session-not-used-with-empty-srtp-key".to_vec(),
-                is_caller: true,
-                is_group: true,
+                role: MediaRole::Caller,
+                kind: MediaKind::Group,
                 send_udp: true,
                 video_enabled: true,
                 video_config: config,
@@ -176,34 +212,31 @@ fn group_camera_uses_sfu_rtp_header_and_announces_quality_layers() {
         1
     );
 
-    let mut saw_config = false;
-    let mut requested_quality = Vec::new();
-    let mut video_header = None;
-    for _ in 0..8 {
+    assert_group_camera_packets(&relay);
+    backend.stop();
+}
+
+fn assert_group_camera_uplink(relay: &UdpSocket, local_frame: &[u8]) -> SrtpKeys {
+    let mut tx_camera_rtp = None;
+    for _ in 0..16 {
         let mut packet = [0u8; 1500];
         let Ok((len, _)) = relay.recv_from(&mut packet) else {
             break;
         };
-        let packet = &packet[..len];
-        if packet.first() == Some(&zrtp_types::CONTROL) && packet.len() >= 24 {
-            match packet[20] {
-                0x0c => saw_config = true,
-                0x0d if packet.len() >= 29 => requested_quality.push(packet[28]),
-                _ => {}
+        if len > 25 && packet[0] == msg_types::VIDEO_RTP {
+            let rtp = &packet[5..len];
+            if u32::from_be_bytes(rtp[8..12].try_into().unwrap()) == 111 && rtp[0] & 0x10 != 0 {
+                tx_camera_rtp = Some(rtp.to_vec());
+                break;
             }
-        } else if packet.first() == Some(&zrtp_types::VIDEO_RTP) {
-            video_header = Some(packet[5..].to_vec());
         }
     }
-    assert!(saw_config, "SFU layer configuration should be announced");
-    assert!(requested_quality.contains(&0));
-    assert!(requested_quality.contains(&3));
-    let rtp = video_header.expect("group H.264 RTP should reach the SFU");
-    assert_eq!(rtp[0], 0x90);
-    assert_eq!(rtp[23] >> 4, 12);
-    assert_eq!(rtp[24], 0x03);
-    assert_eq!(u16::from_be_bytes([rtp[25], rtp[26]]), 1);
-    backend.stop();
+    let tx_camera_rtp = tx_camera_rtp.expect("local camera RTP should reach the SFU");
+    let primary_keys = session_keys(&[0x11; 30]).unwrap();
+    let tx_clear = unprotect_rtp(&tx_camera_rtp, &primary_keys, 0)
+        .expect("SFU uplink camera RTP should authenticate with the configured group key");
+    assert_eq!(tx_clear.opus, local_frame);
+    primary_keys
 }
 
 #[test]
@@ -229,8 +262,8 @@ fn group_camera_media_is_bidirectional_and_reports_remote_ssrc() {
         uid: 111,
         peer_uid: 111,
         sess_id: vec![0x42; 30],
-        is_caller: false,
-        is_group: true,
+        role: MediaRole::Callee,
+        kind: MediaKind::Group,
         send_udp: true,
         video_enabled: true,
         video_config: config.clone(),
@@ -263,25 +296,7 @@ fn group_camera_media_is_bidirectional_and_reports_remote_ssrc() {
     assert!(!backend.set_group_member_render_width(222, 700).unwrap());
     assert!(backend.send_video_frame(true, &local_frame).unwrap() > 0);
 
-    let mut tx_camera_rtp = None;
-    for _ in 0..16 {
-        let mut packet = [0u8; 1500];
-        let Ok((len, _)) = relay.recv_from(&mut packet) else {
-            break;
-        };
-        if len > 25 && packet[0] == msg_types::VIDEO_RTP {
-            let rtp = &packet[5..len];
-            if u32::from_be_bytes(rtp[8..12].try_into().unwrap()) == 111 && rtp[0] & 0x10 != 0 {
-                tx_camera_rtp = Some(rtp.to_vec());
-                break;
-            }
-        }
-    }
-    let tx_camera_rtp = tx_camera_rtp.expect("local camera RTP should reach the SFU");
-    let primary_keys = session_keys(&[0x11; 30]).unwrap();
-    let tx_clear = unprotect_rtp(&tx_camera_rtp, &primary_keys, 0)
-        .expect("SFU uplink camera RTP should authenticate with the configured group key");
-    assert_eq!(tx_clear.opus, local_frame);
+    let primary_keys = assert_group_camera_uplink(&relay, &local_frame);
 
     let remote_frame = [
         0, 0, 0, 1, 0x67, 0x64, 0, 0x1e, 0, 0, 0, 1, 0x68, 0xee, 0x3c, 0x80, 0, 0, 0, 1, 0x65,
@@ -404,8 +419,8 @@ fn p2p_handover_notifies_peer_and_requests_relay_fallback() {
         uid: 111,
         peer_uid: 222,
         sess_id: b"p2p-fallback-session".to_vec(),
-        is_caller: true,
-        is_group: false,
+        role: MediaRole::Caller,
+        kind: MediaKind::OneToOne,
         send_udp: true,
         video_enabled: false,
         video_config: Value::Null,
@@ -467,8 +482,8 @@ fn network_change_sends_change_address_ping_and_relay_request() {
         uid: 111,
         peer_uid: 222,
         sess_id: b"network-change-session".to_vec(),
-        is_caller: true,
-        is_group: false,
+        role: MediaRole::Caller,
+        kind: MediaKind::OneToOne,
         send_udp: true,
         video_enabled: false,
         video_config: Value::Null,
@@ -527,8 +542,8 @@ fn ring_ping_reaches_every_candidate_at_the_configured_interval_and_stops() {
         uid: 111,
         peer_uid: 222,
         sess_id: b"ring-ping-session".to_vec(),
-        is_caller: true,
-        is_group: false,
+        role: MediaRole::Caller,
+        kind: MediaKind::OneToOne,
         send_udp: true,
         video_enabled: false,
         video_config: Value::Null,
@@ -585,8 +600,8 @@ fn selecting_a_relay_pings_it_and_ends_other_ring_sessions() {
         uid: 111,
         peer_uid: 222,
         sess_id: b"ring-select-session".to_vec(),
-        is_caller: true,
-        is_group: false,
+        role: MediaRole::Caller,
+        kind: MediaKind::OneToOne,
         send_udp: true,
         video_enabled: false,
         video_config: Value::Null,
@@ -691,8 +706,8 @@ fn selecting_a_group_relay_sends_zavi_ping_not_one_to_one_ping() {
         uid: 111,
         peer_uid: 111,
         sess_id: b"group-select-session".to_vec(),
-        is_caller: true,
-        is_group: true,
+        role: MediaRole::Caller,
+        kind: MediaKind::Group,
         send_udp: true,
         video_enabled: false,
         video_config: Value::Null,
@@ -729,6 +744,65 @@ fn selecting_a_group_relay_sends_zavi_ping_not_one_to_one_ping() {
     );
     assert!(backend.last_ping.lock().unwrap().elapsed() < Duration::from_secs(1));
     backend.stop();
+}
+
+fn establish_group_share_peer(relay: &UdpSocket, backend: &ZrtcMediaBackend, main_port: u16) {
+    use crate::protocol::zrtp::{build_control_header, commands, msg_types, MAGIC_BYTE};
+    use std::thread;
+
+    let mut init = [0u8; 1500];
+    let (_init_len, share_client) = relay.recv_from(&mut init).unwrap();
+    assert_eq!(init[0], msg_types::CONTROL);
+    assert_eq!(u32::from_le_bytes(init[10..14].try_into().unwrap()), 777);
+    assert_ne!(
+        share_client.port(),
+        main_port,
+        "share must own a second UDP socket"
+    );
+    assert_eq!(
+        u16::from_le_bytes(init[18..20].try_into().unwrap()),
+        commands::INIT_CALL_CALLEE
+    );
+
+    let mut accepted = build_control_header(
+        msg_types::SERVER_REPLY,
+        MAGIC_BYTE,
+        1,
+        777,
+        0,
+        commands::INIT_CALL_CALLEE,
+        4,
+    )
+    .to_vec();
+    accepted.extend_from_slice(&0u32.to_le_bytes());
+    accepted.extend_from_slice(&77u32.to_le_bytes());
+    accepted.extend_from_slice(&0x1122_3344u32.to_le_bytes());
+    accepted.extend_from_slice(&0u16.to_le_bytes());
+    relay.send_to(&accepted, share_client).unwrap();
+
+    let ready_deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        let ready = backend
+            .share_peer
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|peer| peer.token == 0x1122_3344);
+        if ready || Instant::now() >= ready_deadline {
+            assert!(ready, "share InitZRTP response should establish a token");
+            break;
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert!(backend
+        .drain_group_events()
+        .contains(&GroupMediaEvent::ShareReady));
+    assert_eq!(
+        backend
+            .send_group_share_frame(true, &[0, 0, 0, 1, 0x65, 0x88, 0x84, 0x21, 0xa0], 1280, 720)
+            .unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -777,8 +851,8 @@ fn group_screen_share_uses_a_second_socket_uid_token_and_rtp_stream() {
                 uid: 111,
                 peer_uid: 222,
                 sess_id: b"group-share-session".to_vec(),
-                is_caller: true,
-                is_group: true,
+                role: MediaRole::Caller,
+                kind: MediaKind::Group,
                 send_udp: true,
                 video_enabled: false,
                 video_config: serde_json::json!({
@@ -803,59 +877,7 @@ fn group_screen_share_uses_a_second_socket_uid_token_and_rtp_stream() {
     );
     backend.start_group_share(777).unwrap();
 
-    let mut init = [0u8; 1500];
-    let (_init_len, share_client) = relay.recv_from(&mut init).unwrap();
-    assert_eq!(init[0], zrtp_types::CONTROL);
-    assert_eq!(u32::from_le_bytes(init[10..14].try_into().unwrap()), 777);
-    assert_ne!(
-        share_client.port(),
-        main_port,
-        "share must own a second UDP socket"
-    );
-    assert_eq!(
-        u16::from_le_bytes(init[18..20].try_into().unwrap()),
-        commands::INIT_CALL_CALLEE
-    );
-
-    let mut accepted = build_control_header(
-        zrtp_types::SERVER_REPLY,
-        MAGIC_BYTE,
-        1,
-        777,
-        0,
-        commands::INIT_CALL_CALLEE,
-        4,
-    )
-    .to_vec();
-    accepted.extend_from_slice(&0u32.to_le_bytes());
-    accepted.extend_from_slice(&77u32.to_le_bytes());
-    accepted.extend_from_slice(&0x1122_3344u32.to_le_bytes());
-    accepted.extend_from_slice(&0u16.to_le_bytes());
-    relay.send_to(&accepted, share_client).unwrap();
-
-    let ready_deadline = Instant::now() + Duration::from_secs(1);
-    loop {
-        let ready = backend
-            .share_peer
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|peer| peer.token == 0x1122_3344);
-        if ready || Instant::now() >= ready_deadline {
-            assert!(ready, "share InitZRTP response should establish a token");
-            break;
-        }
-        thread::sleep(Duration::from_millis(2));
-    }
-    assert!(backend
-        .drain_group_events()
-        .contains(&GroupMediaEvent::ShareReady));
-    assert_eq!(
-        backend
-            .send_group_share_frame(true, &[0, 0, 0, 1, 0x65, 0x88, 0x84, 0x21, 0xa0], 1280, 720)
-            .unwrap(),
-        1
-    );
+    establish_group_share_peer(&relay, &backend, main_port);
 
     let mut video = None;
     for _ in 0..8 {
@@ -975,8 +997,8 @@ fn caller_installs_candidates_from_answer_before_media_binder_starts() {
         uid: 10,
         peer_uid: 20,
         sess_id: vec![1; 30],
-        is_caller: true,
-        is_group: false,
+        role: MediaRole::Caller,
+        kind: MediaKind::OneToOne,
         send_udp: true,
         video_enabled: false,
         video_config: Value::Null,
@@ -1079,8 +1101,8 @@ fn prepare_collects_all_accepted_relays_and_selects_first_successful_reply() {
                 uid: 111,
                 peer_uid: 222,
                 sess_id: vec![0x42; 30],
-                is_caller: true,
-                is_group: false,
+                role: MediaRole::Caller,
+                kind: MediaKind::OneToOne,
                 send_udp: true,
                 video_enabled: false,
                 video_config: Value::Null,
@@ -1150,8 +1172,8 @@ fn stop_during_ringing_sends_end_call_before_media_workers_start() {
                 uid: 111,
                 peer_uid: 222,
                 sess_id: vec![0x42; 30],
-                is_caller: true,
-                is_group: false,
+                role: MediaRole::Caller,
+                kind: MediaKind::OneToOne,
                 send_udp: true,
                 video_enabled: false,
                 video_config: Value::Null,
@@ -1178,8 +1200,8 @@ fn incoming_h264_frame_is_srtp_verified_and_foreign_sources_are_dropped() {
         uid: 0x1234,
         peer_uid: 0x5678,
         sess_id: vec![1; 30],
-        is_caller: true,
-        is_group: false,
+        role: MediaRole::Caller,
+        kind: MediaKind::OneToOne,
         send_udp: true,
         video_enabled: false,
         video_config: Value::Null,
@@ -1254,8 +1276,8 @@ fn remote_group_share_is_plain_rtp_even_when_camera_peer_has_srtp_keys() {
         uid: 111,
         peer_uid: 222,
         sess_id: vec![1; 30],
-        is_caller: true,
-        is_group: true,
+        role: MediaRole::Caller,
+        kind: MediaKind::Group,
         send_udp: true,
         video_enabled: false,
         video_config: Value::Null,
@@ -1302,6 +1324,39 @@ fn remote_group_share_is_plain_rtp_even_when_camera_peer_has_srtp_keys() {
     backend.stop();
 }
 
+fn wait_for_p2p_response(
+    peer: &UdpSocket,
+    expected_kind: u8,
+    call_id: u32,
+    body_prefix: Option<u8>,
+) -> bool {
+    use crate::protocol::zrtp::p2p;
+
+    let mut buffer = [0u8; 1600];
+    for _ in 0..40 {
+        let Ok((length, _)) = peer.recv_from(&mut buffer) else {
+            continue;
+        };
+        let Some((header, body)) = p2p::parse(&buffer[..length]) else {
+            continue;
+        };
+        if header.kind != expected_kind {
+            continue;
+        }
+        assert!(header.is_callee);
+        assert_eq!(header.call_id, call_id);
+        if let Some(prefix) = body_prefix {
+            if body.first() != Some(&prefix) {
+                continue;
+            }
+        } else {
+            assert!(body.len() >= 6 + 4);
+        }
+        return true;
+    }
+    false
+}
+
 #[test]
 fn p2p_bind_keepalive_and_media_duplicate_use_authenticated_call_path() {
     use crate::protocol::zrtp::p2p;
@@ -1327,8 +1382,8 @@ fn p2p_bind_keepalive_and_media_duplicate_use_authenticated_call_path() {
         uid: local_uid,
         peer_uid,
         sess_id: vec![1; 30],
-        is_caller: false,
-        is_group: false,
+        role: MediaRole::Callee,
+        kind: MediaKind::OneToOne,
         send_udp: true,
         video_enabled: true,
         video_config: Value::Null,
@@ -1347,22 +1402,7 @@ fn p2p_bind_keepalive_and_media_duplicate_use_authenticated_call_path() {
     peer.send_to(&bind_peer, backend.socket.local_addr().unwrap())
         .unwrap();
 
-    let mut buffer = [0u8; 1600];
-    let mut bind_answer_seen = false;
-    for _ in 0..40 {
-        let Ok((length, _)) = peer.recv_from(&mut buffer) else {
-            continue;
-        };
-        if let Some((header, body)) = p2p::parse(&buffer[..length]) {
-            if header.kind == p2p::BIND_ANSWER {
-                assert!(header.is_callee);
-                assert_eq!(header.call_id, call_id);
-                assert!(body.len() >= 6 + 4);
-                bind_answer_seen = true;
-                break;
-            }
-        }
-    }
+    let bind_answer_seen = wait_for_p2p_response(&peer, p2p::BIND_ANSWER, call_id, None);
     assert!(
         bind_answer_seen,
         "native engine should answer the peer's BIND_PEER"
@@ -1372,21 +1412,10 @@ fn p2p_bind_keepalive_and_media_duplicate_use_authenticated_call_path() {
     let ping = p2p::wrap(false, call_id, p2p::KEEPALIVE, &[1]);
     peer.send_to(&ping, backend.socket.local_addr().unwrap())
         .unwrap();
-    let mut pong_seen = false;
-    for _ in 0..40 {
-        let Ok((length, _)) = peer.recv_from(&mut buffer) else {
-            continue;
-        };
-        if let Some((header, body)) = p2p::parse(&buffer[..length]) {
-            if header.kind == p2p::KEEPALIVE && body.first() == Some(&2) {
-                assert!(header.is_callee);
-                pong_seen = true;
-                break;
-            }
-        }
-    }
+    let pong_seen = wait_for_p2p_response(&peer, p2p::KEEPALIVE, call_id, Some(2));
     assert!(pong_seen, "native engine should answer peer keepalive");
     assert_eq!(*backend.p2p_path.lock().unwrap(), Some(peer_addr));
+    let mut buffer = [0u8; 1600];
 
     // Once the path is up the same protected H.264 packet is sent by both
     // relay and peer UDP, with each transport's own envelope.
@@ -1425,8 +1454,8 @@ fn voice_only_session_never_sends_video_frames() {
         uid: 111,
         peer_uid: 222,
         sess_id: b"voice-only-session".to_vec(),
-        is_caller: true,
-        is_group: false,
+        role: MediaRole::Caller,
+        kind: MediaKind::OneToOne,
         send_udp: true,
         video_enabled: false,
         video_config: Value::Null,
@@ -1455,8 +1484,8 @@ fn outgoing_h264_frame_is_fragmented_srtp_protected_and_sent_to_relay() {
         uid: 0x1234,
         peer_uid: 0x5678,
         sess_id: vec![1; 30],
-        is_caller: true,
-        is_group: false,
+        role: MediaRole::Caller,
+        kind: MediaKind::OneToOne,
         send_udp: true,
         video_enabled: true,
         video_config: Value::Null,

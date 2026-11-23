@@ -99,12 +99,11 @@ fn xfixes_cursor_position_matches_the_x11_pointer_hotspot() {
         .expect("queue pointer query")
         .reply()
         .expect("query actual X11 pointer position");
-    let cursor = match xfixes::get_cursor_image(&conn)
+    let Ok(cursor) = xfixes::get_cursor_image(&conn)
         .expect("queue XFixes cursor image")
         .reply()
-    {
-        Ok(cursor) => cursor,
-        Err(_) => return,
+    else {
+        return;
     };
     assert_eq!(
         (cursor.x, cursor.y),
@@ -130,12 +129,11 @@ fn root_capture_composites_the_live_xfixes_cursor_when_available() {
         .iter()
         .find(|screen| screen.root == root)
         .expect("root screen");
-    let cursor = match xfixes::get_cursor_image(&conn)
+    let Ok(cursor) = xfixes::get_cursor_image(&conn)
         .expect("queue XFixes cursor image")
         .reply()
-    {
-        Ok(cursor) => cursor,
-        Err(_) => return,
+    else {
+        return;
     };
     let mut frame = RawScreenFrame {
         bgra: [24, 48, 72, 255]
@@ -153,12 +151,16 @@ fn root_capture_composites_the_live_xfixes_cursor_when_available() {
     for y in 0..cursor_height {
         for x in 0..cursor_width {
             let pixel = cursor.cursor_image[y * cursor_width + x];
-            if pixel >> 24 == 0 || pixel & 0x00ff_ffff == 0 {
+            if pixel >> 24 == 0 || pixel.trailing_zeros() >= 24 {
                 continue;
             }
-            let px = left + x as i32;
-            let py = top + y as i32;
-            if px < 0 || py < 0 || px >= frame.width as i32 || py >= frame.height as i32 {
+            let px = left + i32::try_from(x).unwrap_or(i32::MAX);
+            let py = top + i32::try_from(y).unwrap_or(i32::MAX);
+            if px < 0
+                || py < 0
+                || px >= frame.width.cast_signed()
+                || py >= frame.height.cast_signed()
+            {
                 continue;
             }
             let offset = (py as usize * frame.width as usize + px as usize) * 4;
@@ -342,7 +344,7 @@ fn x11_capture_worker_encodes_a_root_frame_when_an_x_server_is_available() {
             assert!(frame.data.starts_with(&[0, 0, 0, 1]));
         }
         assert!(frame.width >= 2 && frame.height >= 2);
-        assert!(!frame.data.is_empty());
+        assert_ne!(frame.data, Vec::<u8>::new());
         frame_count += 1;
     }
     stop.store(true, Ordering::Release);

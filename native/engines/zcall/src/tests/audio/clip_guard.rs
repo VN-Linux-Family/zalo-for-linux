@@ -59,7 +59,7 @@ fn clip_guard_raises_gain_for_near_end_quiet_speech_only() {
     let manual = Arc::new(AtomicBool::new(false));
     let mut guard = ClipGuard::new(None, Arc::clone(&volume))
         .with_controls(Some(Arc::clone(&far_active)), Arc::clone(&manual));
-    guard.enabled = true;
+    guard.config.enabled = true;
     guard.last_step = std::time::Instant::now()
         .checked_sub(std::time::Duration::from_secs(2))
         .unwrap();
@@ -181,7 +181,7 @@ fn os_mute_pauses_auto_gain_for_privacy() {
     let mut guard = ClipGuard::new(None, Arc::clone(&volume))
         .with_controls(Some(Arc::new(AtomicBool::new(false))), Arc::clone(&manual))
         .with_backend(backend.clone(), true);
-    guard.enabled = true;
+    guard.config.enabled = true;
     assert!(!guard.sync_os_volume());
     assert!(guard.is_os_muted());
 
@@ -203,7 +203,7 @@ fn hot_speech_and_soft_clipping_reduce_capture_gain() {
     let manual = Arc::new(AtomicBool::new(false));
     let mut guard =
         ClipGuard::new(None, Arc::clone(&volume)).with_controls(None, Arc::clone(&manual));
-    guard.enabled = true;
+    guard.config.enabled = true;
     guard.last_step = std::time::Instant::now()
         .checked_sub(std::time::Duration::from_secs(10))
         .unwrap();
@@ -232,7 +232,7 @@ fn re_enabling_auto_unmutes_and_restores_low_capture_floor_even_during_sync_thro
     let mut guard = ClipGuard::new(None, Arc::clone(&volume))
         .with_controls(None, Arc::clone(&manual))
         .with_backend(backend.clone(), true);
-    guard.enabled = true;
+    guard.config.enabled = true;
 
     // Observe Manual mode once, then re-enable Auto while the normal poll is throttled.
     let silence = vec![0i16; 320];

@@ -4,7 +4,8 @@ use super::*;
 
 fn generate_sine_frame(freq: f32, phase: &mut f32) -> Vec<i16> {
     let mut pcm = vec![0i16; FRAME_SAMPLES];
-    let step = 2.0 * std::f32::consts::PI * freq / SAMPLE_RATE as f32;
+    let step = 2.0 * std::f32::consts::PI * freq
+        / f32::from(u16::try_from(SAMPLE_RATE).unwrap_or(u16::MAX));
     for s in &mut pcm {
         *s = (phase.sin() * 15000.0) as i16;
         *phase = (*phase + step) % (2.0 * std::f32::consts::PI);
@@ -14,9 +15,10 @@ fn generate_sine_frame(freq: f32, phase: &mut f32) -> Vec<i16> {
 
 #[test]
 fn test_jitter_buffer_prebuffering_and_playout() {
-    let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+    let mut jb = JitterBuffer::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 10).unwrap();
     jb.set_min_target(3);
-    let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+    let mut enc =
+        OpusEncoder::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 32000).unwrap();
 
     let mut phase = 0.0;
     let mut opus_buf = vec![0u8; 1024];
@@ -50,9 +52,10 @@ fn test_jitter_buffer_prebuffering_and_playout() {
 
 #[test]
 fn test_jitter_buffer_out_of_order_and_plc() {
-    let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+    let mut jb = JitterBuffer::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 10).unwrap();
     jb.set_min_target(2);
-    let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+    let mut enc =
+        OpusEncoder::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 32000).unwrap();
 
     let mut phase = 0.0;
     let mut opus_buf = vec![0u8; 1024];
@@ -89,9 +92,10 @@ fn test_jitter_buffer_out_of_order_and_plc() {
 
 #[test]
 fn test_jitter_buffer_starvation_and_rebuffering() {
-    let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+    let mut jb = JitterBuffer::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 10).unwrap();
     jb.set_min_target(2);
-    let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+    let mut enc =
+        OpusEncoder::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 32000).unwrap();
 
     let mut phase = 0.0;
     let mut opus_buf = vec![0u8; 1024];
@@ -130,9 +134,10 @@ fn test_jitter_buffer_starvation_and_rebuffering() {
 
 #[test]
 fn test_jitter_buffer_overflow_pruning_advances_next_idx() {
-    let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+    let mut jb = JitterBuffer::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 10).unwrap();
     jb.set_min_target(3);
-    let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+    let mut enc =
+        OpusEncoder::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 32000).unwrap();
 
     let mut phase = 0.0;
     let mut opus_buf = vec![0u8; 1024];
@@ -153,9 +158,10 @@ fn test_jitter_buffer_overflow_pruning_advances_next_idx() {
 
 #[test]
 fn test_jitter_buffer_backward_sequence_reset_and_ssrc_change() {
-    let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+    let mut jb = JitterBuffer::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 10).unwrap();
     jb.set_min_target(2);
-    let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+    let mut enc =
+        OpusEncoder::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 32000).unwrap();
 
     let mut phase = 0.0;
     let mut opus_buf = vec![0u8; 1024];
@@ -180,9 +186,10 @@ fn test_jitter_buffer_backward_sequence_reset_and_ssrc_change() {
 
 #[test]
 fn test_jitter_buffer_multiframe_40ms_opus() {
-    let mut jb = JitterBuffer::new(SAMPLE_RATE as i32, CHANNELS as i32, 10).unwrap();
+    let mut jb = JitterBuffer::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 10).unwrap();
     jb.set_min_target(2);
-    let mut enc = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS as i32, 32000).unwrap();
+    let mut enc =
+        OpusEncoder::new(SAMPLE_RATE.cast_signed(), CHANNELS.cast_signed(), 32000).unwrap();
 
     let mut phase = 0.0;
     let mut opus_buf = vec![0u8; 1024];

@@ -32,9 +32,8 @@ struct PipeWireCapture {
 
 type PipeWireFrameFn = Option<extern "C" fn(*mut c_void, *const u8, u32, u32, u32, i32, u32, u32)>;
 
-// These safe declarations are private to this module. `PipeWireCaptureGuard`
-// passes only live handles and bounded output buffers; the callback userdata
-// remains allocated until the capture is freed.
+// SAFETY: These declarations match the C bridge ABI. The guard passes only live
+// handles and bounded buffers, and keeps callback userdata alive until capture free.
 unsafe extern "C" {
     safe fn zcall_pw_capture_new(
         remote_fd: c_int,
@@ -153,6 +152,7 @@ impl Drop for PipeWireCaptureGuard {
     }
 }
 
+#[derive(Clone, Copy)]
 struct PipeWireFrame {
     userdata: *mut c_void,
     mapped: *const u8,
@@ -184,10 +184,10 @@ extern "C" fn pipewire_frame(
         width,
         height,
     };
-    let _ = catch_unwind(AssertUnwindSafe(|| pipewire_frame_inner(frame)));
+    let _ = catch_unwind(AssertUnwindSafe(|| pipewire_frame_inner(&frame)));
 }
 
-fn pipewire_frame_inner(frame: PipeWireFrame) {
+fn pipewire_frame_inner(frame: &PipeWireFrame) {
     let PipeWireFrame {
         userdata,
         mapped,
@@ -197,7 +197,7 @@ fn pipewire_frame_inner(frame: PipeWireFrame) {
         stride,
         width,
         height,
-    } = frame;
+    } = *frame;
     let width = width as usize;
     let height = height as usize;
     let offset = offset as usize;
@@ -220,9 +220,9 @@ fn pipewire_frame_inner(frame: PipeWireFrame) {
         return;
     }
 
-    // SAFETY: PipeWire invokes this callback synchronously with a valid mapped
-    // buffer for `max_size` bytes; userdata points to the live CaptureData box.
-    // The mapped buffer is copied before this callback returns.
+    // SAFETY: The C bridge invokes this callback synchronously while the capture
+    // guard keeps the CaptureData box alive. `mapped` addresses `max_size` readable
+    // bytes for the callback lifetime, and the bytes are copied before returning.
     let (data, mapped) = unsafe {
         (
             &*userdata.cast::<CaptureData>(),
@@ -265,10 +265,10 @@ fn portal_source_types(source: Option<&str>) -> Result<SourceType, String> {
 }
 
 pub(super) fn capture_worker(
-    stop: Arc<AtomicBool>,
+    stop: &Arc<AtomicBool>,
     tx: SyncSender<EncodedScreenFrame>,
-    status: SyncSender<Result<(), String>>,
-    source: Option<String>,
+    status: &SyncSender<Result<(), String>>,
+    source: Option<&str>,
     settings: ScreenEncodeConfig,
 ) -> Result<(), String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -303,7 +303,7 @@ pub(super) fn capture_worker(
         .await?;
         crate::zcall_log!("[zcall-screen] portal connected; creating session");
         let session = portal_request(
-            portal.create_session(Default::default()),
+            portal.create_session(<_>::default()),
             stop.clone(),
             Duration::from_secs(10),
             "creating the ScreenCast session",
@@ -315,7 +315,7 @@ pub(super) fn capture_worker(
         // session before a later share attempt can start.
         let prepared = async {
             crate::zcall_log!("[zcall-screen] session created; opening source chooser");
-            let source_types = portal_source_types(source.as_deref())?;
+            let source_types = portal_source_types(source)?;
             let selected = portal_request(
                 portal.select_sources(
                     &session,
@@ -351,7 +351,10 @@ pub(super) fn capture_worker(
                 .ok_or_else(|| "ScreenCast portal returned no PipeWire stream".to_string())?;
             let node_id = stream.pipe_wire_node_id();
             let remote_fd = portal_request(
-                portal.open_pipe_wire_remote(&session, Default::default()),
+                portal.open_pipe_wire_remote(
+                    &session,
+                    ashpd::desktop::screencast::OpenPipeWireRemoteOptions::default(),
+                ),
                 stop.clone(),
                 Duration::from_secs(10),
                 "opening the portal PipeWire connection",
@@ -416,9 +419,9 @@ async fn wait_for_stop(stop: Arc<AtomicBool>) {
 fn pipewire_capture(
     remote_fd: OwnedFd,
     node_id: u32,
-    stop: Arc<AtomicBool>,
+    stop: &Arc<AtomicBool>,
     tx: SyncSender<EncodedScreenFrame>,
-    status: SyncSender<Result<(), String>>,
+    status: &SyncSender<Result<(), String>>,
     settings: ScreenEncodeConfig,
 ) -> Result<(), String> {
     let raw_frames = Arc::new(LatestFrameQueue::default());
@@ -476,12 +479,12 @@ fn pipewire_capture(
         .name("zcall-screen-encoder".into())
         .spawn(move || {
             if let Err(error) = encode_frames(
-                encoder_frames,
-                encoder_tx,
-                encoder_stop.clone(),
-                encoder_settings,
-                encoder_status.clone(),
-                encoder_encoded_frame_seen,
+                &encoder_frames,
+                &encoder_tx,
+                &encoder_stop,
+                &encoder_settings,
+                &encoder_status,
+                &encoder_encoded_frame_seen,
             ) {
                 crate::zcall_log!("[zcall-screen] encoder failed: {error}");
                 let _ = encoder_status.try_send(Err(error));
@@ -525,7 +528,7 @@ fn pipewire_capture(
     // `report_worker_result` suppresses errors after stop to avoid duplicate
     // terminal events for user cancellation; report native failure while
     // cancellation is still distinguishable.
-    report_capture_failure(&capture_result, &stop, &status);
+    report_capture_failure(&capture_result, stop, status);
 
     stop.store(true, Ordering::Release);
     crate::zcall_log!("[zcall-screen] disconnecting PipeWire stream");

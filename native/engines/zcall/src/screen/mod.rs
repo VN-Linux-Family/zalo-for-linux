@@ -198,10 +198,10 @@ impl ScreenCapture {
                         )
                     } else {
                         portal::capture_worker(
-                            worker_stop,
+                            &worker_stop,
                             tx,
-                            status_tx.clone(),
-                            source,
+                            &status_tx,
+                            source.as_deref(),
                             ScreenEncodeConfig {
                                 bitrate,
                                 max_short,
@@ -312,10 +312,12 @@ const fn fps_tier(fps: u32) -> u32 {
     }
 }
 
-const fn encoder_config(settings: &ScreenEncodeConfig, fps: u32) -> EncoderConfig {
+fn encoder_config(settings: &ScreenEncodeConfig, fps: u32) -> EncoderConfig {
     EncoderConfig::new()
         .bitrate(BitRate::from_bps(settings.bitrate))
-        .max_frame_rate(FrameRate::from_hz(fps as f32))
+        .max_frame_rate(FrameRate::from_hz(f32::from(
+            u8::try_from(fps).unwrap_or(30),
+        )))
         .usage_type(UsageType::ScreenContentRealTime)
         .adaptive_quantization(false)
         .background_detection(false)
@@ -323,13 +325,89 @@ const fn encoder_config(settings: &ScreenEncodeConfig, fps: u32) -> EncoderConfi
         .intra_frame_period(IntraFramePeriod::from_num_frames(fps * 2))
 }
 
+fn update_ema(previous: f64, sample: f64) -> f64 {
+    if previous == 0.0 {
+        sample
+    } else {
+        sample.mul_add(0.15, previous * 0.85)
+    }
+}
+
+fn update_cpu_fps(
+    cpu_fps: &mut u32,
+    good_since: &mut Option<std::time::Instant>,
+    encode_ema_ms: f64,
+    active_fps: u32,
+) {
+    let budget_ms = 1000.0 / f64::from(active_fps);
+    if encode_ema_ms > budget_ms * 0.85 && *cpu_fps > 15 {
+        *cpu_fps = if *cpu_fps > 24 { 24 } else { 15 };
+        *good_since = None;
+        crate::zcall_log!(
+            "[zcall-screen] CPU encode pressure; reducing local FPS ceiling to {} (encode_ema_ms={encode_ema_ms:.1}, budget_ms={budget_ms:.1})",
+            *cpu_fps
+        );
+    } else if encode_ema_ms < budget_ms * 0.45 {
+        let since = good_since.get_or_insert_with(std::time::Instant::now);
+        if since.elapsed() >= Duration::from_secs(8) && *cpu_fps < 30 {
+            *cpu_fps = if *cpu_fps < 24 { 24 } else { 30 };
+            *good_since = None;
+            crate::zcall_log!(
+                "[zcall-screen] CPU headroom recovered; raising local FPS ceiling to {}",
+                *cpu_fps
+            );
+        }
+    } else {
+        *good_since = None;
+    }
+}
+
+fn encode_screen_frame(
+    encoder: &mut Encoder,
+    yuv: &mut YUVBuffer,
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    started: std::time::Instant,
+) -> Result<Option<(EncodedScreenFrame, f64, f64, f64)>, String> {
+    let bgra = BgraSliceU8::new(pixels, (width as usize, height as usize));
+    yuv.read_bgra8(bgra);
+    let convert_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let h264_started = std::time::Instant::now();
+    let bitstream = encoder
+        .encode(yuv)
+        .map_err(|error| format!("Encode screen frame with OpenH264: {error}"))?;
+    let h264_ms = h264_started.elapsed().as_secs_f64() * 1000.0;
+    let encode_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let key = matches!(
+        bitstream.frame_type(),
+        FrameType::IDR | FrameType::I | FrameType::IPMixed
+    );
+    let mut data = Vec::new();
+    bitstream.write_vec(&mut data);
+    if data.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some((
+        EncodedScreenFrame {
+            data,
+            key,
+            width,
+            height,
+        },
+        convert_ms,
+        h264_ms,
+        encode_ms,
+    )))
+}
+
 fn encode_frames<F: RawFrameSource>(
-    frames: F,
-    tx: SyncSender<EncodedScreenFrame>,
-    stop: Arc<AtomicBool>,
-    settings: ScreenEncodeConfig,
-    status: SyncSender<Result<(), String>>,
-    encoded_frame_seen: Arc<AtomicBool>,
+    frames: &F,
+    tx: &SyncSender<EncodedScreenFrame>,
+    stop: &Arc<AtomicBool>,
+    settings: &ScreenEncodeConfig,
+    status: &SyncSender<Result<(), String>>,
+    encoded_frame_seen: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut encoder: Option<Encoder> = None;
     let mut yuv_buffer: Option<YUVBuffer> = None;
@@ -382,7 +460,7 @@ fn encode_frames<F: RawFrameSource>(
             encoder = Some(
                 Encoder::with_api_config(
                     openh264::OpenH264API::from_source(),
-                    encoder_config(&settings, active_fps),
+                    encoder_config(settings, active_fps),
                 )
                 .map_err(|error| format!("Create OpenH264 screen encoder: {error}"))?,
             );
@@ -392,70 +470,21 @@ fn encode_frames<F: RawFrameSource>(
         let Some(encoder) = encoder.as_mut() else {
             continue;
         };
-        let bgra = BgraSliceU8::new(&pixels, (width as usize, height as usize));
         let Some(yuv) = yuv_buffer.as_mut() else {
             continue;
         };
-        yuv.read_bgra8(bgra);
-        let convert_ms = encode_started.elapsed().as_secs_f64() * 1000.0;
-        let h264_started = std::time::Instant::now();
-        let bitstream = encoder
-            .encode(yuv)
-            .map_err(|error| format!("Encode screen frame with OpenH264: {error}"))?;
-        let h264_ms = h264_started.elapsed().as_secs_f64() * 1000.0;
-        let encode_ms = encode_started.elapsed().as_secs_f64() * 1000.0;
-        convert_ema_ms = if convert_ema_ms == 0.0 {
-            convert_ms
-        } else {
-            convert_ms.mul_add(0.15, convert_ema_ms * 0.85)
+        let Some((encoded_frame, convert_ms, h264_ms, encode_ms)) =
+            encode_screen_frame(encoder, yuv, &pixels, width, height, encode_started)?
+        else {
+            continue;
         };
-        h264_ema_ms = if h264_ema_ms == 0.0 {
-            h264_ms
-        } else {
-            h264_ms.mul_add(0.15, h264_ema_ms * 0.85)
-        };
-        encode_ema_ms = if encode_ema_ms == 0.0 {
-            encode_ms
-        } else {
-            encode_ms.mul_add(0.15, encode_ema_ms * 0.85)
-        };
+        convert_ema_ms = update_ema(convert_ema_ms, convert_ms);
+        h264_ema_ms = update_ema(h264_ema_ms, h264_ms);
+        encode_ema_ms = update_ema(encode_ema_ms, encode_ms);
         if last_evaluation.elapsed() >= Duration::from_secs(2) {
-            let budget_ms = 1000.0 / f64::from(active_fps);
-            if encode_ema_ms > budget_ms * 0.85 && cpu_fps > 15 {
-                cpu_fps = if cpu_fps > 24 { 24 } else { 15 };
-                good_since = None;
-                crate::zcall_log!(
-                    "[zcall-screen] CPU encode pressure; reducing local FPS ceiling to {cpu_fps} (encode_ema_ms={encode_ema_ms:.1}, budget_ms={budget_ms:.1})"
-                );
-            } else if encode_ema_ms < budget_ms * 0.45 {
-                let since = good_since.get_or_insert_with(std::time::Instant::now);
-                if since.elapsed() >= Duration::from_secs(8) && cpu_fps < 30 {
-                    cpu_fps = if cpu_fps < 24 { 24 } else { 30 };
-                    good_since = None;
-                    crate::zcall_log!(
-                        "[zcall-screen] CPU headroom recovered; raising local FPS ceiling to {cpu_fps}"
-                    );
-                }
-            } else {
-                good_since = None;
-            }
+            update_cpu_fps(&mut cpu_fps, &mut good_since, encode_ema_ms, active_fps);
             last_evaluation = std::time::Instant::now();
         }
-        let key = matches!(
-            bitstream.frame_type(),
-            FrameType::IDR | FrameType::I | FrameType::IPMixed
-        );
-        let mut encoded_frame = Vec::new();
-        bitstream.write_vec(&mut encoded_frame);
-        if encoded_frame.is_empty() {
-            continue;
-        }
-        let encoded_frame = EncodedScreenFrame {
-            data: encoded_frame,
-            key,
-            width,
-            height,
-        };
         // Publish readiness only after the first encoded frame is actually in
         // the engine's queue. Reporting ready before try_send can let the engine
         // signal share-start while the frame is still absent (or was dropped).

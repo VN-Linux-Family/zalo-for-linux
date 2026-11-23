@@ -39,13 +39,19 @@ struct ReadyFrame {
     since: Instant,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FrameGate {
+    AwaitingInitialKeyframe,
+    Started,
+    AwaitingGroupKeyframe,
+}
+
 pub struct VideoAssembler {
     group: bool,
     pending: BTreeMap<u32, PendingFrame>,
     ready: BTreeMap<u64, ReadyFrame>,
     last_idx: Option<u64>,
-    started: bool,
-    need_key: bool,
+    gate: FrameGate,
     sps: Option<Vec<u8>>,
     pps: Option<Vec<u8>>,
     keyframe_requested: bool,
@@ -70,8 +76,7 @@ impl VideoAssembler {
             pending: BTreeMap::new(),
             ready: BTreeMap::new(),
             last_idx: None,
-            started: false,
-            need_key: false,
+            gate: FrameGate::AwaitingInitialKeyframe,
             sps: None,
             pps: None,
             keyframe_requested: false,
@@ -216,7 +221,7 @@ impl VideoAssembler {
                 }
             }
             let frame = self.ready.remove(&first_idx).expect("ready frame exists");
-            if !self.started && !frame.key {
+            if self.gate == FrameGate::AwaitingInitialKeyframe && !frame.key {
                 self.last_idx = Some(frame.last);
                 self.keyframe_requested = true;
                 continue;
@@ -224,7 +229,7 @@ impl VideoAssembler {
             if self.last_idx.is_some() {
                 self.keyframe_requested = true;
                 if self.group {
-                    self.need_key = true;
+                    self.gate = FrameGate::AwaitingGroupKeyframe;
                 }
             }
             self.emit(frame, &mut output);
@@ -234,13 +239,12 @@ impl VideoAssembler {
 
     fn emit(&mut self, frame: ReadyFrame, output: &mut Vec<VideoFrame>) {
         self.last_idx = Some(frame.last);
-        if self.group && self.need_key && !frame.key {
+        if self.group && self.gate == FrameGate::AwaitingGroupKeyframe && !frame.key {
             return;
         }
         if frame.key {
-            self.need_key = false;
+            self.gate = FrameGate::Started;
         }
-        self.started |= frame.key;
         let codec = avc_codec_string(&frame.data).unwrap_or_else(|| "avc1.64001e".into());
         output.push(VideoFrame {
             key: frame.key,
@@ -263,7 +267,7 @@ impl VideoAssembler {
 const fn is_fragment(payload: &[u8]) -> bool {
     // The SFU's two-byte FU marker uses NAL type 28 in the indicator;
     // F/NRI occupy the high three bits and are not fixed to zero (0x1c).
-    payload.len() >= 2 && payload[0] & 0x1f == 28 && (payload[1] & 0x3f) == 0
+    payload.len() >= 2 && payload[0] & 0x1f == 28 && payload[1].trailing_zeros() >= 6
 }
 
 fn nal_units(annex_b: &[u8]) -> Vec<Vec<u8>> {

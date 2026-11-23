@@ -122,24 +122,24 @@ fn main() {
     };
 
     log(
-        &log_file,
+        log_file.as_ref(),
         &format!(
             "Starting native zcall Rust engine: send_udp={send_udp}, group={is_group}, sockets: recv={recv_path}, send={send_path}"
         ),
     );
 
     zcall::logging::init(log_file.as_ref().and_then(|file| file.try_clone().ok()));
-    log(&log_file, &format!("runtime env: session_type={:?}, wayland_display={}, display={}, ui_port_present={}, ui_token_present={}", env::var("XDG_SESSION_TYPE").ok(), env::var_os("WAYLAND_DISPLAY").is_some(), env::var_os("DISPLAY").is_some(), env::var_os("ZCALL_UI_PORT").is_some(), env::var_os("ZCALL_UI_TOKEN").is_some()));
+    log(log_file.as_ref(), &format!("runtime env: session_type={:?}, wayland_display={}, display={}, ui_port_present={}, ui_token_present={}", env::var("XDG_SESSION_TYPE").ok(), env::var_os("WAYLAND_DISPLAY").is_some(), env::var_os("DISPLAY").is_some(), env::var_os("ZCALL_UI_PORT").is_some(), env::var_os("ZCALL_UI_TOKEN").is_some()));
 
     let main_js = zalo_main_js_path();
     let key = match load_callv2_key(&main_js) {
         Ok(k) => k,
         Err(e) => {
             log(
-                &log_file,
+                log_file.as_ref(),
                 &format!("Failed to load callV2TransportAesKey: {e}"),
             );
-            log(&log_file, &format!("FATAL: {e}"));
+            log(log_file.as_ref(), &format!("FATAL: {e}"));
             std::process::exit(1);
         }
     };
@@ -148,10 +148,10 @@ fn main() {
         Ok(s) => s,
         Err(e) => {
             log(
-                &log_file,
+                log_file.as_ref(),
                 &format!("Failed to connect to recv socket {recv_path}: {e}"),
             );
-            log(&log_file, &format!("FATAL: {e}"));
+            log(log_file.as_ref(), &format!("FATAL: {e}"));
             std::process::exit(1);
         }
     };
@@ -160,10 +160,10 @@ fn main() {
         Ok(s) => s,
         Err(e) => {
             log(
-                &log_file,
+                log_file.as_ref(),
                 &format!("Failed to connect to send socket {send_path}: {e}"),
             );
-            log(&log_file, &format!("FATAL: {e}"));
+            log(log_file.as_ref(), &format!("FATAL: {e}"));
             std::process::exit(1);
         }
     };
@@ -177,14 +177,14 @@ fn main() {
     let shutdown = Arc::new(AtomicBool::new(false));
     if let Err(error) = signal_hook::flag::register(libc::SIGINT, Arc::clone(&shutdown)) {
         log(
-            &log_file,
+            log_file.as_ref(),
             &format!("Failed to register SIGINT handler: {error}"),
         );
         std::process::exit(1);
     }
     if let Err(error) = signal_hook::flag::register(libc::SIGTERM, Arc::clone(&shutdown)) {
         log(
-            &log_file,
+            log_file.as_ref(),
             &format!("Failed to register SIGTERM handler: {error}"),
         );
         std::process::exit(1);
@@ -205,7 +205,10 @@ fn main() {
         // 1. Read from Zalo
         match mut_send_stream.read(&mut read_buf) {
             Ok(0) => {
-                log(&log_file, "send socket EOF from Zalo, shutting down.");
+                log(
+                    log_file.as_ref(),
+                    "send socket EOF from Zalo, shutting down.",
+                );
                 break;
             }
             Ok(n) => {
@@ -214,19 +217,19 @@ fn main() {
                     match ev {
                         FrameEvent::Json(val) => {
                             if verbose {
-                                log(&log_file, &format!("<- Zalo JSON: {val}"));
+                                log(log_file.as_ref(), &format!("<- Zalo JSON: {val}"));
                             }
-                            engine.on_zalo_frame(val);
+                            engine.on_zalo_frame(&val);
                         }
                         FrameEvent::Raw(raw) => {
                             if verbose {
-                                log(&log_file, &format!("<- Zalo RAW: {raw}"));
+                                log(log_file.as_ref(), &format!("<- Zalo RAW: {raw}"));
                             }
                         }
                         FrameEvent::Error(err) => {
-                            log(&log_file, &format!("Frame parse error: {err}"));
+                            log(log_file.as_ref(), &format!("Frame parse error: {err}"));
                         }
-                        _ => {}
+                        FrameEvent::Token(_) => {}
                     }
                 }
             }
@@ -234,7 +237,10 @@ fn main() {
                 // No data right now
             }
             Err(e) => {
-                log(&log_file, &format!("Error reading from send socket: {e}"));
+                log(
+                    log_file.as_ref(),
+                    &format!("Error reading from send socket: {e}"),
+                );
                 break;
             }
         }
@@ -258,16 +264,19 @@ fn main() {
                 || frame_type == "update"
             {
                 log(
-                    &log_file,
+                    log_file.as_ref(),
                     &format!("outgoing Zalo event: type={frame_type}, command={command}"),
                 );
             }
             if verbose {
-                log(&log_file, &format!("-> Zalo JSON: {frame}"));
+                log(log_file.as_ref(), &format!("-> Zalo JSON: {frame}"));
             }
             let bytes = format_outgoing_frames(&frame, &key);
             if let Err(e) = mut_recv_stream.write_all(&bytes) {
-                log(&log_file, &format!("Error writing to recv socket: {e}"));
+                log(
+                    log_file.as_ref(),
+                    &format!("Error writing to recv socket: {e}"),
+                );
                 break;
             }
             let _ = mut_recv_stream.flush();
@@ -277,10 +286,10 @@ fn main() {
     }
 
     engine.hangup("engine_exit");
-    log(&log_file, "zcall engine shutdown complete.");
+    log(log_file.as_ref(), "zcall engine shutdown complete.");
 }
 
-fn log(file_opt: &Option<File>, msg: &str) {
+fn log(file_opt: Option<&File>, msg: &str) {
     let time = chrono_timestamp_time();
     let line = format!("{time} [zcall-rust] {msg}\n");
     if let Some(file) = file_opt {

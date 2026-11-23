@@ -38,7 +38,7 @@ impl PulseConnection {
             sequence: 0,
         };
         let auth: protocol::AuthReply = connection.roundtrip_with_version(
-            protocol::Command::Auth(protocol::AuthParams {
+            &protocol::Command::Auth(protocol::AuthParams {
                 version: protocol::MAX_VERSION,
                 supports_shm: false,
                 supports_memfd: false,
@@ -57,7 +57,7 @@ impl PulseConnection {
             CString::new(std::process::id().to_string()).expect("numeric process id"),
         );
         let _: protocol::SetClientNameReply =
-            connection.roundtrip(protocol::Command::SetClientName(props))?;
+            connection.roundtrip(&protocol::Command::SetClientName(props))?;
         Ok(connection)
     }
     const fn next_sequence(&mut self) -> u32 {
@@ -67,11 +67,11 @@ impl PulseConnection {
     }
     fn roundtrip_with_version<T: protocol::CommandReply>(
         &mut self,
-        command: protocol::Command,
+        command: &protocol::Command,
         version: u16,
     ) -> Result<T, String> {
         let sequence = self.next_sequence();
-        protocol::write_command_message(self.socket.get_mut(), sequence, &command, version)
+        protocol::write_command_message(self.socket.get_mut(), sequence, command, version)
             .and_then(|()| {
                 self.socket
                     .get_mut()
@@ -90,16 +90,16 @@ impl PulseConnection {
     }
     fn roundtrip<T: protocol::CommandReply>(
         &mut self,
-        command: protocol::Command,
+        command: &protocol::Command,
     ) -> Result<T, String> {
         self.roundtrip_with_version(command, self.protocol_version)
     }
-    fn acknowledge(&mut self, command: protocol::Command) -> Result<(), String> {
+    fn acknowledge(&mut self, command: &protocol::Command) -> Result<(), String> {
         let sequence = self.next_sequence();
         protocol::write_command_message(
             self.socket.get_mut(),
             sequence,
-            &command,
+            command,
             self.protocol_version,
         )
         .and_then(|()| {
@@ -215,7 +215,7 @@ fn resolve_source_name(
     }) {
         return Ok(source.to_owned());
     }
-    let info: protocol::ServerInfo = connection.roundtrip(protocol::Command::GetServerInfo)?;
+    let info: protocol::ServerInfo = connection.roundtrip(&protocol::Command::GetServerInfo)?;
     info.default_source_name
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty())
@@ -228,7 +228,7 @@ fn fetch_source_info(
     let name = CString::new(source_name)
         .map_err(|_| "PulseAudio source name contains an interior NUL byte".to_owned())?;
     let info: protocol::SourceInfo =
-        connection.roundtrip(protocol::Command::GetSourceInfo(protocol::GetSourceInfo {
+        connection.roundtrip(&protocol::Command::GetSourceInfo(protocol::GetSourceInfo {
             index: None,
             name: Some(name),
         }))?;
@@ -272,7 +272,7 @@ fn set_source_volume_on_connection(
     info: &SourceSnapshot,
     percent: u8,
 ) -> Result<(), String> {
-    connection.acknowledge(protocol::Command::SetSourceVolume(
+    connection.acknowledge(&protocol::Command::SetSourceVolume(
         protocol::SetDeviceVolumeParams {
             device_index: Some(info.index),
             device_name: None,
@@ -285,7 +285,7 @@ fn set_source_mute_on_connection(
     info: &SourceSnapshot,
     mute: bool,
 ) -> Result<(), String> {
-    connection.acknowledge(protocol::Command::SetSourceMute(
+    connection.acknowledge(&protocol::Command::SetSourceMute(
         protocol::SetDeviceMuteParams {
             device_index: Some(info.index),
             device_name: None,
@@ -298,7 +298,7 @@ fn set_source_output_mute_on_connection(
     index: u32,
     mute: bool,
 ) -> Result<(), String> {
-    connection.acknowledge(protocol::Command::SetSourceOutputMute(
+    connection.acknowledge(&protocol::Command::SetSourceOutputMute(
         protocol::SetStreamMuteParams { index, mute },
     ))
 }
@@ -307,7 +307,7 @@ fn set_source_output_volume_on_connection(
     index: u32,
     channels: u8,
 ) -> Result<(), String> {
-    connection.acknowledge(protocol::Command::SetSourceOutputVolume(
+    connection.acknowledge(&protocol::Command::SetSourceOutputVolume(
         protocol::SetStreamVolumeParams {
             index,
             volume: channel_volume(channels, PA_VOLUME_NORM)?,
@@ -331,13 +331,13 @@ pub fn pulse_get_source_info(source: Option<&str>) -> Option<PulseSourceInfo> {
 pub fn pulse_device_inventory() -> Option<PulseDeviceInventory> {
     let mut connection = pulse_connection().ok()?;
     let server: protocol::ServerInfo = connection
-        .roundtrip(protocol::Command::GetServerInfo)
+        .roundtrip(&protocol::Command::GetServerInfo)
         .ok()?;
     let sources: protocol::SourceInfoList = connection
-        .roundtrip(protocol::Command::GetSourceInfoList)
+        .roundtrip(&protocol::Command::GetSourceInfoList)
         .ok()?;
     let sinks: protocol::SinkInfoList = connection
-        .roundtrip(protocol::Command::GetSinkInfoList)
+        .roundtrip(&protocol::Command::GetSinkInfoList)
         .ok()?;
     let to_device = |name: std::ffi::CString, description: Option<std::ffi::CString>| {
         let id = name.to_string_lossy().into_owned();
@@ -386,7 +386,7 @@ fn source_output_for_pid(
     target_pid: i64,
 ) -> Result<Option<SourceOutputSnapshot>, String> {
     let outputs: protocol::SourceOutputInfoList =
-        connection.roundtrip(protocol::Command::GetSourceOutputInfoList)?;
+        connection.roundtrip(&protocol::Command::GetSourceOutputInfoList)?;
     Ok(outputs.into_iter().find_map(|info| {
         let pid = info
             .props
@@ -444,13 +444,35 @@ pub fn get_source_volume(source: Option<&str>) -> Option<u8> {
     pulse_get_source_info(source).map(|info| info.pct)
 }
 
+fn log_bluetooth_identity(kind: &str, identity: &str) {
+    let profile = identity.to_ascii_lowercase();
+    if !profile.contains("bluez") {
+        return;
+    }
+    crate::zcall_log!("[zcall-rust] hw: detected bluetooth {kind}: {identity}");
+    if [
+        "headset-head-unit",
+        "headset_head_unit",
+        "handsfree",
+        "hfp",
+        "hsp",
+    ]
+    .iter()
+    .any(|term| profile.contains(term))
+    {
+        crate::zcall_log!("[zcall-rust] hw: bluetooth HFP/HSP speech profile active");
+    } else if profile.contains("a2dp") {
+        crate::zcall_log!("[zcall-rust] hw: bluetooth A2DP profile active");
+    }
+}
+
 /// Read-only startup diagnostics using the `PulseAudio` native protocol.
 pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
     let Ok(mut connection) = pulse_connection() else {
         crate::zcall_log!("[zcall-rust] hw: PulseAudio-compatible server unavailable");
         return;
     };
-    let server = connection.roundtrip::<protocol::ServerInfo>(protocol::Command::GetServerInfo);
+    let server = connection.roundtrip::<protocol::ServerInfo>(&protocol::Command::GetServerInfo);
     let backend = server
         .as_ref()
         .ok()
@@ -469,7 +491,7 @@ pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
     );
 
     if let Ok(sources) =
-        connection.roundtrip::<protocol::SourceInfoList>(protocol::Command::GetSourceInfoList)
+        connection.roundtrip::<protocol::SourceInfoList>(&protocol::Command::GetSourceInfoList)
     {
         for source in sources {
             let name = source.name.to_string_lossy();
@@ -478,24 +500,7 @@ pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
                 .as_ref()
                 .map_or_default(|value| value.to_string_lossy());
             let identity = format!("{name} {description}");
-            if identity.to_ascii_lowercase().contains("bluez") {
-                crate::zcall_log!("[zcall-rust] hw: detected bluetooth source: {identity}");
-                let profile = identity.to_ascii_lowercase();
-                if [
-                    "headset-head-unit",
-                    "headset_head_unit",
-                    "handsfree",
-                    "hfp",
-                    "hsp",
-                ]
-                .iter()
-                .any(|term| profile.contains(term))
-                {
-                    crate::zcall_log!("[zcall-rust] hw: bluetooth HFP/HSP speech profile active");
-                } else if profile.contains("a2dp") {
-                    crate::zcall_log!("[zcall-rust] hw: bluetooth A2DP profile active");
-                }
-            }
+            log_bluetooth_identity("source", &identity);
             crate::zcall_log!(
                 "[zcall-rust] hw: source '{name}' sample rate={} Hz",
                 source.sample_spec.sample_rate
@@ -503,7 +508,7 @@ pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
         }
     }
     if let Ok(sinks) =
-        connection.roundtrip::<protocol::SinkInfoList>(protocol::Command::GetSinkInfoList)
+        connection.roundtrip::<protocol::SinkInfoList>(&protocol::Command::GetSinkInfoList)
     {
         for sink in sinks {
             let name = sink.name.to_string_lossy();
@@ -512,24 +517,7 @@ pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
                 .as_ref()
                 .map_or_default(|value| value.to_string_lossy());
             let identity = format!("{name} {description}");
-            if identity.to_ascii_lowercase().contains("bluez") {
-                crate::zcall_log!("[zcall-rust] hw: detected bluetooth sink: {identity}");
-                let profile = identity.to_ascii_lowercase();
-                if [
-                    "headset-head-unit",
-                    "headset_head_unit",
-                    "handsfree",
-                    "hfp",
-                    "hsp",
-                ]
-                .iter()
-                .any(|term| profile.contains(term))
-                {
-                    crate::zcall_log!("[zcall-rust] hw: bluetooth HFP/HSP speech profile active");
-                } else if profile.contains("a2dp") {
-                    crate::zcall_log!("[zcall-rust] hw: bluetooth A2DP profile active");
-                }
-            }
+            log_bluetooth_identity("sink", &identity);
             crate::zcall_log!(
                 "[zcall-rust] hw: sink '{name}' sample rate={} Hz",
                 sink.sample_spec.sample_rate
@@ -537,7 +525,7 @@ pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
         }
     }
     if let Ok(cards) =
-        connection.roundtrip::<protocol::CardInfoList>(protocol::Command::GetCardInfoList)
+        connection.roundtrip::<protocol::CardInfoList>(&protocol::Command::GetCardInfoList)
     {
         for card in cards {
             if let Some(profile) = card.active_profile {

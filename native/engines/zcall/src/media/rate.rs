@@ -86,6 +86,81 @@ pub struct RateTotals {
     pub feedback_timeouts: u64,
 }
 
+fn u64_to_f64(value: u64) -> f64 {
+    let high = u32::try_from(value >> 32).unwrap_or_default();
+    let low = u32::try_from(value & u64::from(u32::MAX)).unwrap_or_default();
+    f64::from(high) * 4_294_967_296.0 + f64::from(low)
+}
+
+fn configured_ladder(
+    config: &Value,
+    max_width: u32,
+    max_height: u32,
+    max_fps: u32,
+    max_kbps: u32,
+    keyframe_interval_ms: u64,
+) -> Vec<Rung> {
+    config
+        .get("bwProfiles")
+        .and_then(Value::as_array)
+        .filter(|rows| !rows.is_empty())
+        .map_or_default(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    let id = row.get("id").and_then(Value::as_u64).unwrap_or(0) as u32;
+                    let res = row.get("res").and_then(Value::as_u64)? as u32;
+                    let fps = row.get("fps").and_then(Value::as_u64).unwrap_or(15) as u32;
+                    let kbps = row.get("bitrate").and_then(Value::as_u64)? as u32;
+                    let (width, height) = dimensions(res)?;
+                    if kbps < MIN_KBPS
+                        || kbps > max_kbps
+                        || width > max_width
+                        || height > max_height
+                    {
+                        return None;
+                    }
+                    Some(Rung {
+                        profile: VideoProfile {
+                            rung: id,
+                            width,
+                            height,
+                            fps: fps.min(max_fps).max(1),
+                            bitrate: kbps.saturating_mul(1000),
+                            keyframe_interval_ms,
+                        },
+                        kbps,
+                    })
+                })
+                .collect()
+        })
+}
+
+fn default_ladder(
+    max_width: u32,
+    max_height: u32,
+    max_fps: u32,
+    max_kbps: u32,
+    keyframe_interval_ms: u64,
+) -> Vec<Rung> {
+    DEFAULT_LADDER
+        .iter()
+        .filter(|(_, width, height, _, kbps)| {
+            *kbps >= MIN_KBPS && *kbps <= max_kbps && *width <= max_width && *height <= max_height
+        })
+        .map(|(id, width, height, fps, kbps)| Rung {
+            profile: VideoProfile {
+                rung: *id,
+                width: *width,
+                height: *height,
+                fps: (*fps).min(max_fps).max(1),
+                bitrate: kbps.saturating_mul(1000),
+                keyframe_interval_ms,
+            },
+            kbps: *kbps,
+        })
+        .collect()
+}
+
 impl SendRateController {
     pub fn new(config: &Value, local_ssrc: u32) -> Self {
         let max_width = positive(config, "maxWidth", 1280);
@@ -94,61 +169,22 @@ impl SendRateController {
         let max_kbps = positive(config, "maxBitrate", 1500);
         let keyframe_interval_ms = u64::from(positive(config, "keyFrameIntervalMs", 10_000));
 
-        let mut ladder = config
-            .get("bwProfiles")
-            .and_then(Value::as_array)
-            .filter(|rows| !rows.is_empty())
-            .map_or_default(|rows| {
-                rows.iter()
-                    .filter_map(|row| {
-                        let id = row.get("id").and_then(Value::as_u64).unwrap_or(0) as u32;
-                        let res = row.get("res").and_then(Value::as_u64)? as u32;
-                        let fps = row.get("fps").and_then(Value::as_u64).unwrap_or(15) as u32;
-                        let kbps = row.get("bitrate").and_then(Value::as_u64)? as u32;
-                        let (width, height) = dimensions(res)?;
-                        if kbps < MIN_KBPS
-                            || kbps > max_kbps
-                            || width > max_width
-                            || height > max_height
-                        {
-                            return None;
-                        }
-                        Some(Rung {
-                            profile: VideoProfile {
-                                rung: id,
-                                width,
-                                height,
-                                fps: fps.min(max_fps).max(1),
-                                bitrate: kbps.saturating_mul(1000),
-                                keyframe_interval_ms,
-                            },
-                            kbps,
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            });
-
+        let mut ladder = configured_ladder(
+            config,
+            max_width,
+            max_height,
+            max_fps,
+            max_kbps,
+            keyframe_interval_ms,
+        );
         if ladder.is_empty() {
-            ladder = DEFAULT_LADDER
-                .iter()
-                .filter(|(_, width, height, _, kbps)| {
-                    *kbps >= MIN_KBPS
-                        && *kbps <= max_kbps
-                        && *width <= max_width
-                        && *height <= max_height
-                })
-                .map(|(id, width, height, fps, kbps)| Rung {
-                    profile: VideoProfile {
-                        rung: *id,
-                        width: *width,
-                        height: *height,
-                        fps: (*fps).min(max_fps).max(1),
-                        bitrate: kbps.saturating_mul(1000),
-                        keyframe_interval_ms,
-                    },
-                    kbps: *kbps,
-                })
-                .collect();
+            ladder = default_ladder(
+                max_width,
+                max_height,
+                max_fps,
+                max_kbps,
+                keyframe_interval_ms,
+            );
         }
         if ladder.is_empty() {
             ladder.push(Rung {
@@ -258,7 +294,9 @@ impl SendRateController {
                 arrival_ms += i64::from(delta) / 4;
                 let sequence = packet.base.wrapping_add(index as u16);
                 if let Some(sent_at) = self.sent.get(&sequence) {
-                    self.window.delays_ms.push(arrival_ms - *sent_at as i64);
+                    self.window
+                        .delays_ms
+                        .push(arrival_ms - sent_at.cast_signed());
                 }
             }
         }
@@ -280,7 +318,7 @@ impl SendRateController {
         let total = window.received.saturating_add(window.lost);
         let twcc_valid = total >= MIN_TWCC_PACKETS;
         let loss = if twcc_valid {
-            Some(window.lost as f64 / total as f64)
+            Some(u64_to_f64(window.lost) / u64_to_f64(total))
         } else {
             window.rr_loss.iter().copied().reduce(f64::max)
         };
