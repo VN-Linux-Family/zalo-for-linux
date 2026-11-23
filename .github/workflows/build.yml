@@ -4,9 +4,7 @@ on:
   schedule:
     - cron: '0 0 * * *'
   push:
-    branches:
   pull_request:
-    branches:
   workflow_dispatch:
     inputs:
       zalo_version:

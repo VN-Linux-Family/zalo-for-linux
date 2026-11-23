@@ -3,7 +3,7 @@ use std::{env, path::PathBuf, time::Duration};
 
 // The loaded models hold roughly 450 MB and OCR is used in short bursts, so
 // drop them after a short idle period; the next request reloads them.
-const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(120);
+const DEFAULT_SESSION_TTL: Duration = Duration::from_mins(2);
 
 #[allow(
     clippy::struct_excessive_bools,
@@ -137,7 +137,7 @@ fn parse_duration(
 mod tests {
     use super::*;
 
-    const DEFAULT: Option<Duration> = Some(Duration::from_secs(120));
+    const DEFAULT: Option<Duration> = Some(Duration::from_mins(2));
 
     #[test]
     fn zero_uses_default() {

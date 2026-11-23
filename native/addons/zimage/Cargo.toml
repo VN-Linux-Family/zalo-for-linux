@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 napi = { version = "2", features = ["napi5", "async"] }
 napi-derive = "2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "fs"] }
-image = "0.25.10"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp", "ico"] }
 
 [build-dependencies]
 napi-build = "2"

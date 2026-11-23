@@ -21,7 +21,7 @@ pub const ZDB4_MAGIC_HEADER: &[u8; 6] = b"ZDB4.0";
 /// Offset where Table of Contents (TOC) begins: 6 bytes magic + 8 bytes padding
 pub const ZDB4_TOC_START_OFFSET: usize = 14;
 
-/// SQLite database file magic header (16 bytes)
+/// `SQLite` database file magic header (16 bytes)
 pub const SQLITE_HEADER_MAGIC: &[u8; 16] = b"SQLite format 3\0";
 
 /// XZ container stream header magic (\xFD7zXZ\x00)
