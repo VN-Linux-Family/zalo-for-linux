@@ -47,7 +47,7 @@ fn stat_file(path: &str) -> Option<FileInfo> {
     }
     let file_name = Path::new(path)
         .file_name()
-        .map_or_default(|s| s.to_string_lossy().into_owned());
+        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
     Some(FileInfo {
         file_name,
         file_path: path.to_string(),

@@ -232,7 +232,7 @@ mod tests {
         leveler.process(&mut f);
 
         // Gain must be frozen and NOT adapt
-        assert_eq!(leveler.gain_db(), gain_before);
+        assert!((leveler.gain_db() - gain_before).abs() < f32::EPSILON);
     }
 
     #[test]

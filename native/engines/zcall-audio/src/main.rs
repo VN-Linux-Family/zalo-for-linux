@@ -62,29 +62,23 @@ fn parse_args() -> Config {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--mic" => {
-                if i + 1 < args.len() {
-                    mic_device = Some(args[i + 1].clone());
-                    i += 1;
-                }
+            "--mic" if i + 1 < args.len() => {
+                mic_device = Some(args[i + 1].clone());
+                i += 1;
             }
-            "--speaker" => {
-                if i + 1 < args.len() {
-                    speaker_device = Some(args[i + 1].clone());
-                    i += 1;
-                }
+            "--speaker" if i + 1 < args.len() => {
+                speaker_device = Some(args[i + 1].clone());
+                i += 1;
             }
             "--mix" => {
                 is_group = true;
                 bitrate_bps = 20000;
             }
-            "--bitrate" => {
-                if i + 1 < args.len() {
-                    if let Ok(b) = args[i + 1].parse::<i32>() {
-                        bitrate_bps = b * 1000;
-                    }
-                    i += 1;
+            "--bitrate" if i + 1 < args.len() => {
+                if let Ok(b) = args[i + 1].parse::<i32>() {
+                    bitrate_bps = b * 1000;
                 }
+                i += 1;
             }
             "--tone" => {
                 test_tone = true;
@@ -98,13 +92,11 @@ fn parse_args() -> Config {
             "--no-high-pass" => {
                 no_high_pass = true;
             }
-            "--min-delay" => {
-                if i + 1 < args.len() {
-                    if let Ok(d) = args[i + 1].parse::<i32>() {
-                        min_delay_ms = Some(d);
-                    }
-                    i += 1;
+            "--min-delay" if i + 1 < args.len() => {
+                if let Ok(d) = args[i + 1].parse::<i32>() {
+                    min_delay_ms = Some(d);
                 }
+                i += 1;
             }
             "--max-delay" if i + 1 < args.len() && !args[i + 1].starts_with("--") => {
                 i += 1;
@@ -503,7 +495,7 @@ impl ClipGuard {
             self.hot_speech_frames = self.hot_speech_frames.saturating_add(1);
             self.quiet_speech_frames = 0;
             if self.hot_speech_frames >= 15
-                && self.last_step.elapsed() >= std::time::Duration::from_millis(1000)
+                && self.last_step.elapsed() >= std::time::Duration::from_secs(1)
             {
                 let cur = self.current_vol.load(Ordering::Relaxed);
                 if cur > 35 {
@@ -530,7 +522,7 @@ impl ClipGuard {
 
         if self.quiet_speech_frames >= 10
             && self.last_clip.elapsed() >= std::time::Duration::from_secs(3)
-            && self.last_step.elapsed() >= std::time::Duration::from_millis(1000)
+            && self.last_step.elapsed() >= std::time::Duration::from_secs(1)
         {
             let cur = self.current_vol.load(Ordering::Relaxed);
             if cur < 100 {
@@ -1304,7 +1296,7 @@ mod tests {
         let vol = Arc::new(AtomicU8::new(100));
         let mut guard = ClipGuard::new(None, Arc::clone(&vol));
         // Artificially reset last_step to 1 second ago so it can step
-        guard.last_step = past(std::time::Duration::from_millis(1000));
+        guard.last_step = past(std::time::Duration::from_secs(1));
 
         // Feed 10 frames with clipping (30000)
         let clipped_frame = vec![30500i16; 320];
@@ -1317,14 +1309,14 @@ mod tests {
 
         // Test floor limit at 35%
         vol.store(42, Ordering::Relaxed);
-        guard.last_step = past(std::time::Duration::from_millis(1000));
+        guard.last_step = past(std::time::Duration::from_secs(1));
         for _ in 0..10 {
             guard.feed(&clipped_frame);
         }
         assert_eq!(vol.load(Ordering::Relaxed), 35);
 
         // Feed again, must not go below 35
-        guard.last_step = past(std::time::Duration::from_millis(1000));
+        guard.last_step = past(std::time::Duration::from_secs(1));
         for _ in 0..10 {
             guard.feed(&clipped_frame);
         }
@@ -1342,7 +1334,7 @@ mod tests {
             Arc::new(Mutex::new(past(std::time::Duration::from_secs(10)))),
         );
         guard.enabled = true;
-        guard.last_step = past(std::time::Duration::from_millis(2000));
+        guard.last_step = past(std::time::Duration::from_secs(2));
 
         // Learn quiet noise floor (~ -64 dBFS -> amplitude ~ 20)
         let noise = vec![20i16; 320];
@@ -1367,7 +1359,7 @@ mod tests {
 
         // Manual slider lock stops further auto-adjustments
         manual.store(true, Ordering::Relaxed);
-        guard.last_step = past(std::time::Duration::from_millis(2000));
+        guard.last_step = past(std::time::Duration::from_secs(2));
         for _ in 0..15 {
             guard.feed(&quiet_speech);
         }
