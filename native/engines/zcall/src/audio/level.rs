@@ -4,7 +4,10 @@
 //!   0 = full scale (maximum volume)
 //!   127 = silence (or rms < 1)
 
-#[must_use]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "metrics/percent; precision below 2^52 is irrelevant"
+)]
 pub fn compute_rfc6464_level(pcm: &[i16]) -> u8 {
     if pcm.is_empty() {
         return 127;

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { getAvailableTargets } = require('../scripts/build-native');
-const { getOnnxRuntimeUrl, ONNXRUNTIME_VERSION } = require('../scripts/download');
+const { getOnnxRuntimeUrl, ONNXRUNTIME_VERSION, ONNXRUNTIME_NUGET_ID } = require('../scripts/download');
 const { ROOT } = require('../scripts/utils/paths');
 
 describe('Native Build Orchestrator & Downloads', () => {
@@ -38,12 +38,11 @@ describe('Native Build Orchestrator & Downloads', () => {
     assert.ok(!names.includes('zcall-audio'), 'Audio IO is linked into zcall; no separate zcall-audio process is packaged');
   });
 
-  it('generates correct OnnxRuntime download URL for current architecture', () => {
+  it('generates the NuGet package URL for ONNX Runtime', () => {
     assert.ok(ONNXRUNTIME_VERSION, 'ONNXRUNTIME_VERSION must be defined');
-    const url = getOnnxRuntimeUrl();
-    assert.ok(url.startsWith('https://github.com/microsoft/onnxruntime/releases/download/'));
-    assert.ok(url.includes(`v${ONNXRUNTIME_VERSION}`));
-    const arch = process.arch === 'arm64' ? 'aarch64' : 'x64';
-    assert.ok(url.includes(`onnxruntime-linux-${arch}-${ONNXRUNTIME_VERSION}.tgz`));
+    assert.strictEqual(
+      getOnnxRuntimeUrl(),
+      `https://api.nuget.org/v3-flatcontainer/${ONNXRUNTIME_NUGET_ID}/${ONNXRUNTIME_VERSION}/${ONNXRUNTIME_NUGET_ID}.${ONNXRUNTIME_VERSION}.nupkg`,
+    );
   });
 });

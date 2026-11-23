@@ -50,7 +50,10 @@ impl MicLeveler {
         }
     }
 
-    #[must_use]
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "metrics/percent; precision below 2^52 is irrelevant"
+    )]
     pub fn compute_level_db(samples: &[i16]) -> f32 {
         if samples.is_empty() {
             return -120.0;
@@ -60,6 +63,10 @@ impl MicLeveler {
         20.0 * (rms / 32768.0).log10() as f32
     }
 
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "metrics/percent; precision below 2^52 is irrelevant"
+    )]
     pub fn process(&mut self, samples: &mut [i16]) {
         if samples.is_empty() {
             return;

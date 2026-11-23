@@ -32,3 +32,6 @@ x11rb = { version = "0.14.0", default-features = false, features = ["composite",
 
 [build-dependencies]
 cc = "1.0"
+
+[lints]
+workspace = true

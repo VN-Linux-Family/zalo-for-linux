@@ -66,6 +66,10 @@ fn map_lang_to_bcp47(lang: Lang, script: Script) -> String {
     }
 }
 
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "signature mirrors the fallible Task::compute API"
+)]
 pub fn detect(text: &str, max_results: Option<u32>) -> Result<Vec<Hypothesis>> {
     let _limit = max_results.unwrap_or(MAX_RESULTS).clamp(1, MAX_RESULTS) as usize;
 
@@ -90,14 +94,17 @@ mod tests {
     #[test]
     fn test_metadata() {
         assert_eq!(name(), "whatlang-linux");
-        assert_eq!(available(), true);
+        assert!(available());
         assert_eq!(score_kind(), "probability");
     }
 
     #[test]
     fn test_detect_vietnamese() {
         let res = detect("Xin chào các bạn, đây là tiếng Việt", None).unwrap();
-        assert!(!res.is_empty());
+        assert_ne!(
+            res,
+            [] as [(std::string::String, std::option::Option<f64>); 0]
+        );
         assert_eq!(res[0].0, "vi");
         assert!(res[0].1.unwrap() > 0.8);
     }
@@ -105,7 +112,10 @@ mod tests {
     #[test]
     fn test_detect_english() {
         let res = detect("Hello world, this is an English language sentence.", None).unwrap();
-        assert!(!res.is_empty());
+        assert_ne!(
+            res,
+            [] as [(std::string::String, std::option::Option<f64>); 0]
+        );
         assert_eq!(res[0].0, "en");
         assert!(res[0].1.unwrap() > 0.8);
     }
@@ -113,7 +123,10 @@ mod tests {
     #[test]
     fn test_detect_chinese() {
         let res = detect("你好世界，这是一个中文语言测试。", None).unwrap();
-        assert!(!res.is_empty());
+        assert_ne!(
+            res,
+            [] as [(std::string::String, std::option::Option<f64>); 0]
+        );
         assert!(res[0].0 == "zh-Hans" || res[0].0 == "zh");
         assert!(res[0].1.unwrap() > 0.8);
     }
@@ -121,15 +134,27 @@ mod tests {
     #[test]
     fn test_detect_japanese() {
         let res = detect("こんにちは世界、日本語のテストです。", None).unwrap();
-        assert!(!res.is_empty());
+        assert_ne!(
+            res,
+            [] as [(std::string::String, std::option::Option<f64>); 0]
+        );
         assert_eq!(res[0].0, "ja");
         assert!(res[0].1.unwrap() > 0.8);
     }
 
     #[test]
     fn test_detect_short_and_whitespace() {
-        assert!(detect("hi", None).unwrap().is_empty());
-        assert!(detect("   ", None).unwrap().is_empty());
-        assert!(detect("", None).unwrap().is_empty());
+        assert_eq!(
+            detect("hi", None).unwrap(),
+            [] as [(std::string::String, std::option::Option<f64>); 0]
+        );
+        assert_eq!(
+            detect("   ", None).unwrap(),
+            [] as [(std::string::String, std::option::Option<f64>); 0]
+        );
+        assert_eq!(
+            detect("", None).unwrap(),
+            [] as [(std::string::String, std::option::Option<f64>); 0]
+        );
     }
 }

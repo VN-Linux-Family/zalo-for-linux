@@ -8,10 +8,10 @@ const ZALO_DMG_PATTERN = 'https://res-download-pc.zadn.vn/mac/ZaloSetup-universa
 const ZALO_WIN_PATTERN = 'https://res-download-pc.zadn.vn/win/ZaloSetup-VERSION.exe';
 const { TEMP_DIR } = require('./utils/paths');
 const ONNXRUNTIME_VERSION = '1.30.0';
+const ONNXRUNTIME_NUGET_ID = 'microsoft.ml.onnxruntime';
 
 function getOnnxRuntimeUrl() {
-  const arch = process.arch === 'arm64' ? 'aarch64' : 'x64';
-  return `https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-${arch}-${ONNXRUNTIME_VERSION}.tgz`;
+  return `https://api.nuget.org/v3-flatcontainer/${ONNXRUNTIME_NUGET_ID}/${ONNXRUNTIME_VERSION}/${ONNXRUNTIME_NUGET_ID}.${ONNXRUNTIME_VERSION}.nupkg`;
 }
 
 async function main() {
@@ -208,4 +208,5 @@ module.exports = {
   downloadOnnxRuntime,
   getOnnxRuntimeUrl,
   ONNXRUNTIME_VERSION,
+  ONNXRUNTIME_NUGET_ID,
 };

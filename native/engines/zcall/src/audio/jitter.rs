@@ -83,10 +83,8 @@ impl JitterBuffer {
         if ssrc != 0 {
             if let Some(cur_ssrc) = self.current_ssrc {
                 if cur_ssrc != ssrc {
-                    crate::zcall_log!(
-                        "[audio-io] info: stream ssrc changed ({} -> {}), resetting jitter buffer",
-                        cur_ssrc,
-                        ssrc
+                    eprintln!(
+                        "[audio-io] info: stream ssrc changed ({cur_ssrc} -> {ssrc}), resetting jitter buffer"
                     );
                     self.queue.clear();
                     self.carry_pcm.clear();
@@ -114,9 +112,8 @@ impl JitterBuffer {
                 let diff = next - idx;
                 if diff > 500 {
                     // Peer RTP sequence reset backward (e.g. after network handover)
-                    crate::zcall_log!(
-                        "[audio-io] info: sequence reset detected (prev={}, new={}), flushing jitter buffer",
-                        next, idx
+                    eprintln!(
+                        "[audio-io] info: sequence reset detected (prev={next}, new={idx}), flushing jitter buffer"
                     );
                     self.queue.clear();
                     self.carry_pcm.clear();
@@ -132,9 +129,8 @@ impl JitterBuffer {
                 }
             } else if (idx - next) > 500 {
                 // Large forward sequence jump across network switch
-                crate::zcall_log!(
-                    "[audio-io] info: forward sequence jump detected (prev={}, new={}), flushing jitter buffer",
-                    next, idx
+                eprintln!(
+                    "[audio-io] info: forward sequence jump detected (prev={next}, new={idx}), flushing jitter buffer"
                 );
                 self.queue.clear();
                 self.carry_pcm.clear();
@@ -231,9 +227,8 @@ impl JitterBuffer {
                 } else if first > cur {
                     let gap = first - cur;
                     if gap > 10 || (gap > 1 && self.queue.len() >= self.min_target) {
-                        crate::zcall_log!(
-                            "[audio-io] warn: sequence gap detected (expected {}, got {}), resyncing",
-                            cur, first
+                        eprintln!(
+                            "[audio-io] warn: sequence gap detected (expected {cur}, got {first}), resyncing"
                         );
                         self.next_idx = Some(first);
                         self.consecutive_plc = 0;

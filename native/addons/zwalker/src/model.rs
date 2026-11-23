@@ -9,12 +9,11 @@
 //! "Error locking tree"). Nothing is persisted to disk — restart the process and the
 //! marks are gone, which is why the app re-scans + re-marks every cleanup cycle.
 
-use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// One file leaf. serde field names are snake_case to match the mac `struct FileInfo`
+/// One file leaf. serde field names are `snake_case` to match the mac `struct FileInfo`
 /// (leaked: `file_name file_path atime reference_message_id` + `size`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileInfo {
@@ -69,8 +68,9 @@ pub struct ScanState {
     #[allow(dead_code)]
     pub root: String,
     pub files: Vec<FileInfo>,
-    /// absolute file_path -> index into `files`
+    /// absolute `file_path` -> index into `files`
     pub index: HashMap<String, usize>,
 }
 
-pub static STATE: Lazy<Mutex<ScanState>> = Lazy::new(|| Mutex::new(ScanState::default()));
+pub static STATE: std::sync::LazyLock<Mutex<ScanState>> =
+    std::sync::LazyLock::new(|| Mutex::new(ScanState::default()));

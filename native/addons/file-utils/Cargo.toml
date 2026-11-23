@@ -9,8 +9,10 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "2", features = ["napi5", "async"] }
 napi-derive = "2"
-libc = "0.2"
+rustix = { version = "1", features = ["fs", "linux_5_11"] }
 
 [build-dependencies]
 napi-build = "2"
 
+[lints]
+workspace = true

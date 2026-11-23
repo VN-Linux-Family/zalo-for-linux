@@ -12,3 +12,6 @@ mp4 = "0.14"
 napi = { version = "2.16", default-features = false, features = ["napi5", "async"] }
 napi-derive = "2.16"
 openh264 = "0.9.10"
+
+[lints]
+workspace = true

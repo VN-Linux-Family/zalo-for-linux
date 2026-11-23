@@ -25,7 +25,7 @@ pub fn delete_empty_folders(root: &str) -> EmptyFolderOutcome {
         .follow_links(false)
         .build();
     for dent in walker.flatten() {
-        if dent.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        if dent.file_type().is_some_and(|t| t.is_dir()) {
             let p = dent.path();
             // Never the root itself.
             if p != Path::new(root) {
@@ -37,7 +37,9 @@ pub fn delete_empty_folders(root: &str) -> EmptyFolderOutcome {
     // Deepest first: more path separators == deeper. Removing a child before its parent
     // lets the parent be seen as empty on this same pass.
     dirs.sort_by(|a, b| {
-        b.matches(std::path::MAIN_SEPARATOR).count().cmp(&a.matches(std::path::MAIN_SEPARATOR).count())
+        b.matches(std::path::MAIN_SEPARATOR)
+            .count()
+            .cmp(&a.matches(std::path::MAIN_SEPARATOR).count())
     });
 
     let mut deleted_dirs = Vec::new();

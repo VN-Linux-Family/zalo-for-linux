@@ -5,7 +5,7 @@ use std::fs::Metadata;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Compile a list of glob patterns (e.g. `<root>/Cache/**`, `**/*.tmp`) into a
-/// GlobSet. Patterns that fail to compile are skipped (the mac binary is likewise
+/// `GlobSet`. Patterns that fail to compile are skipped (the mac binary is likewise
 /// tolerant — a bad pattern must not abort a whole cleanup). An empty input yields a
 /// set that matches nothing.
 pub fn build_globset(patterns: &[String]) -> GlobSet {
@@ -20,10 +20,9 @@ pub fn build_globset(patterns: &[String]) -> GlobSet {
 
 /// Whole seconds since the unix epoch, now.
 pub fn now_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| {
+        i64::try_from(d.as_secs()).expect("unix timestamps fit in i64")
+    })
 }
 
 /// File access time as whole seconds since the unix epoch (mac reads `st_atime`).
@@ -33,7 +32,7 @@ pub fn atime_secs(md: &Metadata) -> i64 {
         .accessed()
         .or_else(|_| md.modified())
         .unwrap_or(UNIX_EPOCH);
-    t.duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    t.duration_since(UNIX_EPOCH).map_or(0, |d| {
+        i64::try_from(d.as_secs()).expect("unix timestamps fit in i64")
+    })
 }
