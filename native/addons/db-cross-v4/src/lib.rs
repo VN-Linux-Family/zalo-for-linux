@@ -1,9 +1,9 @@
-#![allow(unsafe_code, reason = "napi FFI: JsUnknown::cast is unsafe by API")]
 mod binnet;
 mod container;
 mod crypto;
 mod tlv;
 
+use napi::bindgen_prelude::FromNapiValue;
 use napi::{Env, JsArrayBuffer, JsBuffer, JsFunction, JsObject, JsTypedArray, JsUnknown, Result};
 use napi_derive::napi;
 
@@ -65,27 +65,19 @@ pub fn parse_bin_net(env: Env, val: Option<JsUnknown>) -> Result<JsObject> {
     };
 
     if val.is_buffer()? {
-        // SAFETY: `is_buffer()` above confirmed the value is a Buffer, so the
-        // unchecked cast to `JsBuffer` matches the real napi type; `val` is owned
-        // by the live `env` for the whole function scope.
-        let buf: JsBuffer = unsafe { val.cast() };
+        let buf = JsBuffer::from_unknown(val)?;
         let value = buf.into_value()?;
         return binnet::parse_bin_net_internal(value.as_ref(), env);
     }
 
     if val.is_typedarray()? {
-        // SAFETY: `is_typedarray()` above confirmed the value is a TypedArray, so
-        // the unchecked cast to `JsTypedArray` matches the real napi type; `val`
-        // is owned by the live `env` for the whole function scope.
-        let ta: JsTypedArray = unsafe { val.cast() };
+        let ta = JsTypedArray::from_unknown(val)?;
         let value = ta.into_value()?;
         return binnet::parse_bin_net_internal(value.as_ref(), env);
     }
 
-    // SAFETY: the cast only reinterprets the napi handle; `into_value()` calls
-    // `napi_get_arraybuffer_info`, which returns an error for non-ArrayBuffers.
-    if let Ok(ab) = unsafe { val.cast::<JsArrayBuffer>() }.into_value() {
-        return binnet::parse_bin_net_internal(ab.as_ref(), env);
+    if let Ok(value) = JsArrayBuffer::from_unknown(val).and_then(JsArrayBuffer::into_value) {
+        return binnet::parse_bin_net_internal(value.as_ref(), env);
     }
 
     ret.set_named_property("result", 1)?;

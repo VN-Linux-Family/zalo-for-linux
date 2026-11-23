@@ -24,7 +24,6 @@ pub struct Config {
     pub det_min: f32,
     pub rec_min: f32,
     pub rec_keep: f32,
-    pub trim_interval: Option<Duration>,
     pub session_ttl: Option<Duration>,
     pub affinity: String,
     pub profile_dir: Option<PathBuf>,
@@ -56,7 +55,6 @@ impl Config {
             det_min: probability("ZOCR_LINE_SCORE_DET_MIN", 0.741)?,
             rec_min: probability("ZOCR_LINE_SCORE_REC_MIN", 0.840)?,
             rec_keep: probability("ZOCR_LINE_SCORE_REC_KEEP", 0.925)?,
-            trim_interval: duration("ZOCR_WORKING_SET_TRIM_MS", None)?,
             session_ttl: duration("ZOCR_SESSION_IDLE_TTL_MS", Some(DEFAULT_SESSION_TTL))?,
             affinity: env::var("ZOCR_ORT_TOPOLOGY_AFFINITY").unwrap_or_else(|_| "auto".into()),
             profile_dir: env::var_os("ZOCR_ORT_PROFILE_DIR")

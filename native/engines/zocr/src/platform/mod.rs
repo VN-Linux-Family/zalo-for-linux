@@ -1,4 +1,4 @@
-use crate::{config::Config, engine::Engine};
+use crate::engine::Engine;
 use anyhow::{ensure, Context, Result};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -7,7 +7,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[derive(Clone, Debug)]
@@ -95,7 +95,11 @@ impl Cpu {
 pub fn lifecycle() -> Result<Arc<AtomicBool>> {
     let parent = rustix::process::getppid();
     let stop = Arc::new(AtomicBool::new(false));
-    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+    for signal in [
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGINT,
+        signal_hook::consts::SIGHUP,
+    ] {
         signal_hook::flag::register(signal, stop.clone())?;
     }
     rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM))
@@ -107,31 +111,18 @@ pub fn lifecycle() -> Result<Arc<AtomicBool>> {
 }
 pub fn maintenance(
     engine: Arc<std::sync::Mutex<Engine>>,
-    cfg: &Config,
     stop: Arc<AtomicBool>,
 ) -> std::thread::JoinHandle<()> {
-    let trim = cfg.trim_interval;
     let runtime = engine
         .lock()
         .expect("engine mutex poisoned at startup")
         .runtime();
     std::thread::spawn(move || {
-        let mut last_trim = Instant::now();
         while !stop.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(50));
-            let released = engine
+            let _ = engine
                 .try_lock()
                 .is_ok_and(|mut engine| engine.release_idle());
-            // glibc keeps freed arenas mapped; hand them back to the
-            // OS right after the models go away.
-            if released || trim.is_some_and(|d| last_trim.elapsed() >= d) {
-                #[cfg(target_env = "gnu")]
-                // SAFETY: `malloc_trim` takes only an integer and passes no pointers, so it cannot violate memory safety.
-                unsafe {
-                    libc::malloc_trim(0);
-                }
-                last_trim = Instant::now();
-            }
         }
         runtime.cancel_active();
     })
@@ -142,16 +133,14 @@ pub struct Resources {
     pub peak_rss_kib: i64,
 }
 pub fn resources() -> Resources {
-    // SAFETY: `rusage` is plain-old-data, so all-zero is a valid value and any fields the kernel skips stay initialized.
-    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-    // SAFETY: `usage` is a live stack out-parameter of the correct type; `getrusage` writes only into it.
-    unsafe {
-        libc::getrusage(libc::RUSAGE_SELF, &raw mut usage);
-    }
+    let usage = nix::sys::resource::getrusage(nix::sys::resource::UsageWho::RUSAGE_SELF)
+        .expect("getrusage(RUSAGE_SELF)");
+    let user = usage.user_time();
+    let system = usage.system_time();
     Resources {
-        cpu_micros: ((usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) as u64) * 1_000_000
-            + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) as u64,
-        peak_rss_kib: usage.ru_maxrss as i64,
+        cpu_micros: ((user.tv_sec() + system.tv_sec()) as u64) * 1_000_000
+            + (user.tv_usec() + system.tv_usec()) as u64,
+        peak_rss_kib: usage.max_rss() as i64,
     }
 }
 

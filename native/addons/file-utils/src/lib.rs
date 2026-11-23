@@ -1,6 +1,6 @@
 #![cfg(target_os = "linux")]
-#![allow(unsafe_code, reason = "napi cast")]
 
+use napi::bindgen_prelude::FromNapiValue;
 use napi::{Error, JsUnknown, Result, Status, ValueType};
 use napi_derive::napi;
 
@@ -32,10 +32,7 @@ pub fn get_disk_usage(path: Option<JsUnknown>) -> Result<DiskUsage> {
         ));
     }
 
-    // SAFETY: `get_type()` above returned `ValueType::String` (else we returned
-    // `InvalidArg`), so the unchecked cast to `JsString` matches the real napi
-    // type; `path_arg` lives in the caller's live `env`.
-    let js_string = unsafe { path_arg.cast::<napi::JsString>() };
+    let js_string = napi::JsString::from_unknown(path_arg)?;
     let path_str = js_string.into_utf8()?.into_owned()?;
 
     if path_str.as_bytes().contains(&0) {
