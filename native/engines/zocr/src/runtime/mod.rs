@@ -1,32 +1,66 @@
-//! Dynamically loaded ONNX C API; no link-time dependency on the runtime .so.
+//! ONNX Runtime is dlopen'ed from `libonnxruntime.so` beside the binary via
+//! [`ort::init_from`]; there is still no link-time dependency on the runtime.
 mod segments;
+
 use crate::config::Config;
 use anyhow::{bail, ensure, Context, Result};
-use libloading::Library;
-use ort_sys as ffi;
+use ort::{
+    environment::Environment,
+    logging::LogLevel,
+    session::{
+        builder::{GraphOptimizationLevel, SessionBuilder},
+        NoSelectedOutputs, RunOptions, Session as OrtSession,
+    },
+    value::{Outlet, Shape, Tensor as OrtTensor, TensorElementType, TensorRef, ValueType},
+};
 use std::{
-    ffi::{CStr, CString},
-    os::unix::ffi::OsStrExt,
     path::Path,
-    ptr,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
 };
 
+// `ort` allows exactly one environment per process; keep it alive for the whole
+// process and hand out clones, so repeated `Runtime::load` calls stay cheap.
+static ENV: OnceLock<Result<Environment, String>> = OnceLock::new();
+
+fn environment(path: &Path) -> Result<Environment> {
+    ENV.get_or_init(|| {
+        let env = ort::init_from(path)
+            .map_err(|error| error.to_string())?
+            .with_name("zocr-host")
+            .build()
+            .map_err(|error| error.to_string())?;
+        env.set_log_level(LogLevel::Error);
+        Ok(env)
+    })
+    .clone()
+    .map_err(|error| anyhow::anyhow!("unable to create ONNX Runtime environment: {error}"))
+}
+
+fn step(result: Result<SessionBuilder, ort::Error<SessionBuilder>>) -> Result<SessionBuilder> {
+    result.map_err(|error| anyhow::anyhow!("{}", error.message()))
+}
+
+fn input_dims(outlet: &Outlet, rank: usize, ty: TensorElementType) -> Result<Vec<i64>> {
+    let ValueType::Tensor {
+        ty: actual, shape, ..
+    } = outlet.dtype()
+    else {
+        bail!("model input is not a tensor");
+    };
+    ensure!(*actual == ty, "unexpected model input dtype");
+    ensure!(shape.len() == rank, "unexpected model input rank");
+    Ok(shape.iter().copied().collect())
+}
+
 pub struct Runtime {
-    api: *const ffi::OrtApi,
-    env: *mut ffi::OrtEnv,
-    _library: Library,
-    active_runs: Mutex<Vec<usize>>,
+    env: Environment,
+    active_runs: Mutex<Vec<Arc<RunOptions<NoSelectedOutputs>>>>,
     cancelled: AtomicBool,
 }
-// ORT Env and sessions support concurrent callers. Session::run requires &mut self.
-// SAFETY: `Runtime` owns the ORT env/api pointers and keeps their library loaded; ORT env calls are safe from any thread.
-unsafe impl Send for Runtime {}
-// SAFETY: shared mutable state is behind `Mutex`/`AtomicBool`, and ORT env calls are thread-safe.
-unsafe impl Sync for Runtime {}
+
 impl Runtime {
     pub fn load(dir: &Path) -> Result<Arc<Self>> {
         let path = dir.join("libonnxruntime.so");
@@ -34,282 +68,116 @@ impl Runtime {
             path.is_file(),
             "libonnxruntime.so not found alongside binary"
         );
-        // SAFETY: `path` was checked as a regular file; loading the trusted runtime beside the binary only runs its constructors, and every returned pointer is null-checked before use.
-        unsafe {
-            let library =
-                Library::new(&path).context("unable to load libonnxruntime.so alongside binary")?;
-            let get_base = library
-                .get::<unsafe extern "system" fn() -> *const ffi::OrtApiBase>(b"OrtGetApiBase\0")
-                .context("runtime does not export OrtGetApiBase")?;
-            let base = get_base();
-            ensure!(!base.is_null(), "null OrtApiBase");
-            let api = ((*base).GetApi)(ffi::ORT_API_VERSION);
-            ensure!(
-                !api.is_null(),
-                "runtime does not support ONNX C API {}",
-                ffi::ORT_API_VERSION
-            );
-            let mut runtime = Self {
-                api,
-                env: ptr::null_mut(),
-                _library: library,
-                active_runs: Mutex::new(Vec::new()),
-                cancelled: AtomicBool::new(false),
-            };
-            let status = ((*api).CreateEnv)(
-                ffi::OrtLoggingLevel::ORT_LOGGING_LEVEL_ERROR,
-                c"zocr-host".as_ptr(),
-                &raw mut runtime.env,
-            );
-            runtime.check(status)?;
-            Ok(Arc::new(runtime))
-        }
+        let env = environment(&path)?;
+        Ok(Arc::new(Self {
+            env,
+            active_runs: Mutex::new(Vec::new()),
+            cancelled: AtomicBool::new(false),
+        }))
     }
-    fn check(&self, status: ffi::OrtStatusPtr) -> Result<()> {
-        let status = status.0;
-        if status.is_null() {
-            return Ok(());
-        }
-        // SAFETY: `status` is non-null (checked above) and owned by ORT; its message stays valid until the `ReleaseStatus` call below.
-        unsafe {
-            let message = CStr::from_ptr(((*self.api).GetErrorMessage)(status))
-                .to_string_lossy()
-                .into_owned();
-            ((*self.api).ReleaseStatus)(status);
-            bail!("ONNX Runtime: {message}")
-        }
-    }
+
     pub fn cancel_active(&self) {
         if let Ok(runs) = self.active_runs.lock() {
             self.cancelled.store(true, Ordering::Relaxed);
-            for &options in runs.iter() {
-                // SAFETY: entries are registered only after `CreateRunOptions` succeeds and are removed under this lock before release, so the pointer is live.
-                unsafe {
-                    let _ = self.check(((*self.api).RunOptionsSetTerminate)(
-                        options as *mut ffi::OrtRunOptions,
-                    ));
-                }
+            for options in runs.iter() {
+                let _ = options.terminate();
             }
         }
     }
+
     pub fn session(self: &Arc<Self>, model: &[u8], cfg: &Config, label: &str) -> Result<Session> {
-        // SAFETY: `self.api` is the live ORT table of the loaded library; every out-pointer is validated by `check` and released by its owning wrapper, and `model` lives through the call.
-        unsafe {
-            let api = &*self.api;
-            let mut options = ptr::null_mut();
-            self.check((api.CreateSessionOptions)(&raw mut options))?;
-            let options = SessionOptions {
-                runtime: self.clone(),
-                ptr: options,
-            };
-            self.check((api.SetIntraOpNumThreads)(
-                options.ptr,
-                i32::try_from(cfg.parallel_budget)
-                    .expect("parallel budget is clamped to the CPU count"),
-            ))?;
-            self.check((api.SetInterOpNumThreads)(options.ptr, 1))?;
-            self.check((api.SetSessionExecutionMode)(
-                options.ptr,
-                ffi::ExecutionMode::ORT_SEQUENTIAL,
-            ))?;
-            self.check((api.SetSessionGraphOptimizationLevel)(
-                options.ptr,
-                ffi::GraphOptimizationLevel::ORT_ENABLE_ALL,
-            ))?;
-            self.check((api.EnableCpuMemArena)(options.ptr))?;
-            self.check((api.EnableMemPattern)(options.ptr))?;
-            self.check((api.SetSessionLogSeverityLevel)(options.ptr, 3))?;
-            if let Some(dir) = &cfg.profile_dir {
-                std::fs::create_dir_all(dir).context("unable to create ORT profile directory")?;
-                let prefix = CString::new(
-                    dir.join(format!("ort-session-{label}"))
-                        .as_os_str()
-                        .as_bytes(),
-                )?;
-                self.check((api.EnableProfiling)(options.ptr, prefix.as_ptr()))?;
-            }
-            let mut session = Session {
-                ptr: ptr::null_mut(),
-                runtime: self.clone(),
-                input: CString::new("")?,
-                output: CString::new("")?,
-                input_shape: Vec::new(),
-                segment_input: None,
-                profiling: cfg.profile_dir.is_some(),
-            };
-            self.check((api.CreateSessionFromArray)(
-                self.env,
-                model.as_ptr().cast(),
-                model.len(),
-                options.ptr,
-                &raw mut session.ptr,
-            ))
+        let mut builder =
+            OrtSession::builder(&self.env).context("unable to create session builder")?;
+        builder = step(builder.with_intra_threads(cfg.parallel_budget))?;
+        builder = step(builder.with_inter_threads(1))?;
+        builder = step(builder.with_parallel_execution(false))?;
+        builder = step(builder.with_optimization_level(GraphOptimizationLevel::Level3))?;
+        builder = step(builder.with_memory_pattern(true))?;
+        builder = step(builder.with_log_level(LogLevel::Error))?;
+        if let Some(dir) = &cfg.profile_dir {
+            std::fs::create_dir_all(dir).context("unable to create ORT profile directory")?;
+            builder = step(builder.with_profiling(dir.join(format!("ort-session-{label}"))))?;
+        }
+        let session = builder
+            .commit_from_memory(model)
             .with_context(|| format!("failed to initialize {label}"))?;
-            let mut input_count = 0;
-            let mut output_count = 0;
-            self.check((api.SessionGetInputCount)(
-                session.ptr,
-                &raw mut input_count,
-            ))?;
-            self.check((api.SessionGetOutputCount)(
-                session.ptr,
-                &raw mut output_count,
-            ))?;
-            ensure!(
-                (input_count == 1 || (label == "recognizer" && input_count == 2))
-                    && output_count >= 1,
-                "{label}: unsupported model input/output count"
-            );
-            session.input = session.name(true, 0)?;
-            session.output = session.name(false, 0)?;
-            session.input_shape = session.read_input_shape(
-                0,
-                4,
-                ffi::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-            )?;
-            if input_count == 2 {
-                let name = session.name(true, 1)?;
-                ensure!(
-                    name.as_bytes() == b"seg",
-                    "recognizer auxiliary input must be seg"
-                );
-                let shape = session.read_input_shape(
-                    1,
-                    2,
-                    ffi::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32,
-                )?;
-                session.segment_input = Some((name, shape));
-            }
-            Ok(session)
-        }
+        let inputs = session.inputs();
+        ensure!(
+            (inputs.len() == 1 || (label == "recognizer" && inputs.len() == 2))
+                && !session.outputs().is_empty(),
+            "{label}: unsupported model input/output count"
+        );
+        let input_shape = input_dims(&inputs[0], 4, TensorElementType::Float32)?;
+        ensure!(
+            input_shape
+                .iter()
+                .all(|&d| d == -1 || (1..=4096).contains(&d)),
+            "unsupported model input dimension"
+        );
+        ensure!(
+            input_shape[1] == -1 || input_shape[1] == 3,
+            "OCR models require three input channels"
+        );
+        let segment_input = if inputs.len() == 2 {
+            let name = inputs[1].name().to_string();
+            ensure!(name == "seg", "recognizer auxiliary input must be seg");
+            Some((name, input_dims(&inputs[1], 2, TensorElementType::Int32)?))
+        } else {
+            None
+        };
+        Ok(Session {
+            inner: session,
+            runtime: self.clone(),
+            input_shape,
+            segment_input,
+            profiling: cfg.profile_dir.is_some(),
+        })
     }
 }
-impl Drop for Runtime {
-    fn drop(&mut self) {
-        if !self.env.is_null() {
-            // SAFETY: `env` is non-null and was produced by `CreateEnv`; `Drop` runs once, so it is released exactly once.
-            unsafe {
-                ((*self.api).ReleaseEnv)(self.env);
-            }
-        }
-    }
-}
-struct SessionOptions {
+
+struct RunGuard {
     runtime: Arc<Runtime>,
-    ptr: *mut ffi::OrtSessionOptions,
+    options: Arc<RunOptions<NoSelectedOutputs>>,
 }
-impl Drop for SessionOptions {
+
+impl Drop for RunGuard {
     fn drop(&mut self) {
-        // SAFETY: `ptr` came from a successful `CreateSessionOptions` (errors discard the wrapper), and this is its only release.
-        unsafe {
-            ((*self.runtime.api).ReleaseSessionOptions)(self.ptr);
+        if let Ok(mut runs) = self.runtime.active_runs.lock() {
+            runs.retain(|entry| !Arc::ptr_eq(entry, &self.options));
         }
     }
 }
 
 pub struct Session {
-    ptr: *mut ffi::OrtSession,
+    inner: OrtSession,
     runtime: Arc<Runtime>,
-    input: CString,
-    output: CString,
     input_shape: Vec<i64>,
-    segment_input: Option<(CString, Vec<i64>)>,
+    segment_input: Option<(String, Vec<i64>)>,
     profiling: bool,
 }
-// SAFETY: an ORT session may move between threads; concurrent runs are impossible because `run`/`run_recognition` need `&mut self`.
-unsafe impl Send for Session {}
+
 impl Session {
-    fn name(&self, input: bool, index: usize) -> Result<CString> {
-        // SAFETY: `Session` keeps the runtime loaded and `self.ptr` a live ORT session.
-        unsafe {
-            let api = &*self.runtime.api;
-            let mut allocator = ptr::null_mut();
-            self.runtime
-                .check((api.GetAllocatorWithDefaultOptions)(&raw mut allocator))?;
-            let mut name = ptr::null_mut();
-            if input {
-                self.runtime.check((api.SessionGetInputName)(
-                    self.ptr,
-                    index,
-                    allocator,
-                    &raw mut name,
-                ))?;
-            } else {
-                self.runtime.check((api.SessionGetOutputName)(
-                    self.ptr,
-                    index,
-                    allocator,
-                    &raw mut name,
-                ))?;
-            }
-            ensure!(!name.is_null(), "runtime returned a null tensor name");
-            let copy = CStr::from_ptr(name).to_owned();
-            self.runtime
-                .check((api.AllocatorFree)(allocator, name.cast()))?;
-            Ok(copy)
-        }
-    }
-    fn read_input_shape(
-        &self,
-        index: usize,
-        expected_rank: usize,
-        expected_type: ffi::ONNXTensorElementDataType,
-    ) -> Result<Vec<i64>> {
-        // SAFETY: `Session` keeps the runtime loaded and `self.ptr` a live ORT session.
-        unsafe {
-            let api = &*self.runtime.api;
-            let mut info = TypeInfo {
-                runtime: self.runtime.clone(),
-                ptr: ptr::null_mut(),
-            };
-            self.runtime.check((api.SessionGetInputTypeInfo)(
-                self.ptr,
-                index,
-                &raw mut info.ptr,
-            ))?;
-            let mut tensor = ptr::null();
-            self.runtime
-                .check((api.CastTypeInfoToTensorInfo)(info.ptr, &raw mut tensor))?;
-            ensure!(!tensor.is_null(), "model input is not a tensor");
-            let mut rank = 0;
-            self.runtime
-                .check((api.GetDimensionsCount)(tensor, &raw mut rank))?;
-            ensure!(rank == expected_rank, "unexpected model input rank");
-            let mut dtype = ffi::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
-            self.runtime
-                .check((api.GetTensorElementType)(tensor, &raw mut dtype))?;
-            ensure!(dtype == expected_type, "unexpected model input dtype");
-            let mut shape = vec![0; rank];
-            self.runtime
-                .check((api.GetDimensions)(tensor, shape.as_mut_ptr(), rank))?;
-            ensure!(
-                shape.iter().all(|&d| d == -1 || (1..=4096).contains(&d)),
-                "unsupported model input dimension"
-            );
-            ensure!(
-                rank != 4 || shape[1] == -1 || shape[1] == 3,
-                "OCR models require three input channels"
-            );
-            Ok(shape)
-        }
-    }
     pub fn input_shape(&self) -> &[i64] {
         &self.input_shape
     }
+
     pub fn has_segments(&self) -> bool {
         self.segment_input.is_some()
     }
-    pub fn run(&mut self, shape: &[i64], data: &mut [f32]) -> Result<Tensor> {
+
+    pub fn run(&mut self, shape: &[i64], data: &[f32]) -> Result<Tensor> {
         self.run_with_widths(shape, data, None)
     }
+
     pub fn run_recognition(
         &mut self,
         shape: &[i64],
-        data: &mut [f32],
+        data: &[f32],
         widths: &[u32],
     ) -> Result<Tensor> {
         self.run_with_widths(shape, data, Some(widths))
     }
+
     #[allow(
         clippy::too_many_lines,
         reason = "single protocol pipeline, splitting hurts readability"
@@ -317,7 +185,7 @@ impl Session {
     fn run_with_widths(
         &mut self,
         shape: &[i64],
-        data: &mut [f32],
+        data: &[f32],
         widths: Option<&[u32]>,
     ) -> Result<Tensor> {
         let count = shape
@@ -335,228 +203,138 @@ impl Session {
             shape,
             self.input_shape
         );
-        // SAFETY: ORT objects come from the live runtime; `data`/`segment_data` outlive every call, all out-pointers are checked and released by their wrappers, and the output buffer is copied with ORT's reported length.
-        unsafe {
-            let api = &*self.runtime.api;
-            let mut memory = MemoryInfo {
-                runtime: self.runtime.clone(),
-                ptr: ptr::null_mut(),
-            };
-            self.runtime.check((api.CreateCpuMemoryInfo)(
-                ffi::OrtAllocatorType::OrtArenaAllocator,
-                ffi::OrtMemType::OrtMemTypeDefault,
-                &raw mut memory.ptr,
-            ))?;
-            let mut input = Value {
-                runtime: self.runtime.clone(),
-                ptr: ptr::null_mut(),
-            };
-            self.runtime.check((api.CreateTensorWithDataAsOrtValue)(
-                memory.ptr,
-                data.as_mut_ptr().cast(),
-                std::mem::size_of_val(data),
-                shape.as_ptr(),
-                shape.len(),
-                ffi::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-                &raw mut input.ptr,
-            ))?;
-            let input_name = self.input.as_ptr();
-            let output_name = self.output.as_ptr();
-            let input_ptr: *const ffi::OrtValue = input.ptr;
-            let mut output = Value {
-                runtime: self.runtime.clone(),
-                ptr: ptr::null_mut(),
-            };
-            let mut options = RunOptions {
-                runtime: self.runtime.clone(),
-                ptr: ptr::null_mut(),
-            };
-            self.runtime
-                .check((api.CreateRunOptions)(&raw mut options.ptr))?;
-            {
-                let mut runs = self
-                    .runtime
-                    .active_runs
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("run registry poisoned"))?;
-                ensure!(
-                    !self.runtime.cancelled.load(Ordering::Relaxed),
-                    "inference cancelled by shutdown"
-                );
-                runs.push(options.ptr as usize);
-            }
-            let mut segment_data: Vec<i32>;
-            let mut segment_value = Value {
-                runtime: self.runtime.clone(),
-                ptr: ptr::null_mut(),
-            };
-            if let Some((name, expected)) = &self.segment_input {
-                let full_widths = vec![shape[3] as u32; shape[0] as usize];
-                let (segment_shape, values) =
-                    segments::build(shape, widths.unwrap_or(&full_widths))?;
-                ensure!(
-                    segment_shape
-                        .iter()
-                        .zip(expected)
-                        .all(|(&actual, &expected)| expected < 0 || actual == expected),
-                    "seg shape does not match model"
-                );
-                segment_data = values;
-                self.runtime.check((api.CreateTensorWithDataAsOrtValue)(
-                    memory.ptr,
-                    segment_data.as_mut_ptr().cast(),
-                    std::mem::size_of_val(segment_data.as_slice()),
-                    segment_shape.as_ptr(),
-                    2,
-                    ffi::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32,
-                    &raw mut segment_value.ptr,
-                ))?;
-                let names = [input_name, name.as_ptr()];
-                let inputs = [input_ptr, segment_value.ptr.cast_const()];
-                self.runtime.check((api.Run)(
-                    self.ptr,
-                    options.ptr,
-                    names.as_ptr(),
-                    inputs.as_ptr(),
-                    2,
-                    &raw const output_name,
-                    1,
-                    &raw mut output.ptr,
-                ))?;
-            } else {
-                self.runtime.check((api.Run)(
-                    self.ptr,
-                    options.ptr,
-                    &raw const input_name,
-                    &raw const input_ptr,
-                    1,
-                    &raw const output_name,
-                    1,
-                    &raw mut output.ptr,
-                ))?;
-            }
-            let mut info = TensorInfo {
-                runtime: self.runtime.clone(),
-                ptr: ptr::null_mut(),
-            };
-            self.runtime
-                .check((api.GetTensorTypeAndShape)(output.ptr, &raw mut info.ptr))?;
-            let mut dtype = ffi::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED;
-            self.runtime
-                .check((api.GetTensorElementType)(info.ptr, &raw mut dtype))?;
+        let image = TensorRef::from_array_view((Shape::new(shape.iter().copied()), data))
+            .context("unable to create input tensor")?;
+        let options = Arc::new(RunOptions::new().context("unable to create run options")?);
+        {
+            let mut runs = self
+                .runtime
+                .active_runs
+                .lock()
+                .map_err(|_| anyhow::anyhow!("run registry poisoned"))?;
             ensure!(
-                dtype == ffi::ONNXTensorElementDataType::ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
-                "expected float32 output"
+                !self.runtime.cancelled.load(Ordering::Relaxed),
+                "inference cancelled by shutdown"
             );
-            let mut rank = 0;
-            let mut len = 0;
-            self.runtime
-                .check((api.GetDimensionsCount)(info.ptr, &raw mut rank))?;
-            ensure!(rank <= 8, "output tensor rank exceeds limit");
-            let mut shape = vec![0i64; rank];
-            self.runtime
-                .check((api.GetDimensions)(info.ptr, shape.as_mut_ptr(), rank))?;
-            self.runtime
-                .check((api.GetTensorShapeElementCount)(info.ptr, &raw mut len))?;
-            ensure!(
-                len <= 134_217_728 && len > 0,
-                "output tensor size exceeds limit or is empty"
-            );
-            let mut buffer = ptr::null_mut();
-            self.runtime
-                .check((api.GetTensorMutableData)(output.ptr, &raw mut buffer))?;
-            ensure!(!buffer.is_null(), "null output tensor data");
-            let data = std::slice::from_raw_parts(buffer.cast::<f32>(), len).to_vec();
-            ensure!(
-                data.iter().all(|n| n.is_finite()),
-                "non-finite model output"
-            );
-            Ok(Tensor { shape, data })
+            runs.push(options.clone());
         }
+        let _guard = RunGuard {
+            runtime: self.runtime.clone(),
+            options: options.clone(),
+        };
+        let seg = if let Some((_, expected)) = &self.segment_input {
+            let full_widths = vec![shape[3] as u32; shape[0] as usize];
+            let (segment_shape, values) = segments::build(shape, widths.unwrap_or(&full_widths))?;
+            ensure!(
+                segment_shape
+                    .iter()
+                    .zip(expected)
+                    .all(|(&actual, &expected)| expected < 0 || actual == expected),
+                "seg shape does not match model"
+            );
+            Some(
+                OrtTensor::from_array((Shape::new(segment_shape), values))
+                    .context("unable to create seg tensor")?,
+            )
+        } else {
+            None
+        };
+        let outputs = if let Some(seg) = seg {
+            self.inner
+                .run_with_options([image.into(), seg.into()], &options)?
+        } else {
+            self.inner.run_with_options([image.into()], &options)?
+        };
+        let (shape, data) = outputs[0]
+            .try_extract_tensor::<f32>()
+            .context("expected float32 output")?;
+        ensure!(shape.len() <= 8, "output tensor rank exceeds limit");
+        ensure!(
+            !data.is_empty() && data.len() <= 134_217_728,
+            "output tensor size exceeds limit or is empty"
+        );
+        ensure!(
+            data.iter().all(|n| n.is_finite()),
+            "non-finite model output"
+        );
+        Ok(Tensor {
+            shape: shape.to_vec(),
+            data: data.to_vec(),
+        })
     }
 }
+
 impl Drop for Session {
     fn drop(&mut self) {
-        if self.ptr.is_null() {
-            return;
-        }
-        // SAFETY: `self.ptr` is non-null here and came from a successful `CreateSessionFromArray`; this drop releases it once and frees any profiling filename first.
-        unsafe {
-            let api = &*self.runtime.api;
-            if self.profiling {
-                let mut allocator = ptr::null_mut();
-                if self
-                    .runtime
-                    .check((api.GetAllocatorWithDefaultOptions)(&raw mut allocator))
-                    .is_ok()
-                {
-                    let mut filename = ptr::null_mut();
-                    if self
-                        .runtime
-                        .check((api.SessionEndProfiling)(
-                            self.ptr,
-                            allocator,
-                            &raw mut filename,
-                        ))
-                        .is_ok()
-                        && !filename.is_null()
-                    {
-                        let _ = self
-                            .runtime
-                            .check((api.AllocatorFree)(allocator, filename.cast()));
-                    }
-                }
-            }
-            (api.ReleaseSession)(self.ptr);
+        if self.profiling {
+            let _ = self.inner.end_profiling();
         }
     }
 }
-struct RunOptions {
-    runtime: Arc<Runtime>,
-    ptr: *mut ffi::OrtRunOptions,
-}
-impl Drop for RunOptions {
-    fn drop(&mut self) {
-        if self.ptr.is_null() {
-            return;
-        }
-        if let Ok(mut runs) = self.runtime.active_runs.lock() {
-            runs.retain(|&p| p != self.ptr as usize);
-        }
-        // SAFETY: `ptr` is non-null from a successful `CreateRunOptions`; it was just unregistered under the registry lock, so this is its only release.
-        unsafe {
-            ((*self.runtime.api).ReleaseRunOptions)(self.ptr);
-        }
-    }
-}
+
 pub struct Tensor {
     pub shape: Vec<i64>,
     pub data: Vec<f32>,
 }
-macro_rules! resource {
-    ($name:ident, $ty:ty, $release:ident) => {
-        struct $name {
-            runtime: Arc<Runtime>,
-            ptr: *mut $ty,
-        }
-        impl Drop for $name {
-            fn drop(&mut self) {
-                if !self.ptr.is_null() {
-                    // SAFETY: the pointer was produced by the matching ORT constructor, the null guard covers unused slots, and `Drop` releases it exactly once.
-                    unsafe {
-                        ((*self.runtime.api).$release)(self.ptr);
-                    }
-                }
-            }
-        }
-    };
-}
-resource!(MemoryInfo, ffi::OrtMemoryInfo, ReleaseMemoryInfo);
-resource!(Value, ffi::OrtValue, ReleaseValue);
-resource!(
-    TensorInfo,
-    ffi::OrtTensorTypeAndShapeInfo,
-    ReleaseTensorTypeAndShapeInfo
-);
 
-resource!(TypeInfo, ffi::OrtTypeInfo, ReleaseTypeInfo);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{config::Config, vault::Vault};
+    use std::time::Duration;
+
+    fn test_config() -> Config {
+        Config {
+            auth_token: String::new(),
+            skip_cpu_gate: true,
+            pipe_buffer: 1 << 20,
+            frame_timeout: Duration::from_millis(15),
+            parallel_budget: 2,
+            max_pixel_size: 1280,
+            orientation: false,
+            orientation_threshold: 0.9,
+            orientation_probe: 5,
+            score_filter: true,
+            det_min: 0.741,
+            rec_min: 0.84,
+            rec_keep: 0.925,
+            session_ttl: None,
+            affinity: "auto".into(),
+            profile_dir: None,
+            benchmark_resources: false,
+            benchmark_profile: false,
+        }
+    }
+
+    #[test]
+    fn runs_bundled_recognizer() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../app/native/ocr");
+        if !dir.join("zocr/models.zmdl").is_file() {
+            eprintln!("skipping: bundled OCR assets absent");
+            return;
+        }
+        let runtime = Runtime::load(&dir).expect("loads bundled libonnxruntime.so");
+        let info = ort::info();
+        eprintln!("ONNX Runtime build: {info}");
+        assert!(!info.trim().is_empty(), "empty ONNX Runtime build info");
+        let vault = Vault::load(&dir).expect("vault");
+        let model = vault.decrypt(1).expect("recognizer model");
+        let mut session = runtime
+            .session(&model, &test_config(), "recognizer")
+            .expect("recognizer session");
+        let dims = session.input_shape().to_vec();
+        let batch = if dims[0] > 0 { dims[0] } else { 1 };
+        let width = if dims[3] > 0 { dims[3] } else { 256 };
+        let shape = [batch, 3, 48, width];
+        let len = usize::try_from(batch * 3 * 48 * width).expect("tensor size fits usize");
+        let data = vec![0f32; len];
+        let widths = vec![
+            u32::try_from(width).expect("width fits u32");
+            usize::try_from(batch).expect("batch fits usize")
+        ];
+        let out = session
+            .run_recognition(&shape, &data, &widths)
+            .expect("inference");
+        assert!(!out.data.is_empty() && out.data.iter().all(|v| v.is_finite()));
+    }
+}

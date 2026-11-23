@@ -148,7 +148,7 @@ impl Engine {
         };
         stages["detResizeMicros"] = json!(t.elapsed().as_micros());
         let t = Instant::now();
-        let mut input = pixels::tensor(&resized, true);
+        let input = pixels::tensor(&resized, true);
         stages["detNormalizeMicros"] = json!(t.elapsed().as_micros());
         let t = Instant::now();
         let map = models.detector.run(
@@ -158,7 +158,7 @@ impl Engine {
                 i64::from(resized.height()),
                 i64::from(resized.width()),
             ],
-            &mut input,
+            &input,
         )?;
         stages["detInferMicros"] = json!(t.elapsed().as_micros());
         ensure!(
@@ -206,9 +206,9 @@ impl Engine {
                 80
             };
             for i in 0..probe {
-                let (shape, mut data, _) =
+                let (shape, data, _) =
                     pixels::batch(std::slice::from_ref(&crops[i]), height, Some(width));
-                let output = models.classifier.run(&shape, &mut data)?;
+                let output = models.classifier.run(&shape, &data)?;
                 ensure!(
                     output.shape == [1, 2] && output.data.len() == 2,
                     "classifier expected [N,2] output"
@@ -263,12 +263,10 @@ impl Engine {
                     images.push(images.last().unwrap().clone());
                 }
             }
-            let (shape, mut data, widths) = pixels::batch(&images, 48, fixed_width);
+            let (shape, data, widths) = pixels::batch(&images, 48, fixed_width);
             pre_us += t.elapsed().as_micros();
             let t = Instant::now();
-            let output = models
-                .recognizer
-                .run_recognition(&shape, &mut data, &widths)?;
+            let output = models.recognizer.run_recognition(&shape, &data, &widths)?;
             infer_us += t.elapsed().as_micros();
             let t = Instant::now();
             let batch = images.len();

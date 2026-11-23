@@ -1,4 +1,4 @@
-#![allow(unsafe_code, reason = "onnxruntime FFI")]
+#![forbid(unsafe_code)]
 
 #[cfg(not(all(
     target_os = "linux",
