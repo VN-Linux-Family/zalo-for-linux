@@ -2,9 +2,7 @@ name: CI
 
 on:
   push:
-    branches:
   pull_request:
-    branches:
   workflow_dispatch:
 
 concurrency:
@@ -61,6 +59,11 @@ jobs:
 
       - name: Run Clippy lints
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Security audit dependencies
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Node.js tests
         run: npm test
