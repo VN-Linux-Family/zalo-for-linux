@@ -5,7 +5,6 @@ curl
 wget
 ca-certificates
 xz-utils
-python3
 build-essential
 libssl-dev
 liblzma-dev
@@ -16,7 +15,4 @@ libxcb1-dev
 libxext-dev
 zlib1g-dev
 zsync
-libopus-dev
-libpulse-dev
 libpipewire-0.3-dev
-libspeexdsp-dev

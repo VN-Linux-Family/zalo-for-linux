@@ -103,14 +103,7 @@ chmod +x Zalo-*.AppImage
 ./Zalo-*.AppImage
 ```
 
-> 📞 **Voice & Video Calls Requirement**: Install audio utilities for native call support:
->
-> - **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`
-> - **Arch Linux**: `sudo pacman -S python opus pulseaudio`
-> - **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`
-> - **openSUSE**: `sudo zypper install python3 libopus0 pulseaudio-utils`
-> - **Gentoo**: `sudo emerge --ask dev-lang/python media-libs/opus media-sound/pulseaudio-daemon`
-
+> 📞 **Voice & Video Calls Requirement**: A PulseAudio or PipeWire-Pulse server must be running.
 </details>
 
 <details>

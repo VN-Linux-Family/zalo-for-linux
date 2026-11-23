@@ -1,39 +1,24 @@
-//! Embedded WebRTC Audio Processing Module (AEC, Noise Suppression, High Pass Filter).
-//! Provides true acoustic echo cancellation and background noise suppression directly
-//! in-process without relying on external PipeWire filter modules.
+//! Pure-Rust WebRTC-style audio processing adapter.
 
-use std::os::raw::{c_int, c_void};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{
+    atomic::{AtomicI32, Ordering},
+    Mutex,
+};
 
-#[link(name = "zcall_apm", kind = "static")]
-unsafe extern "C" {
-    fn zcall_apm_create(
-        sample_rate_hz: c_int,
-        channels: c_int,
-        aec_enabled: c_int,
-        ns_enabled: c_int,
-        hpf_enabled: c_int,
-    ) -> *mut c_void;
+use sonora::config::{EchoCanceller, HighPassFilter, NoiseSuppression, NoiseSuppressionLevel};
+use sonora::{AudioProcessing, Config, StreamConfig};
 
-    fn zcall_apm_process_render(handle: *mut c_void, pcm: *const i16, num_samples: c_int) -> c_int;
-
-    fn zcall_apm_process_capture(
-        handle: *mut c_void,
-        pcm: *mut i16,
-        num_samples: c_int,
-        delay_ms: c_int,
-    ) -> c_int;
-
-    fn zcall_apm_destroy(handle: *mut c_void);
+struct ApmInner {
+    processing: AudioProcessing,
+    render_scratch: Vec<i16>,
+    capture_scratch: Vec<i16>,
 }
 
 pub struct Apm {
-    raw: *mut c_void,
+    inner: Mutex<ApmInner>,
     delay_ms: AtomicI32,
+    samples_per_chunk: usize,
 }
-
-unsafe impl Send for Apm {}
-unsafe impl Sync for Apm {}
 
 impl Apm {
     pub fn new(
@@ -43,49 +28,78 @@ impl Apm {
         ns_enabled: bool,
         hpf_enabled: bool,
     ) -> Result<Self, String> {
-        let raw = unsafe {
-            zcall_apm_create(
-                sample_rate_hz as c_int,
-                channels as c_int,
-                if aec_enabled { 1 } else { 0 },
-                if ns_enabled { 1 } else { 0 },
-                if hpf_enabled { 1 } else { 0 },
-            )
+        let sample_rate_hz =
+            u32::try_from(sample_rate_hz).map_err(|_| "invalid audio sample rate".to_string())?;
+        let channels =
+            u16::try_from(channels).map_err(|_| "invalid audio channel count".to_string())?;
+        let samples_per_chunk = (sample_rate_hz as usize / 100)
+            .checked_mul(channels as usize)
+            .filter(|&samples| samples > 0)
+            .ok_or_else(|| "invalid 10 ms audio frame size".to_string())?;
+        let stream = StreamConfig::new(sample_rate_hz, channels);
+        let config = Config {
+            echo_canceller: aec_enabled.then(|| EchoCanceller {
+                enforce_high_pass_filtering: hpf_enabled,
+                ..EchoCanceller::default()
+            }),
+            noise_suppression: ns_enabled.then(|| NoiseSuppression {
+                level: NoiseSuppressionLevel::High,
+                ..NoiseSuppression::default()
+            }),
+            high_pass_filter: hpf_enabled.then(HighPassFilter::default),
+            ..Config::default()
         };
-
-        if raw.is_null() {
-            return Err("Failed to instantiate WebRTC AudioProcessing module".to_string());
-        }
-
+        let processing = AudioProcessing::builder()
+            .config(config)
+            .capture_config(stream)
+            .render_config(stream)
+            .build();
         Ok(Self {
-            raw,
-            delay_ms: AtomicI32::new(40), // Standard acoustic echo delay default (40 ms)
+            inner: Mutex::new(ApmInner {
+                processing,
+                render_scratch: vec![0; samples_per_chunk],
+                capture_scratch: vec![0; samples_per_chunk],
+            }),
+            delay_ms: AtomicI32::new(40),
+            samples_per_chunk,
         })
     }
 
-    /// Feed render/speaker audio to APM as echo reference.
+    /// Feed speaker audio as the far-end reference for echo cancellation.
     pub fn process_render(&self, pcm: &[i16]) {
-        if self.raw.is_null() || pcm.is_empty() {
+        let Ok(mut inner) = self.inner.lock() else {
             return;
-        }
-        unsafe {
-            zcall_apm_process_render(self.raw, pcm.as_ptr(), pcm.len() as c_int);
+        };
+        let ApmInner {
+            processing,
+            render_scratch,
+            ..
+        } = &mut *inner;
+        for chunk in pcm.chunks_exact(self.samples_per_chunk) {
+            let _ = processing.process_render_i16(chunk, render_scratch);
         }
     }
 
-    /// Process capture/mic audio through AEC and Noise Suppression in-place.
+    /// Apply echo cancellation, noise suppression, and optional high-pass filtering.
     pub fn process_capture(&self, pcm: &mut [i16]) {
-        if self.raw.is_null() || pcm.is_empty() {
+        let delay_ms = self.delay_ms.load(Ordering::Relaxed);
+        let Ok(mut inner) = self.inner.lock() else {
             return;
-        }
-        let delay = self.delay_ms.load(Ordering::Relaxed);
-        unsafe {
-            zcall_apm_process_capture(
-                self.raw,
-                pcm.as_mut_ptr(),
-                pcm.len() as c_int,
-                delay as c_int,
-            );
+        };
+        let ApmInner {
+            processing,
+            capture_scratch,
+            ..
+        } = &mut *inner;
+        let _ = processing.set_stream_delay_ms(delay_ms);
+        for chunk in pcm.chunks_exact_mut(self.samples_per_chunk) {
+            capture_scratch.copy_from_slice(chunk);
+            if processing
+                .process_capture_i16(capture_scratch, chunk)
+                .is_err()
+            {
+                chunk.copy_from_slice(capture_scratch);
+            }
         }
     }
 
@@ -94,36 +108,26 @@ impl Apm {
     }
 }
 
-impl Drop for Apm {
-    fn drop(&mut self) {
-        if !self.raw.is_null() {
-            unsafe {
-                zcall_apm_destroy(self.raw);
-            }
-            self.raw = std::ptr::null_mut();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_apm_lifecycle_or_fallback() {
-        match Apm::new(16000, 1, true, true, false) {
-            Ok(apm) => {
-                let render_frame = vec![500i16; 320];
-                apm.process_render(&render_frame);
+    fn processing_preserves_frame_shape_and_handles_render_reference() {
+        let apm = Apm::new(16_000, 1, true, true, false).expect("create Sonora processor");
+        let render = vec![500i16; 320];
+        apm.process_render(&render);
+        let mut capture = vec![500i16; 320];
+        apm.process_capture(&mut capture);
+        assert_eq!(capture.len(), 320);
+    }
 
-                let mut capture_frame = vec![500i16; 320];
-                apm.process_capture(&mut capture_frame);
-
-                assert_eq!(capture_frame.len(), 320);
-            }
-            Err(e) => {
-                assert!(e.contains("WebRTC AudioProcessing"));
-            }
-        }
+    #[test]
+    fn processing_handles_partial_tail_without_panicking() {
+        let apm = Apm::new(16_000, 1, false, true, true).unwrap();
+        let mut capture = vec![100i16; 321];
+        let tail = capture[320];
+        apm.process_capture(&mut capture);
+        assert_eq!(capture[320], tail);
     }
 }

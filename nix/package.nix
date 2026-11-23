@@ -8,8 +8,6 @@
   fetchurl,
   runCommand,
   dwarfs,
-  libopus,
-  libpulseaudio,
   runtimeShell,
   # "zadark" (with ZaDark) or "original"
   variant ? "zadark",
@@ -46,25 +44,14 @@ appimageTools.wrapAppImage {
   inherit pname version;
   src = contents;
 
-  # Calls (zcall-native) run python3, which loads libopus and libpulse-simple
-  # through ctypes, and the PulseAudio tools (pactl, pacat, parec).
+  # Python 3 is used by the XDG Desktop Portal screenshot helper.
+  # The native Rust call engine handles audio streaming and PulseAudio control.
   extraPkgs =
     pkgs: with pkgs; [
       python3
-      libopus
-      libpulseaudio
       pulseaudio
       alsa-utils
     ];
-
-  profile = ''
-    export LD_LIBRARY_PATH=${
-      lib.makeLibraryPath [
-        libopus
-        libpulseaudio
-      ]
-    }''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
-  '';
 
   extraInstallCommands = ''
     ${lib.optionalString (commandLineArgs != [ ]) ''

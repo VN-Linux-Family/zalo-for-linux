@@ -26,79 +26,19 @@ struct SystemVolumeBackend;
 
 impl VolumeBackend for SystemVolumeBackend {
     fn get_source_state(&self, source: Option<&str>) -> Option<SourceState> {
-        if let Some(info) = pulse_get_source_info(source) {
-            return Some(SourceState {
-                pct: info.pct,
-                muted: info.muted,
-                resolved_name: info.resolved_name,
-            });
-        }
-        let source_name = source
-            .filter(|s| !s.is_empty())
-            .unwrap_or("@DEFAULT_SOURCE@");
-        let output = std::process::Command::new("pactl")
-            .env("LC_ALL", "C")
-            .args(["get-source-volume", source_name])
-            .output();
-        if let Ok(out) = output {
-            if out.status.success() {
-                let s = String::from_utf8_lossy(&out.stdout);
-                if let Some(pos) = s.find('%') {
-                    let prefix = &s[..pos];
-                    if let Some(slash_pos) = prefix.rfind('/') {
-                        let num_str = prefix[slash_pos + 1..].trim();
-                        if let Ok(val) = num_str.parse::<u16>() {
-                            return Some(SourceState {
-                                pct: val.min(150) as u8,
-                                muted: false,
-                                resolved_name: None,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        None
+        pulse_get_source_info(source).map(|info| SourceState {
+            pct: info.pct,
+            muted: info.muted,
+            resolved_name: info.resolved_name,
+        })
     }
 
     fn set_source_volume(&self, source: Option<&str>, pct: u8) -> bool {
-        let pct = pct.min(100);
-        if set_source_volume(source, pct).is_ok() {
-            return true;
-        }
-        let source_name = source
-            .filter(|s| !s.is_empty())
-            .unwrap_or("@DEFAULT_SOURCE@");
-        let raw = (65536.0 * (pct as f64) / 100.0).round() as u32;
-        if let Ok(status) = std::process::Command::new("pactl")
-            .env("LC_ALL", "C")
-            .args(["set-source-volume", source_name, &raw.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-        {
-            return status.success();
-        }
-        false
+        set_source_volume(source, pct.min(100)).is_ok()
     }
 
     fn set_source_mute(&self, source: Option<&str>, mute: bool) -> bool {
-        if set_source_mute(source, mute).is_ok() {
-            return true;
-        }
-        let source_name = source
-            .filter(|s| !s.is_empty())
-            .unwrap_or("@DEFAULT_SOURCE@");
-        if let Ok(status) = std::process::Command::new("pactl")
-            .env("LC_ALL", "C")
-            .args(["set-source-mute", source_name, if mute { "1" } else { "0" }])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-        {
-            return status.success();
-        }
-        false
+        set_source_mute(source, mute).is_ok()
     }
 
     fn normalize_own_stream(&self) {

@@ -7,7 +7,7 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
 | Hiện tượng / Triệu chứng lỗi | Nguyên nhân cốt lõi | Lệnh / Thao tác khắc phục ngay |
 | :--- | :--- | :--- |
 | **Văng ngay khi mở (Ubuntu 23.10+)** | AppArmor chặn unprivileged user namespace | Thêm cờ `--no-sandbox` vào lệnh chạy hoặc file `.desktop`, hoặc làm theo [hướng dẫn xử lý của AM](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) để tắt triệt để giới hạn. |
-| **Không gọi được (Mất tiếng/Mic/Cam)** | Thiếu thư viện âm thanh Opus hoặc PulseAudio / PipeWire | **Với engine native Rust mặc định**: Chỉ cần `libopus` và `libpulse` (thường có sẵn trên hầu hết desktop Linux):<br>• **Debian / Ubuntu**: `sudo apt install libopus0 libpulse0`<br>• **Arch Linux**: `sudo pacman -S opus libpulse`<br>• **Fedora / RHEL**: `sudo dnf install opus pulseaudio-libs` |
+| **Không gọi được (Mất tiếng/Mic/Cam)** | Máy chủ PulseAudio tương thích không chạy hoặc không thể kết nối | **Với engine native Rust mặc định**: cần máy chủ PulseAudio hoặc PipeWire-Pulse đang chạy để truyền audio, điều khiển volume/mute và dò thiết bị:<br>• **Debian / Ubuntu**: dùng PulseAudio hoặc PipeWire-Pulse của hệ thống<br>• **Arch Linux**: `sudo pacman -S pulseaudio` hoặc `pipewire-pulse`<br>• **Fedora / RHEL**: `sudo dnf install pulseaudio` hoặc `pipewire-pulseaudio` |
 | **Không dán được ảnh (`Ctrl+V`)** | Thiếu công cụ clipboard cho Wayland / X11 | Cài đặt `wl-clipboard` (nếu dùng Wayland) hoặc `xclip` (nếu dùng X11). |
 | **Giao diện không tự đổi Dark/Light** | Ứng dụng mặc định giữ theme tĩnh | Đã hỗ trợ tự động nhận diện theo thời gian thực qua GNOME D-Bus và XDG Desktop Portal trong các bản build mới. |
 | **Không có icon trên menu ứng dụng** | Chạy AppImage trực tiếp chưa tích hợp | Nếu cài qua AM, chỉ cần chạy `am reinstall zalo`. Nếu chạy AppImage thủ công, dùng [Gear Lever](https://flathub.org/en/apps/it.mijorus.gearlever) để đưa vào Menu, hoặc tạo file `~/.local/share/applications/zalo.desktop`. |
@@ -16,7 +16,7 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
 
 ## ⚠️ Các giới hạn hiện tại
 
-- **Cuộc gọi trên ARM64 (`aarch64`)**: Engine gọi điện chạy hoàn toàn bằng Node.js + Python (`native/engines/zcall/`, không dùng Wine của x86) và đã được kiểm thử, xác nhận hoạt động trên phần cứng ARM64 bởi tester @lolmc0587 ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
+- **Cuộc gọi trên ARM64 (`aarch64`)**: Engine gọi điện chạy bằng Node.js + Rust (`native/engines/zcall/`, không dùng Wine của x86) và đã được kiểm thử, xác nhận hoạt động trên phần cứng ARM64 bởi tester @lolmc0587 ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
 - **Giới hạn Sandbox trên Ubuntu 23.10+**: Do cơ chế AppArmor mới, cần chạy với `--no-sandbox` hoặc làm theo [hướng dẫn xử lý của AM](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) để cấu hình profile AppArmor ([Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72), [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143)).
 
 ---

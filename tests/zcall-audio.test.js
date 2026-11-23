@@ -14,13 +14,15 @@ const codec = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src
 const media = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'media', 'mod.rs'), 'utf8');
 const jitter = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'jitter.rs'), 'utf8');
 const clipGuard = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'clip_guard.rs'), 'utf8');
+const devices = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'devices.rs'), 'utf8');
 const backend = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'backend.rs'), 'utf8');
-const pulseVolume = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'c_pulse_vol.c'), 'utf8');
+const zcallBuild = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'build.rs'), 'utf8');
 
 test('audio capture/playback and Opus are integrated into the standalone zcall Rust process', () => {
   assert.match(manifest, /name\s*=\s*"zcall"/);
   assert.match(core, /pub mod audio/);
-  assert.match(codec, /#\[link\(name\s*=\s*"opus"\)\]/);
+  assert.match(manifest, /rusty-opus\s*=\s*"/);
+  assert.match(codec, /RustOpusEncoder::new/);
   assert.match(codec, /opus_voice_frame_encodes_and_decodes_at_call_sample_rate/);
   assert.match(media, /Apm::new\(/, 'PR #220 WebRTC APM must be part of the active media pipeline');
   assert.match(media, /apm\.process_render\(/);
@@ -35,11 +37,18 @@ test('audio capture/playback and Opus are integrated into the standalone zcall R
   assert.match(jitter, /consecutive_plc/);
   assert.match(clipGuard, /apply_soft_limiter/);
   assert.match(clipGuard, /ZCALL_MIC_AGC/);
-  assert.match(backend, /zcall_pulse_get_source_volume/);
-  assert.match(backend, /zcall_pulse_set_source_volume/);
-  assert.match(backend, /Command::new\(\"pactl\"\)/, 'pactl remains a fallback when libpulse volume control is unavailable');
-  assert.match(pulseVolume, /pa_context_get_source_info_by_name/);
-  assert.match(pulseVolume, /pa_context_set_source_volume_by_index/);
+  assert.match(backend, /protocol::Command::GetSourceInfo/);
+  assert.match(backend, /protocol::Command::GetSourceOutputInfoList/);
+  assert.match(backend, /protocol::Command::SetSourceVolume/);
+  assert.match(backend, /protocol::Command::SetSourceMute/);
+  assert.match(backend, /protocol::Command::SetSourceOutputVolume/);
+  assert.match(backend, /protocol::Command::SetSourceOutputMute/);
+  assert.match(backend, /protocol::read_ack_message/);
+  assert.match(backend, /pulse_device_inventory/);
+  assert.doesNotMatch(backend + clipGuard + devices, /unsafe|extern \"C\"|libpulse|pa_context_|zcall_pulse|pactl/,
+    'PulseAudio control and device discovery must use safe Rust and the native protocol');
+  assert.doesNotMatch(zcallBuild, /libpulse|pulse-simple|c_pulse_vol/);
+  assert.equal(fs.existsSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'c_pulse_vol.c')), false);
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'scripts', 'build-native.js'), 'utf8'), /name:\s*'zcall-audio'/);
   assert.ok(packageJson.build.extraFiles.some((entry) => entry.from === 'app' && entry.to === 'app'),
     'the standalone app/native/zcall binary must be copied into the AppDir');

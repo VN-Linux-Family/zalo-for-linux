@@ -4,7 +4,6 @@ pub mod apm;
 pub mod backend;
 pub mod clip_guard;
 pub mod codec;
-pub mod dsp;
 pub mod group;
 pub mod jitter;
 pub mod level;

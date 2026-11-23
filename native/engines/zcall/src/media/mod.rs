@@ -18,7 +18,6 @@ use crate::audio::backend::{
 use crate::audio::{
     clip_guard::{apply_soft_limiter, ClipGuard},
     compute_rfc6464_level,
-    dsp::AudioProcessor,
     group::GroupAudioMixer,
     leveler::MicLeveler,
     Apm, JitterBuffer, OpusEncoder, PulsePlayer, PulseRecorder, FRAME_BYTES, FRAME_SAMPLES,
@@ -57,7 +56,6 @@ fn spawn_playout_worker(
     params: Arc<Mutex<Option<MediaSessionParams>>>,
     jitter_buffer: Option<Arc<Mutex<JitterBuffer>>>,
     group_audio: Arc<Mutex<GroupAudioMixer>>,
-    audio_dsp: Arc<Mutex<Option<AudioProcessor>>>,
     apm: Option<Arc<Apm>>,
     far_active: Arc<AtomicBool>,
     mic_volume: Arc<AtomicU8>,
@@ -152,10 +150,6 @@ fn spawn_playout_worker(
                     } else {
                         if let Some(apm) = apm.as_ref() {
                             apm.process_render(&pcm_out);
-                        } else if let Ok(mut processor) = audio_dsp.lock() {
-                            if let Some(processor) = processor.as_mut() {
-                                processor.playback(&pcm_out);
-                            }
                         }
 
                         let sum_sq: i64 = pcm_out
@@ -1636,42 +1630,15 @@ impl ZrtcMediaBackend {
         let apm = match Apm::new(SAMPLE_RATE as i32, 1, aec_enabled, ns_enabled, hpf_enabled) {
             Ok(apm) => {
                 crate::zcall_log!(
-                    "[zcall-rust] WebRTC APM enabled: AEC={aec_enabled} NS={ns_enabled} HPF={hpf_enabled}"
+                    "[zcall-rust] Sonora audio processing enabled: AEC={aec_enabled} NS={ns_enabled} HPF={hpf_enabled}"
                 );
                 Some(Arc::new(apm))
             }
             Err(error) => {
-                crate::zcall_log!(
-                    "[zcall-rust] WebRTC APM unavailable, using SpeexDSP fallback: {error}"
-                );
+                crate::zcall_log!("[zcall-rust] Sonora audio processing unavailable: {error}");
                 None
             }
         };
-        let audio_dsp = if apm.is_none() {
-            let mut fallback_config = audio_config.clone();
-            if !fallback_config.is_object() {
-                fallback_config = serde_json::json!({});
-            }
-            fallback_config["audioMicGain"] = Value::Bool(false);
-            match AudioProcessor::new(&fallback_config) {
-                Ok(processor) => {
-                    crate::zcall_log!(
-                        "[zcall-rust] SpeexDSP fallback: AEC={} NS={} HPF={} (PR MicLeveler owns gain)",
-                        processor.is_echo_cancellation_enabled(),
-                        processor.is_noise_suppression_enabled(),
-                        processor.is_high_pass_enabled()
-                    );
-                    Arc::new(Mutex::new(Some(processor)))
-                }
-                Err(error) => {
-                    crate::zcall_log!("[zcall-rust] SpeexDSP fallback unavailable: {error}");
-                    Arc::new(Mutex::new(None))
-                }
-            }
-        } else {
-            Arc::new(Mutex::new(None))
-        };
-
         let bind_params = self.params.lock().ok().and_then(|params| params.clone());
         if let Some(bind_params) = bind_params.filter(|params| !params.p2p_candidates.is_empty()) {
             let bind_socket = socket.clone();
@@ -1755,7 +1722,6 @@ impl ZrtcMediaBackend {
             params_for_playout,
             jitter_buffer.clone(),
             group_audio.clone(),
-            audio_dsp.clone(),
             apm.clone(),
             far_active.clone(),
             self.mic_volume.clone(),
@@ -3051,7 +3017,6 @@ impl ZrtcMediaBackend {
         let tx_rate = self.send_rate.clone();
         let tx_last_video = self.last_video_sent_ms.clone();
         let tx_pending_profile = self.pending_video_profile.clone();
-        let tx_audio_dsp = audio_dsp.clone();
         let tx_apm = apm.clone();
         let tx_far_active = far_active.clone();
         let tx_mic_volume = self.mic_volume.clone();
@@ -3235,10 +3200,6 @@ impl ZrtcMediaBackend {
                             clip_guard.feed(&pcm_s16);
                             if let Some(apm) = tx_apm.as_ref() {
                                 apm.process_capture(&mut pcm_s16);
-                            } else if let Ok(mut processor) = tx_audio_dsp.lock() {
-                                if let Some(processor) = processor.as_mut() {
-                                    processor.capture(&mut pcm_s16);
-                                }
                             }
                             if mic_gain_enabled {
                                 leveler.process(&mut pcm_s16);
@@ -4336,7 +4297,7 @@ impl ZrtcMediaBackend {
             .then(|| self.mic_level.load(Ordering::Relaxed).min(127))
     }
 
-    /// Active PulseSimple streams are reopened on their owning worker thread.
+    /// Active PulseAudio streams are reopened on their owning worker thread.
     /// The media session, SRTP state and jitter buffer are retained.
     pub fn set_device(&self, kind: &str, name: &str) {
         if let Ok(mut devices) = self.devices.lock() {

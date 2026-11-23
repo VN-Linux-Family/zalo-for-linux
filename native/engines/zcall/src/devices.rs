@@ -1,11 +1,11 @@
 //! Native Linux device discovery and call-device preferences.
 //! Device discovery, preference storage, and Zalo device-list formatting live here;
 //! host frontends render the returned lists and forward a user's selection.
+use crate::audio::backend::{pulse_device_inventory, PulseAudioDevice};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -53,55 +53,17 @@ pub fn save_prefs(prefs: &DevicePrefs) -> Result<(), String> {
     fs::rename(&temp, &path).map_err(|error| error.to_string())
 }
 
-fn pactl(args: &[&str]) -> Option<String> {
-    let output = Command::new("pactl").args(args).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-fn audio_devices(kind: &str) -> Vec<Value> {
-    let mut devices = Vec::new();
-    if let Some(output) = pactl(&["-f", "json", "list", kind]) {
-        if let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&output) {
-            for item in items {
-                let id = item.get("name").and_then(Value::as_str).unwrap_or_default();
-                if id.is_empty() {
-                    continue;
-                }
-                let label = item
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .filter(|label| !label.is_empty() && *label != "(null)")
-                    .unwrap_or(id);
-                devices.push(json!({"id":id,"label":label}));
-            }
-        }
-    }
-    if devices.is_empty() {
-        if let Some(output) = pactl(&["list", "short", kind]) {
-            for line in output.lines() {
-                let Some(id) = line.split('\t').nth(1).filter(|id| !id.is_empty()) else {
-                    continue;
-                };
-                devices.push(json!({"id":id,"label":id}));
-            }
-        }
-    }
-
-    devices.retain(|device| {
-        let id = device.get("id").and_then(Value::as_str).unwrap_or_default();
-        let label = device
-            .get("label")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        !id.ends_with(".monitor")
-            && !id.starts_with("zcall_ec_")
-            && !id.starts_with("raop_sink.")
-            && label != "(null)"
-    });
+fn audio_devices(devices: &[PulseAudioDevice]) -> Vec<Value> {
     devices
+        .iter()
+        .filter(|device| {
+            !device.id.ends_with(".monitor")
+                && !device.id.starts_with("zcall_ec_")
+                && !device.id.starts_with("raop_sink.")
+                && device.label != "(null)"
+        })
+        .map(|device| json!({"id": device.id, "label": device.label}))
+        .collect()
 }
 
 #[cfg(target_os = "linux")]
@@ -179,11 +141,12 @@ fn preferred_device<'a>(
 }
 
 pub fn list_devices() -> Value {
-    let mics = audio_devices("sources");
-    let speakers = audio_devices("sinks");
+    let inventory = pulse_device_inventory().unwrap_or_default();
+    let mics = audio_devices(&inventory.sources);
+    let speakers = audio_devices(&inventory.sinks);
     let cameras = camera_devices();
-    let default_mic = pactl(&["get-default-source"]).unwrap_or_default();
-    let default_speaker = pactl(&["get-default-sink"]).unwrap_or_default();
+    let default_mic = inventory.default_source;
+    let default_speaker = inventory.default_sink;
     let prefs = load_prefs();
 
     json!({
@@ -369,6 +332,32 @@ mod tests {
         assert!(is_capture_node(Flags::VIDEO_CAPTURE_MPLANE));
         assert!(!is_capture_node(Flags::META_CAPTURE));
         assert!(!is_capture_node(Flags::empty()));
+    }
+
+    #[test]
+    fn audio_device_filter_excludes_monitors_and_internal_loopbacks() {
+        let devices = vec![
+            PulseAudioDevice {
+                id: "alsa_input.usb".into(),
+                label: "USB microphone".into(),
+            },
+            PulseAudioDevice {
+                id: "alsa_output.speaker.monitor".into(),
+                label: "Monitor".into(),
+            },
+            PulseAudioDevice {
+                id: "zcall_ec_virtual".into(),
+                label: "Internal".into(),
+            },
+            PulseAudioDevice {
+                id: "raop_sink.living_room".into(),
+                label: "AirPlay".into(),
+            },
+        ];
+        let listed = audio_devices(&devices);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["id"], "alsa_input.usb");
+        assert_eq!(listed[0]["label"], "USB microphone");
     }
 
     #[test]

@@ -100,13 +100,7 @@ chmod +x Zalo-*.AppImage
 ./Zalo-*.AppImage
 ```
 
-> 📞 **Yêu cầu gọi thoại & video**: Cài đặt các gói âm thanh sau để sử dụng engine gọi native:
->
-> - **Debian / Ubuntu**: `sudo apt install python3 libopus0 pulseaudio-utils`
-> - **Arch Linux**: `sudo pacman -S python opus pulseaudio`
-> - **Fedora / RHEL**: `sudo dnf install python3 opus pulseaudio-utils`
-> - **openSUSE**: `sudo zypper install python3 libopus0 pulseaudio-utils`
-> - **Gentoo**: `sudo emerge --ask dev-lang/python media-libs/opus media-sound/pulseaudio-daemon`
+> 📞 **Yêu cầu gọi thoại & video**: Cần có máy chủ PulseAudio hoặc PipeWire-Pulse đang chạy.
 
 </details>
 
