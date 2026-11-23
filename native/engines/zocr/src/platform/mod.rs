@@ -19,17 +19,10 @@ pub struct Cpu {
 }
 impl Cpu {
     pub fn discover() -> Result<Self> {
-        // SAFETY: `cpu_set_t` is plain-old-data, so an all-zero bit pattern is a valid empty set.
-        let mut mask: libc::cpu_set_t = unsafe { std::mem::zeroed() };
-        ensure!(
-            // SAFETY: `mask` is the initialized stack affinity set and `size_of_val` passes exactly its size.
-            unsafe { libc::sched_getaffinity(0, std::mem::size_of_val(&mask), &raw mut mask) } == 0,
-            "sched_getaffinity: {}",
-            std::io::Error::last_os_error()
-        );
-        let allowed: Vec<_> = (0..libc::CPU_SETSIZE as usize)
-            // SAFETY: `i` is bounded by `CPU_SETSIZE` and `mask` is the initialized set above.
-            .filter(|&i| unsafe { libc::CPU_ISSET(i, &mask) })
+        let mask = rustix::thread::sched_getaffinity(None)
+            .map_err(|e| anyhow::anyhow!("sched_getaffinity: {e}"))?;
+        let allowed: Vec<_> = (0..rustix::thread::CpuSet::MAX_CPU)
+            .filter(|&i| mask.is_set(i))
             .collect();
         ensure!(!allowed.is_empty(), "empty CPU affinity mask");
         let mut cores = BTreeMap::new();
@@ -86,42 +79,28 @@ impl Cpu {
         };
         ensure!(!cpus.is_empty(), "empty requested affinity");
         let allowed: BTreeSet<_> = self.allowed.iter().copied().collect();
-        // SAFETY: `cpu_set_t` is plain-old-data, so all-zero is a valid empty set ready for `CPU_SET`.
-        let mut mask: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+        let mut mask = rustix::thread::CpuSet::new();
         for cpu in cpus {
             ensure!(
                 allowed.contains(&cpu),
                 "CPU {cpu} is outside process cpuset"
             );
-            // SAFETY: `cpu` is in `allowed`, which was collected from indices below `CPU_SETSIZE`, and `mask` is a live stack value.
-            unsafe {
-                libc::CPU_SET(cpu, &mut mask);
-            }
+            mask.set(cpu);
         }
-        ensure!(
-            // SAFETY: `mask` is the initialized stack affinity set and `size_of_val` passes exactly its size.
-            unsafe { libc::sched_setaffinity(0, std::mem::size_of_val(&mask), &raw const mask) }
-                == 0,
-            "sched_setaffinity: {}",
-            std::io::Error::last_os_error()
-        );
+        rustix::thread::sched_setaffinity(None, &mask)
+            .map_err(|e| anyhow::anyhow!("sched_setaffinity: {e}"))?;
         Ok(())
     }
 }
 pub fn lifecycle() -> Result<Arc<AtomicBool>> {
-    // SAFETY: `getppid` takes no arguments and returns a scalar.
-    let parent = unsafe { libc::getppid() };
+    let parent = rustix::process::getppid();
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         signal_hook::flag::register(signal, stop.clone())?;
     }
-    ensure!(
-        // SAFETY: `prctl` is called with scalar arguments only and its return is checked here.
-        unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM, 0, 0, 0) } == 0,
-        "PR_SET_PDEATHSIG failed"
-    );
-    // SAFETY: `getppid` takes no arguments and returns a scalar.
-    if unsafe { libc::getppid() } != parent || parent == 1 {
+    rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::TERM))
+        .map_err(|_| anyhow::anyhow!("PR_SET_PDEATHSIG failed"))?;
+    if rustix::process::getppid() != parent || parent.is_none_or(rustix::process::Pid::is_init) {
         stop.store(true, Ordering::Relaxed);
     }
     Ok(stop)
@@ -173,5 +152,25 @@ pub fn resources() -> Resources {
         cpu_micros: ((usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) as u64) * 1_000_000
             + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) as u64,
         peak_rss_kib: usage.ru_maxrss as i64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cpu_discover_reports_cpus() {
+        let cpu = Cpu::discover().expect("sched_getaffinity succeeds");
+        assert!(cpu.logical >= 1, "at least one CPU in the affinity mask");
+        assert!(!cpu.allowed.is_empty(), "affinity mask is not empty");
+        assert!(cpu.physical >= 1);
+    }
+
+    #[test]
+    fn resources_reports_non_negative_usage() {
+        let usage = resources();
+        assert!(usage.cpu_micros < u64::MAX);
+        assert!(usage.peak_rss_kib >= 0);
     }
 }

@@ -1,4 +1,3 @@
-#![allow(unsafe_code, reason = "libc access/statvfs FFI")]
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -30,45 +29,52 @@ pub struct FileInfo {
 }
 
 #[napi(js_name = "canRead")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of the argument"
+)]
 pub fn can_read(path: String) -> bool {
     if path.is_empty() {
         return false;
     }
-    if let Ok(c_path) = std::ffi::CString::new(path) {
-        // SAFETY: `c_path` is a NUL-terminated `CString` that lives across this
-        // call, which only reads it and retains no pointer.
-        unsafe { libc::access(c_path.as_ptr(), libc::R_OK) == 0 }
-    } else {
-        false
+    if path.as_bytes().contains(&0) {
+        return false;
     }
+    rustix::fs::access(std::path::Path::new(&path), rustix::fs::Access::READ_OK).is_ok()
 }
 
 #[napi(js_name = "canWrite")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of the argument"
+)]
 pub fn can_write(path: String) -> bool {
     if path.is_empty() {
         return false;
     }
-    if let Ok(c_path) = std::ffi::CString::new(path) {
-        // SAFETY: `c_path` is a NUL-terminated `CString` that lives across this
-        // call, which only reads it and retains no pointer.
-        unsafe { libc::access(c_path.as_ptr(), libc::W_OK) == 0 }
-    } else {
-        false
+    if path.as_bytes().contains(&0) {
+        return false;
     }
+    rustix::fs::access(std::path::Path::new(&path), rustix::fs::Access::WRITE_OK).is_ok()
 }
 
 #[napi(js_name = "canReadAndWrite")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of the argument"
+)]
 pub fn can_read_and_write(path: String) -> bool {
     if path.is_empty() {
         return false;
     }
-    if let Ok(c_path) = std::ffi::CString::new(path) {
-        // SAFETY: `c_path` is a NUL-terminated `CString` that lives across this
-        // call, which only reads it and retains no pointer.
-        unsafe { libc::access(c_path.as_ptr(), libc::R_OK | libc::W_OK) == 0 }
-    } else {
-        false
+    if path.as_bytes().contains(&0) {
+        return false;
     }
+    rustix::fs::access(
+        std::path::Path::new(&path),
+        rustix::fs::Access::READ_OK | rustix::fs::Access::WRITE_OK,
+    )
+    .is_ok()
 }
 
 fn is_real_fs(fstype: &str, dev: &str) -> bool {
@@ -167,33 +173,23 @@ pub async fn get_disk_info() -> Result<HashMap<String, DiskEntry>> {
         let fstype = parts[2];
 
         let dir = unescape_octal(raw_dir);
-        if seen.contains(&dir) || !is_real_fs(fstype, dev) {
+        if seen.contains(&dir) || !is_real_fs(fstype, dev) || dir.as_bytes().contains(&0) {
             continue;
         }
 
-        let Ok(c_dir) = std::ffi::CString::new(dir.as_bytes()) else {
+        let Ok(vfs) = rustix::fs::statvfs(std::path::Path::new(&dir)) else {
             continue;
         };
-
-        // SAFETY: `libc::statvfs` is plain-old-data; an all-zero byte pattern is
-        // a valid value of the struct and it is fully overwritten by the syscall.
-        let mut vfs: libc::statvfs = unsafe { std::mem::zeroed() };
-        // SAFETY: `c_dir` is a NUL-terminated `CString` alive across this call,
-        // and `&mut vfs` is a live, aligned, writable `statvfs`; fields are read
-        // only after the return value was checked to be 0.
-        if unsafe { libc::statvfs(c_dir.as_ptr(), &raw mut vfs) } != 0 {
-            continue;
-        }
 
         let frsize = if vfs.f_frsize != 0 {
-            vfs.f_frsize as u64
+            vfs.f_frsize
         } else {
-            vfs.f_bsize as u64
+            vfs.f_bsize
         };
 
-        let total = (vfs.f_blocks as u64).saturating_mul(frsize);
+        let total = vfs.f_blocks.saturating_mul(frsize);
         let used = if vfs.f_blocks >= vfs.f_bfree {
-            (vfs.f_blocks - vfs.f_bfree) as u64 * frsize
+            (vfs.f_blocks - vfs.f_bfree) * frsize
         } else {
             0
         };

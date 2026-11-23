@@ -48,22 +48,19 @@ impl Read for Stdin {
             if self.stop.load(Ordering::Relaxed) {
                 return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "shutdown"));
             }
-            let mut fd = libc::pollfd {
-                fd: libc::STDIN_FILENO,
-                events: libc::POLLIN,
-                revents: 0,
+            let stdin_fd = rustix::stdio::stdin();
+            let mut fds = [rustix::event::PollFd::new(
+                &stdin_fd,
+                rustix::event::PollFlags::IN,
+            )];
+            let timeout = rustix::time::Timespec {
+                tv_sec: 0,
+                tv_nsec: 50_000_000,
             };
-            // SAFETY: `fd` is a fully initialized stack `pollfd` and `nfds` is 1, matching the single element passed.
-            let ready = unsafe { libc::poll(&raw mut fd, 1, 50) };
-            if ready < 0 {
-                let e = io::Error::last_os_error();
-                if e.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(e);
-            }
-            if ready == 0 {
-                continue;
+            match rustix::event::poll(&mut fds, Some(&timeout)) {
+                Ok(0) | Err(rustix::io::Errno::INTR) => continue,
+                Ok(_) => {}
+                Err(e) => return Err(io::Error::from_raw_os_error(e.raw_os_error())),
             }
             let mut stdin = io::stdin().lock();
             return stdin.read(buffer);

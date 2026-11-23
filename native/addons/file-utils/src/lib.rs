@@ -1,10 +1,8 @@
 #![cfg(target_os = "linux")]
-#![allow(unsafe_code, reason = "napi cast and libc statvfs FFI")]
+#![allow(unsafe_code, reason = "napi cast")]
 
 use napi::{Error, JsUnknown, Result, Status, ValueType};
 use napi_derive::napi;
-use std::ffi::CString;
-use std::mem;
 
 #[napi(object)]
 pub struct DiskUsage {
@@ -40,27 +38,19 @@ pub fn get_disk_usage(path: Option<JsUnknown>) -> Result<DiskUsage> {
     let js_string = unsafe { path_arg.cast::<napi::JsString>() };
     let path_str = js_string.into_utf8()?.into_owned()?;
 
-    let c_path = CString::new(path_str).map_err(|_| {
-        Error::new(
+    if path_str.as_bytes().contains(&0) {
+        return Err(Error::new(
             Status::InvalidArg,
             "DISKUSAGE_INVALID_ARG_TYPE: Path contains null byte".to_string(),
-        )
-    })?;
-
-    // SAFETY: `libc::statvfs` is plain-old-data; an all-zero byte pattern is a
-    // valid value of the struct, and it is fully overwritten by the syscall.
-    let mut stat: libc::statvfs = unsafe { mem::zeroed() };
-    // SAFETY: `c_path` is a NUL-terminated `CString` that outlives this call, and
-    // `&mut stat` points at a live, aligned, writable `statvfs`; the struct is
-    // only read after `res` was checked to be 0.
-    let res = unsafe { libc::statvfs(c_path.as_ptr(), &raw mut stat) };
-
-    if res != 0 {
-        return Err(Error::new(
-            Status::GenericFailure,
-            "DISKUSAGE_RUNTIME_ERROR: Get diskusage failed".to_string(),
         ));
     }
+
+    let stat = rustix::fs::statvfs(std::path::Path::new(&path_str)).map_err(|_| {
+        Error::new(
+            Status::GenericFailure,
+            "DISKUSAGE_RUNTIME_ERROR: Get diskusage failed".to_string(),
+        )
+    })?;
 
     let factor = if stat.f_frsize > 0 {
         stat.f_frsize

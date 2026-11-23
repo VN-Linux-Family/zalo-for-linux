@@ -10,12 +10,9 @@ use std::{
     fs,
     io::{self, BufReader, Read},
     net::Shutdown,
-    os::{
-        fd::AsRawFd,
-        unix::{
-            fs::{MetadataExt, PermissionsExt},
-            net::{UnixListener, UnixStream},
-        },
+    os::unix::{
+        fs::{MetadataExt, PermissionsExt},
+        net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
     sync::{
@@ -44,19 +41,16 @@ impl SocketServer {
         let mut random = [0u8; 8];
         let mut read = 0;
         while read < random.len() {
-            // SAFETY: the pointer targets the unread tail of the stack array `random` and the length matches it; the loop handles short reads and EINTR.
-            let n = unsafe {
-                libc::getrandom(random[read..].as_mut_ptr().cast(), random.len() - read, 0)
+            let n = match rustix::rand::getrandom(
+                &mut random[read..],
+                rustix::rand::GetRandomFlags::empty(),
+            ) {
+                Ok(n) => n,
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(e) => return Err(io::Error::from_raw_os_error(e.raw_os_error()).into()),
             };
-            if n < 0 {
-                let e = io::Error::last_os_error();
-                if e.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(e.into());
-            }
             ensure!(n > 0, "getrandom returned no bytes");
-            read += n as usize;
+            read += n;
         }
         let path = directory.join(format!("zocr-{}.sock", hex::encode(random)));
         let listener = UnixListener::bind(&path).context("unable to bind Unix socket")?;
@@ -148,23 +142,9 @@ fn serve(
 ) -> Result<()> {
     stream.set_read_timeout(Some(cfg.frame_timeout))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-    // SAFETY: `ucred` is plain-old-data, so all-zero is a valid value before the kernel overwrites it.
-    let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
-    let mut size = std::mem::size_of_val(&credentials) as libc::socklen_t;
-    ensure!(
-        // SAFETY: the fd belongs to a live `UnixStream`; `credentials`/`size` are stack locals with `size` set to the struct's size, and a non-zero return is rejected here.
-        unsafe {
-            libc::getsockopt(
-                stream.as_raw_fd(),
-                libc::SOL_SOCKET,
-                libc::SO_PEERCRED,
-                (&raw mut credentials).cast(),
-                &raw mut size,
-            )
-        } == 0,
-        "unable to read Unix socket peer credentials"
-    );
-    let pid = credentials.pid as u32;
+    let peer = rustix::net::sockopt::socket_peercred(&stream)
+        .context("unable to read Unix socket peer credentials")?;
+    let pid = peer.pid.as_raw_pid() as u32;
     let accepted = match handshake::verify(&mut stream, token) {
         Ok(accepted) => accepted,
         Err(error) => {

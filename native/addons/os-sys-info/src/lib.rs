@@ -1,5 +1,3 @@
-#![allow(unsafe_code, reason = "glibc uname/sysconf FFI")]
-
 //! OS and process information for Linux on `x86_64` and arm64.
 //!
 //! The public fields follow `os-sys-info-technical.md`. Linux collection uses
@@ -49,7 +47,7 @@ pub fn getOsArchitecture() -> &'static str {
 
 /// Returns the machine label (`x64` or `arm64`) reported by Linux.
 pub fn get_os_machine() -> Option<String> {
-    let machine = uname_machine().ok()?;
+    let machine = uname_machine();
     match machine.as_str() {
         "x86_64" => Some("x64".to_owned()),
         "aarch64" => Some("arm64".to_owned()),
@@ -100,17 +98,14 @@ fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
         op: "parseProcessStat".to_owned(),
         code: -1,
     })?;
-    // SAFETY: `sysconf` only takes a scalar constant (`_SC_CLK_TCK == 2` on
-    // glibc), dereferences no pointer, writes no user memory and is thread-safe.
-    let ticks_per_second = unsafe { sysconf(2) };
-    if ticks_per_second <= 0 {
+    let hz = rustix::param::clock_ticks_per_second();
+    if hz == 0 {
         return Err(ProcessError {
             pid,
             op: "getClockTicks".to_owned(),
-            code: io::Error::last_os_error().raw_os_error().unwrap_or(-1),
+            code: -1,
         });
     }
-    let hz = ticks_per_second as u64;
     let kernel = ticks_to_100ns(fields.stime, hz);
     let user = ticks_to_100ns(fields.utime, hz);
     let boot_time = get_boot_time().map_err(|e| process_error(pid, "readBootTime", &e))?;
@@ -213,36 +208,9 @@ fn get_boot_time() -> io::Result<u64> {
     }
 }
 
-#[repr(C)]
-struct UtsName {
-    sysname: [i8; 65],
-    nodename: [i8; 65],
-    release: [i8; 65],
-    version: [i8; 65],
-    machine: [i8; 65],
-    domainname: [i8; 65],
-}
-
-fn uname_machine() -> io::Result<String> {
-    let mut name = std::mem::MaybeUninit::<UtsName>::zeroed();
-    // SAFETY: `name` is a zeroed `MaybeUninit<UtsName>` on the stack, so
-    // `as_mut_ptr()` is valid and aligned; `UtsName` is `#[repr(C)]` with the
-    // glibc `struct utsname` layout (six `[c_char; 65]` fields) and non-supported
-    // targets are rejected by the `compile_error!` below.
-    let rc = unsafe { uname(name.as_mut_ptr()) };
-    if rc != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: `uname` returned 0 just above (non-zero returns early), so the
-    // kernel filled every byte of the `UtsName` out-parameter.
-    let name = unsafe { name.assume_init() };
-    let bytes: Vec<u8> = name
-        .machine
-        .iter()
-        .take_while(|&&c| c != 0)
-        .map(|&c| c as u8)
-        .collect();
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+fn uname_machine() -> String {
+    let uname = rustix::system::uname();
+    String::from_utf8_lossy(uname.machine().to_bytes()).into_owned()
 }
 
 #[cfg(not(all(
@@ -250,11 +218,6 @@ fn uname_machine() -> io::Result<String> {
     any(target_arch = "x86_64", target_arch = "aarch64")
 )))]
 compile_error!("os-sys-info supports only Linux x86_64 and Linux arm64");
-
-extern "C" {
-    fn uname(name: *mut UtsName) -> i32;
-    fn sysconf(name: i32) -> isize;
-}
 
 // Node.js bindings. These wrappers keep the Rust API above available while
 // exposing the names and object shapes used by the native Node packages.

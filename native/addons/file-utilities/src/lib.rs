@@ -1,5 +1,4 @@
 #![cfg(target_os = "linux")]
-#![allow(unsafe_code, reason = "libc statfs FFI")]
 
 use globset::Glob;
 use napi::bindgen_prelude::*;
@@ -356,19 +355,13 @@ pub async fn detect_hardlinks_async(path1: String, path2: String) -> Result<bool
 }
 
 fn filesystem_name(path: &Path) -> Result<String> {
-    let bytes = path.as_os_str().as_bytes();
-    let c_path = std::ffi::CString::new(bytes)
-        .map_err(|_| Error::from_reason("path contains a NUL byte"))?;
-    let mut info = std::mem::MaybeUninit::<libc::statfs>::uninit();
-    // SAFETY: `c_path` is a NUL-terminated `CString` alive across this call, and
-    // `info.as_mut_ptr()` is a valid, properly aligned out-pointer for the
-    // `[statfs]` libc expects; the contents are read only after a 0 return.
-    if unsafe { libc::statfs(c_path.as_ptr(), info.as_mut_ptr()) } != 0 {
-        return Err(napi_err("statfs failed", io::Error::last_os_error()));
-    }
-    // SAFETY: `statfs` returned 0 just above (non-zero returns early), so the
-    // kernel/libc has initialised the whole `libc::statfs` value.
-    let magic = unsafe { info.assume_init() }.f_type as u64;
+    let stat = rustix::fs::statfs(path).map_err(|e| {
+        napi_err(
+            "statfs failed",
+            io::Error::from_raw_os_error(e.raw_os_error()),
+        )
+    })?;
+    let magic = stat.f_type as u64;
     let name = match magic {
         0xEF53 => "ext2/ext3/ext4",
         0x9123_683E => "btrfs",
@@ -502,4 +495,16 @@ pub fn cancel_job(job_id: f64) -> bool {
 #[napi(js_name = "custom_gc")]
 pub fn custom_gc() -> u32 {
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filesystem_name_is_known() {
+        let name = filesystem_name(Path::new("/")).expect("statfs succeeds on /");
+        assert!(name.len() >= 2, "filesystem name must not be empty");
+        assert!(!name.starts_with("unknown"), "unexpected fs magic: {name}");
+    }
 }

@@ -41,10 +41,7 @@ fn run() -> Result<()> {
         return Ok(());
     }
     // Restrict socket permissions from creation, including the bind/chmod interval.
-    // SAFETY: called before any socket or thread is created; `umask` only changes a process-global scalar and takes no pointers.
-    unsafe {
-        libc::umask(0o077);
-    }
+    rustix::process::umask(rustix::fs::Mode::from_bits_truncate(0o077));
     let cpu = platform::Cpu::discover()?;
     let cfg = config::Config::from_env(cpu.physical)?;
     platform::Cpu::gate(cfg.skip_cpu_gate)?;
