@@ -482,9 +482,10 @@ impl EngineCore {
                 } else if !group_share
                     && frame.key
                     && matches!(&result, Ok(packets) if *packets > 0)
-                    && self.call.as_ref().is_some_and(|call| {
-                        call.phase == CallPhase::InCall && !call.sharing_screen
-                    })
+                    && self
+                        .call
+                        .as_ref()
+                        .is_some_and(|call| call.phase == CallPhase::InCall && !call.sharing_screen)
                 {
                     // Do not interrupt the camera on encoder readiness alone.
                     // Switch only after at least one screen frame was sent.

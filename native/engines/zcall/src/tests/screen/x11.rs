@@ -188,11 +188,9 @@ fn captures_root_and_lists_windows_when_an_x_server_is_available() {
         .expect("stable X11 root geometry");
     assert!(root_frame.width >= 2 && root_frame.height >= 2);
     let listed = list_windows().expect("enumerate X11 windows");
-    assert!(
-        listed
-            .iter()
-            .all(|(id, title)| id.starts_with("window:") && !title.is_empty())
-    );
+    assert!(listed
+        .iter()
+        .all(|(id, title)| id.starts_with("window:") && !title.is_empty()));
 }
 
 #[test]

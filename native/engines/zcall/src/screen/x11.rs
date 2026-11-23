@@ -4,9 +4,9 @@ use std::{
     fs::File,
     os::unix::fs::FileExt,
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::SyncSender,
+        Arc,
     },
     thread,
     time::{Duration, Instant},
