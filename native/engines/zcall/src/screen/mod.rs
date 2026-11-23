@@ -7,9 +7,9 @@ use openh264::encoder::{
     BitRate, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, Profile, UsageType,
 };
 use openh264::formats::{BgraSliceU8, YUVBuffer};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -489,7 +489,7 @@ fn encode_frames<F: RawFrameSource>(
 }
 
 fn resize_bgra(
-    source: Vec<u8>,
+    mut source: Vec<u8>,
     width: u32,
     height: u32,
     max_short: u32,
@@ -507,7 +507,6 @@ fn resize_bgra(
         let scale = f64::from(max_short) / f64::from(short_side);
         let target_width = (((f64::from(even_width) * scale).round() as u32).max(2)) & !1;
         let target_height = (((f64::from(even_height) * scale).round() as u32).max(2)) & !1;
-        let mut resized = vec![0u8; target_width as usize * target_height as usize * 4];
         for y in 0..target_height {
             let source_y =
                 (u64::from(y) * u64::from(even_height) / u64::from(target_height)) as usize;
@@ -516,11 +515,11 @@ fn resize_bgra(
                     (u64::from(x) * u64::from(even_width) / u64::from(target_width)) as usize;
                 let source_offset = (source_y * width as usize + source_x) * 4;
                 let target_offset = (y as usize * target_width as usize + x as usize) * 4;
-                resized[target_offset..target_offset + 4]
-                    .copy_from_slice(&source[source_offset..source_offset + 4]);
+                source.copy_within(source_offset..source_offset + 4, target_offset);
             }
         }
-        return Ok((resized, target_width, target_height));
+        source.truncate(target_width as usize * target_height as usize * 4);
+        return Ok((source, target_width, target_height));
     }
 
     if even_width == width && even_height == height {
@@ -528,12 +527,13 @@ fn resize_bgra(
     }
 
     let row_bytes = even_width as usize * 4;
-    let mut cropped = Vec::with_capacity(row_bytes * even_height as usize);
     for y in 0..even_height as usize {
         let start = y * width as usize * 4;
-        cropped.extend_from_slice(&source[start..start + row_bytes]);
+        let target = y * row_bytes;
+        source.copy_within(start..start + row_bytes, target);
     }
-    Ok((cropped, even_width, even_height))
+    source.truncate(row_bytes * even_height as usize);
+    Ok((source, even_width, even_height))
 }
 
 #[cfg(test)]

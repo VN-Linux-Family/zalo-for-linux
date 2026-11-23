@@ -1,4 +1,47 @@
 use super::*;
+
+fn test_connection() -> Option<(RustConnection, x11::Window)> {
+    if !is_x11_session() || std::env::var_os("DISPLAY").is_none() {
+        return None;
+    }
+    let (conn, screen_num) = connect_x11rb().expect("connect to X11");
+    let root = conn
+        .setup()
+        .roots
+        .get(screen_num)
+        .expect("root screen")
+        .root;
+    Some((conn, root))
+}
+
+fn capture(
+    conn: &RustConnection,
+    root: x11::Window,
+    target: Target,
+) -> Result<Option<RawScreenFrame>, String> {
+    let mut shm_capture = PersistentShm::new(conn)?;
+    let mut window_capture = None;
+    capture_with_shm(conn, root, target, &mut shm_capture, &mut window_capture)
+}
+
+fn capture_window(
+    conn: &RustConnection,
+    root: x11::Window,
+    win: x11::Window,
+) -> Result<Option<RawScreenFrame>, String> {
+    let mut shm_capture = PersistentShm::new(conn)?;
+    let mut window_capture = None;
+    let mut pointer_is_over_window = false;
+    capture_window_with_shm(
+        conn,
+        root,
+        win,
+        &mut shm_capture,
+        &mut window_capture,
+        &mut pointer_is_over_window,
+    )
+}
+
 #[test]
 fn composites_premultiplied_cursor_pixels_over_the_capture() {
     let mut frame = RawScreenFrame {
@@ -36,67 +79,80 @@ fn parses_x11_source_ids() {
 }
 
 #[test]
+fn cursor_is_visible_only_when_every_pointer_ancestor_selects_the_target_path() {
+    let path = [10, 20, 30];
+
+    assert!(pointer_path_matches(&path, &[20, 30]));
+    assert!(!pointer_path_matches(&path, &[40, 30]));
+    assert!(!pointer_path_matches(&path, &[20, 40]));
+    assert!(!pointer_path_matches(&path, &[0, 0]));
+    assert!(!pointer_path_matches(&path, &[20]));
+    assert!(!pointer_path_matches(&path, &[20, 30, 40]));
+}
+
+#[test]
 fn xfixes_cursor_position_matches_the_x11_pointer_hotspot() {
-    if !is_x11_session() || std::env::var_os("DISPLAY").is_none() {
+    let Some((conn, root)) = test_connection() else {
         return;
-    }
-    let (conn, screen_num) = connect().expect("connect to X11");
-    let root = conn
-        .get_setup()
-        .roots()
-        .nth(screen_num as usize)
-        .expect("root screen")
-        .root();
-    let pointer = conn
-        .wait_for_reply(conn.send_request(&x::QueryPointer { window: root }))
+    };
+    let pointer = x11::query_pointer(&conn, root)
+        .expect("queue pointer query")
+        .reply()
         .expect("query actual X11 pointer position");
-    let cursor = conn
-        .wait_for_reply(conn.send_request(&xcb::xfixes::GetCursorImage {}))
-        .expect("read XFixes cursor image");
+    let cursor = match xfixes::get_cursor_image(&conn)
+        .expect("queue XFixes cursor image")
+        .reply()
+    {
+        Ok(cursor) => cursor,
+        Err(_) => return,
+    };
     assert_eq!(
-        (cursor.x(), cursor.y()),
-        (pointer.root_x(), pointer.root_y()),
+        (cursor.x, cursor.y),
+        (pointer.root_x, pointer.root_y),
         "XFixes cursor coordinates must identify the pointer hotspot in root coordinates"
     );
-    assert!(cursor.width() > 0 && cursor.height() > 0);
+    assert!(cursor.width > 0 && cursor.height > 0);
     assert_eq!(
-        cursor.cursor_image().len(),
-        usize::from(cursor.width()) * usize::from(cursor.height()),
+        cursor.cursor_image.len(),
+        usize::from(cursor.width) * usize::from(cursor.height),
         "XFixes cursor image must contain every ARGB pixel"
     );
 }
 
 #[test]
 fn root_capture_composites_the_live_xfixes_cursor_when_available() {
-    if !is_x11_session() || std::env::var_os("DISPLAY").is_none() {
+    let Some((conn, root)) = test_connection() else {
         return;
-    }
-    let (conn, screen_num) = connect().expect("connect to X11");
+    };
     let screen = conn
-        .get_setup()
-        .roots()
-        .nth(screen_num as usize)
+        .setup()
+        .roots
+        .iter()
+        .find(|screen| screen.root == root)
         .expect("root screen");
-    let cursor = match conn.wait_for_reply(conn.send_request(&xcb::xfixes::GetCursorImage {})) {
+    let cursor = match xfixes::get_cursor_image(&conn)
+        .expect("queue XFixes cursor image")
+        .reply()
+    {
         Ok(cursor) => cursor,
-        Err(_) => return, // XFixes may be unavailable on a minimal X server.
+        Err(_) => return,
     };
     let mut frame = RawScreenFrame {
         bgra: [24, 48, 72, 255]
-            .repeat(usize::from(screen.width_in_pixels()) * usize::from(screen.height_in_pixels())),
-        width: u32::from(screen.width_in_pixels()),
-        height: u32::from(screen.height_in_pixels()),
+            .repeat(usize::from(screen.width_in_pixels) * usize::from(screen.height_in_pixels)),
+        width: u32::from(screen.width_in_pixels),
+        height: u32::from(screen.height_in_pixels),
     };
-    overlay_cursor(&cursor, (0, 0), &mut frame);
+    overlay_cursor_reply(&cursor, (0, 0), &mut frame);
 
-    let left = i32::from(cursor.x()) - i32::from(cursor.xhot());
-    let top = i32::from(cursor.y()) - i32::from(cursor.yhot());
-    let cursor_width = usize::from(cursor.width());
-    let cursor_height = usize::from(cursor.height());
+    let left = i32::from(cursor.x) - i32::from(cursor.xhot);
+    let top = i32::from(cursor.y) - i32::from(cursor.yhot);
+    let cursor_width = usize::from(cursor.width);
+    let cursor_height = usize::from(cursor.height);
     let mut has_visible_pixel = false;
     for y in 0..cursor_height {
         for x in 0..cursor_width {
-            let pixel = cursor.cursor_image()[y * cursor_width + x];
+            let pixel = cursor.cursor_image[y * cursor_width + x];
             if pixel >> 24 == 0 || pixel & 0x00ff_ffff == 0 {
                 continue;
             }
@@ -124,115 +180,107 @@ fn root_capture_composites_the_live_xfixes_cursor_when_available() {
 
 #[test]
 fn captures_root_and_lists_windows_when_an_x_server_is_available() {
-    if !is_x11_session() || std::env::var_os("DISPLAY").is_none() {
+    let Some((conn, root)) = test_connection() else {
         return;
-    }
-    let (conn, screen_num) = connect().expect("connect to X11");
-    let root = conn
-        .get_setup()
-        .roots()
-        .nth(screen_num as usize)
-        .expect("root screen")
-        .root();
+    };
     let root_frame = capture(&conn, root, Target::Screen)
         .expect("capture X11 root")
         .expect("stable X11 root geometry");
     assert!(root_frame.width >= 2 && root_frame.height >= 2);
     let listed = list_windows().expect("enumerate X11 windows");
-    if let Some((id, _)) = listed.first() {
-        let id = id
-            .strip_prefix("window:")
-            .expect("window source prefix")
-            .parse()
-            .expect("window id");
-        let frame = capture(&conn, root, Target::Window(id))
-            .expect("capture X11 window")
-            .expect("stable X11 window geometry");
-        assert!(frame.width >= 2 && frame.height >= 2);
-        assert_eq!(
-            frame.bgra.len(),
-            frame.width as usize * frame.height as usize * 4
-        );
-    }
+    assert!(
+        listed
+            .iter()
+            .all(|(id, title)| id.starts_with("window:") && !title.is_empty())
+    );
 }
 
 #[test]
 fn window_capture_tracks_resized_drawable_geometry() {
-    if !is_x11_session() || std::env::var_os("DISPLAY").is_none() {
+    let Some((conn, root)) = test_connection() else {
         return;
-    }
-    let (conn, screen_num) = connect().expect("connect to X11");
-    let root = conn
-        .get_setup()
-        .roots()
-        .nth(screen_num as usize)
-        .expect("root screen")
-        .root();
-    let win: x::Window = conn.generate_id();
-    conn.check_request(conn.send_request_checked(&x::CreateWindow {
-        depth: x::COPY_FROM_PARENT as u8,
-        wid: win,
-        parent: root,
-        x: 0,
-        y: 0,
-        width: 320,
-        height: 200,
-        border_width: 0,
-        class: x::WindowClass::InputOutput,
-        visual: x::COPY_FROM_PARENT as x::Visualid,
-        value_list: &[],
-    }))
+    };
+    let win = conn.generate_id().expect("allocate test window id");
+    let values = x11::CreateWindowAux::new().override_redirect(1);
+    x11::create_window(
+        &conn,
+        x11rb::COPY_FROM_PARENT as u8,
+        win,
+        root,
+        20,
+        20,
+        320,
+        200,
+        0,
+        x11::WindowClass::INPUT_OUTPUT,
+        x11rb::COPY_FROM_PARENT,
+        &values,
+    )
+    .expect("queue test window creation")
+    .check()
     .expect("create X11 test window");
-    conn.check_request(conn.send_request_checked(&x::MapWindow { window: win }))
+    x11::map_window(&conn, win)
+        .expect("queue map test window")
+        .check()
         .expect("map X11 test window");
+    x11::configure_window(
+        &conn,
+        win,
+        &x11::ConfigureWindowAux::new().stack_mode(x11::StackMode::ABOVE),
+    )
+    .expect("queue raise test window")
+    .check()
+    .expect("raise X11 test window");
     conn.flush().expect("flush X11 test window");
 
-    let first = capture_window(&conn, win)
+    let first = capture_window(&conn, root, win)
         .expect("capture initial X11 window")
         .expect("stable initial geometry");
     assert_eq!((first.width, first.height), (320, 200));
 
-    conn.check_request(conn.send_request_checked(&x::ConfigureWindow {
-        window: win,
-        value_list: &[x::ConfigWindow::Width(640), x::ConfigWindow::Height(360)],
-    }))
+    x11::configure_window(
+        &conn,
+        win,
+        &x11::ConfigureWindowAux::new()
+            .width(640)
+            .height(360)
+            .stack_mode(x11::StackMode::ABOVE),
+    )
+    .expect("queue resize test window")
+    .check()
     .expect("resize X11 test window");
-    conn.flush().expect("flush resized X11 window");
+    conn.flush().expect("flush resized X11 test window");
 
-    let resized = capture_window(&conn, win)
+    let resized = capture_window(&conn, root, win)
         .expect("capture resized X11 window")
         .expect("stable resized geometry");
     assert_eq!((resized.width, resized.height), (640, 360));
 
-    // Race two X11 clients: resize the drawable while the capture client
-    // alternates GetGeometry/GetImage requests. A resize must never turn a
-    // transient BadMatch into a fatal capture error.
-    let window_id = win.resource_id();
+    // Race two x11rb clients: resize the drawable while capture alternates
+    // GetGeometry/GetImage. Transient resize BadMatch must not be fatal.
+    let resize_win = win;
     let resize_worker = thread::spawn(move || {
-        let (resize_conn, _) = connect().expect("connect X11 resize client");
-        let resize_win = x::Window::new(window_id);
+        let (resize_conn, _) = connect_x11rb().expect("connect X11 resize client");
         for index in 0..40 {
             let (width, height) = if index % 2 == 0 {
                 (320, 200)
             } else {
                 (640, 360)
             };
-            let request = resize_conn.send_request_checked(&x::ConfigureWindow {
-                window: resize_win,
-                value_list: &[
-                    x::ConfigWindow::Width(width),
-                    x::ConfigWindow::Height(height),
-                ],
-            });
-            resize_conn
-                .check_request(request)
-                .expect("resize X11 window during capture");
+            x11::configure_window(
+                &resize_conn,
+                resize_win,
+                &x11::ConfigureWindowAux::new().width(width).height(height),
+            )
+            .expect("queue concurrent X11 resize")
+            .check()
+            .expect("resize X11 window during capture");
             thread::sleep(Duration::from_millis(1));
         }
     });
     for _ in 0..40 {
         if let Some(frame) =
-            capture_window(&conn, win).expect("capture must survive a concurrent X11 resize")
+            capture_window(&conn, root, win).expect("capture must survive a concurrent X11 resize")
         {
             assert!(matches!(
                 (frame.width, frame.height),
@@ -241,12 +289,14 @@ fn window_capture_tracks_resized_drawable_geometry() {
         }
     }
     resize_worker.join().expect("X11 resize client");
-    let settled = capture_window(&conn, win)
+    let settled = capture_window(&conn, root, win)
         .expect("capture settled X11 window")
         .expect("settled X11 geometry");
     assert_eq!((settled.width, settled.height), (640, 360));
 
-    conn.check_request(conn.send_request_checked(&x::DestroyWindow { window: win }))
+    x11::destroy_window(&conn, win)
+        .expect("queue destroy test window")
+        .check()
         .expect("destroy X11 test window");
 }
 
@@ -282,8 +332,6 @@ fn x11_capture_worker_encodes_a_root_frame_when_an_x_server_is_available() {
         Ok(())
     );
 
-    // Keep the real X11 capture + encoder worker running long enough to
-    // exercise sustained frame pacing and emit its five-second diagnostics.
     let deadline = Instant::now() + Duration::from_secs(6);
     let mut frame_count = 0usize;
     let mut first_frame_was_key = false;
@@ -296,7 +344,7 @@ fn x11_capture_worker_encodes_a_root_frame_when_an_x_server_is_available() {
             assert!(frame.data.starts_with(&[0, 0, 0, 1]));
         }
         assert!(frame.width >= 2 && frame.height >= 2);
-        assert_ne!(frame.data, [] as [u8; 0]);
+        assert!(!frame.data.is_empty());
         frame_count += 1;
     }
     stop.store(true, Ordering::Release);

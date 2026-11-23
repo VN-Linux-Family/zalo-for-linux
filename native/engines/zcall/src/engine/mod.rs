@@ -290,9 +290,9 @@ impl EngineCore {
                     if stopping {
                         // A ready notification can race with the user's Stop
                         // action. Never signal a share after cancellation.
-                    } else if active_call || active_group {
+                    } else if active_group {
                         self.activate_screen_share();
-                    } else {
+                    } else if !active_call {
                         self.stop_screen_capture();
                     }
                 }
@@ -460,19 +460,36 @@ impl EngineCore {
                 };
                 if !self.screen_first_frame_reported {
                     match &result {
-                        Ok(packets) => self.log(&format!(
-                            "first screen H.264 frame transport: key={}, size={} bytes, {}x{}, packets={}, group_share={group_share}",
-                            frame.key, frame.data.len(), frame.width, frame.height, packets
-                        )),
-                        Err(error) => self.log(&format!(
-                            "first screen H.264 frame transport failed: key={}, size={} bytes, group_share={group_share}: {error}",
-                            frame.key, frame.data.len()
-                        )),
+                        Ok(packets) if *packets > 0 => {
+                            self.log(&format!(
+                                "first screen H.264 frame transport: key={}, size={} bytes, {}x{}, packets={}, group_share={group_share}",
+                                frame.key, frame.data.len(), frame.width, frame.height, packets
+                            ));
+                            self.screen_first_frame_reported = true;
+                        }
+                        Err(error) => {
+                            self.log(&format!(
+                                "first screen H.264 frame transport failed: key={}, size={} bytes, group_share={group_share}: {error}",
+                                frame.key, frame.data.len()
+                            ));
+                            self.screen_first_frame_reported = true;
+                        }
+                        Ok(_) => {}
                     }
-                    self.screen_first_frame_reported = true;
                 }
-                if let Err(error) = result {
+                if let Err(error) = &result {
                     self.log(&format!("screen H.264 send failed: {error}"));
+                } else if !group_share
+                    && frame.key
+                    && matches!(&result, Ok(packets) if *packets > 0)
+                    && self.call.as_ref().is_some_and(|call| {
+                        call.phase == CallPhase::InCall && !call.sharing_screen
+                    })
+                {
+                    // Do not interrupt the camera on encoder readiness alone.
+                    // Switch only after at least one screen frame was sent.
+                    self.log("first screen frame sent; activating 1:1 screen share");
+                    self.activate_screen_share();
                 }
             }
             if let Some(ui) = self.ui.as_ref() {

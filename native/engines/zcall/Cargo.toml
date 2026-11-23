@@ -27,7 +27,8 @@ futures-util = { version = "0.3", features = ["io"] }
 pulseaudio = "0.3.2"
 
 v4l = "0.14"
-xcb = { version = "1.7.1", features = ["dl", "shm", "xfixes"] }
+
+x11rb = { version = "0.14.0", default-features = false, features = ["composite", "shm", "xfixes"] }
 
 [build-dependencies]
 cc = "1.0"

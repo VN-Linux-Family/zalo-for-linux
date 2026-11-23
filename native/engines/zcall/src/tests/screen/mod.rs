@@ -18,6 +18,23 @@ fn x11_latest_frame_queue_replaces_stale_frames() {
 }
 
 #[test]
+fn latest_frame_queue_preserves_frame_allocation_when_transferring_ownership() {
+    let queue = Arc::new(LatestFrameQueue::default());
+    let mut pixels = Vec::with_capacity(4096);
+    pixels.resize(16, 1);
+    assert!(!queue.push(RawScreenFrame {
+        bgra: pixels,
+        width: 2,
+        height: 2,
+    }));
+    let frame = queue
+        .recv_timeout(Duration::from_millis(1))
+        .expect("queued frame remains available");
+    assert_eq!(frame.bgra, vec![1; 16]);
+    assert!(frame.bgra.capacity() >= 4096);
+}
+
+#[test]
 fn encodes_odd_sized_window_frames_after_cropping_to_even_dimensions() {
     let (raw_tx, raw_rx) = sync_channel(2);
     let (encoded_tx, encoded_rx) = sync_channel(2);
@@ -260,6 +277,48 @@ fn group_share_resolution_limits_short_side_and_preserves_aspect_ratio() {
     assert_eq!(resized.len(), 1280 * 720 * 4);
     assert_eq!(resized[0], 7);
     assert_eq!(resized[resized.len() - 1], 7);
+}
+
+#[test]
+fn resize_bgra_scales_in_place_and_preserves_nearest_neighbor_pixels() {
+    let source = (0..16u8)
+        .flat_map(|pixel| [pixel, 0, 0, 255])
+        .collect::<Vec<_>>();
+    let capacity = source.capacity();
+    let (resized, width, height) = resize_bgra(source, 4, 4, 2).unwrap();
+
+    assert_eq!((width, height), (2, 2));
+    assert_eq!(resized.capacity(), capacity);
+    assert_eq!(
+        resized
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[0])
+            .collect::<Vec<_>>(),
+        [0, 2, 8, 10]
+    );
+}
+
+#[test]
+fn resize_bgra_crops_odd_dimensions_in_place() {
+    let source = (0..9u8)
+        .flat_map(|pixel| [pixel, 0, 0, 255])
+        .collect::<Vec<_>>();
+    let capacity = source.capacity();
+    let (cropped, width, height) = resize_bgra(source, 3, 3, 0).unwrap();
+
+    assert_eq!((width, height), (2, 2));
+    assert_eq!(cropped.capacity(), capacity);
+    assert_eq!(
+        cropped
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[0])
+            .collect::<Vec<_>>(),
+        [0, 1, 3, 4]
+    );
 }
 
 #[test]
