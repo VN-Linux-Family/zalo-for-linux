@@ -6,11 +6,12 @@ pub const TWCC_EXT_ID: u8 = 5;
 pub const AUDIO_LEVEL_EXT_ID: u8 = 2;
 pub const ABS_SEND_TIME_EXT_ID: u8 = 3;
 pub const CAPTURE_NTP_EXT_ID: u8 = 13;
-pub const NTP_UNIX_OFFSET: u64 = 2208988800;
+pub const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
 
 /// Read the RFC 6464 one-byte audio-level extension (id 2) from an RTP packet.
 /// The extension is part of the authenticated RTP header and remains unencrypted
 /// by the SRTP profile used by Zalo.
+#[must_use]
 pub fn parse_rfc6464_audio_level(rtp: &[u8]) -> Option<u8> {
     if rtp.len() < 16 || rtp[0] >> 6 != 2 || rtp[0] & 0x10 == 0 {
         return None;
@@ -50,6 +51,7 @@ pub struct AudioRtpHeader {
     pub tw_seq: Option<u16>,
 }
 
+#[must_use]
 pub fn build_audio_rtp_header(
     seq: u16,
     ts: u32,
@@ -73,6 +75,7 @@ pub fn build_audio_rtp_header(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[must_use]
 pub fn build_group_audio_rtp_header(
     seq: u16,
     ts: u32,
@@ -101,6 +104,7 @@ pub fn build_group_audio_rtp_header(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[must_use]
 pub fn build_group_video_rtp_header(
     seq: u16,
     ts: u32,
@@ -137,7 +141,7 @@ pub fn build_group_video_rtp_header(
     let mut o = 16;
     h[o] = (ABS_SEND_TIME_EXT_ID << 4) | 2;
     o += 1;
-    let abs = ((send_ms as f64 * 262.144) as u64) % 0x1000000;
+    let abs = ((send_ms as f64 * 262.144) as u64) % 0x0100_0000;
     h[o] = ((abs >> 16) & 0xff) as u8;
     h[o + 1] = ((abs >> 8) & 0xff) as u8;
     h[o + 2] = (abs & 0xff) as u8;
@@ -167,7 +171,7 @@ fn write_capture_ntp(h: &mut [u8], mut o: usize, capture_ms: u64) {
     o += 1;
     let ntp = (capture_ms as f64 / 1000.0) + NTP_UNIX_OFFSET as f64;
     let sec = ntp.floor() as u64;
-    let frac = (((ntp - ntp.floor()) * 4294967296.0).floor() as u64) & 0xffffffff;
+    let frac = (((ntp - ntp.floor()) * 4_294_967_296.0).floor() as u64) & 0xffff_ffff;
     h[o] = ((sec >> 16) & 0xff) as u8;
     h[o + 1] = ((sec >> 8) & 0xff) as u8;
     h[o + 2] = (sec & 0xff) as u8;
@@ -175,7 +179,8 @@ fn write_capture_ntp(h: &mut [u8], mut o: usize, capture_ms: u64) {
     h[o..o + 4].copy_from_slice(&(frac as u32).to_be_bytes());
 }
 
-pub fn read_audio_rtp_header(rtp: &[u8]) -> Option<AudioRtpHeader> {
+#[must_use]
+pub const fn read_audio_rtp_header(rtp: &[u8]) -> Option<AudioRtpHeader> {
     if rtp.len() < 20 || rtp[0] != 0x90 || u16::from_be_bytes([rtp[12], rtp[13]]) != 0xbede {
         return None;
     }
@@ -196,82 +201,5 @@ pub fn read_audio_rtp_header(rtp: &[u8]) -> Option<AudioRtpHeader> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn builds_and_parses_audio_rtp_header_with_twcc() {
-        let header = build_audio_rtp_header(105, 960_320, 987_654_321, 502, true, AUDIO_PT);
-        assert_eq!(header.len(), 20);
-        let parsed = read_audio_rtp_header(&header).unwrap();
-        assert!(parsed.marker);
-        assert_eq!(parsed.pt, AUDIO_PT);
-        assert_eq!(parsed.seq, 105);
-        assert_eq!(parsed.ts, 960_320);
-        assert_eq!(parsed.ssrc, 987_654_321);
-        assert_eq!(parsed.tw_seq, Some(502));
-    }
-
-    #[test]
-    fn parses_rfc6464_audio_level_extension_and_rejects_malformed_headers() {
-        let mut packet =
-            build_group_audio_rtp_header(1, 320, 42, 7, false, AUDIO_PT, 1_700_000_000_000, 43);
-        packet.extend_from_slice(&[0xf8, 0xf9]);
-        assert_eq!(parse_rfc6464_audio_level(&packet), Some(43));
-        assert_eq!(parse_rfc6464_audio_level(&packet[..15]), None);
-
-        let mut no_level = build_audio_rtp_header(1, 320, 42, 7, false, AUDIO_PT).to_vec();
-        assert_eq!(parse_rfc6464_audio_level(&no_level), None);
-        no_level[0] = 0x10;
-        assert_eq!(parse_rfc6464_audio_level(&no_level), None);
-    }
-
-    #[test]
-    fn group_video_header_matches_short_sfu_extension_layout() {
-        let header = build_group_video_rtp_header(
-            7,
-            9000,
-            42,
-            8,
-            true,
-            98,
-            false,
-            12,
-            3,
-            1_700_000_000_000,
-            1_700_000_000_010,
-        );
-        assert_eq!(header.len(), 36);
-        assert_eq!(header[0], 0x90);
-        assert_eq!(header[1], 0x80 | 98);
-        assert_eq!(u16::from_be_bytes([header[2], header[3]]), 7);
-        assert_eq!(u32::from_be_bytes(header[8..12].try_into().unwrap()), 42);
-        assert_eq!(u16::from_be_bytes([header[12], header[13]]), 0xbede);
-        assert_eq!(header[23], (12 << 4) | 2);
-        assert_eq!(header[24], 0x03);
-        assert_eq!(u16::from_be_bytes([header[25], header[26]]), 3);
-        assert_eq!(header[27], (CAPTURE_NTP_EXT_ID << 4) | 6);
-    }
-
-    #[test]
-    fn group_video_header_matches_long_sfu_extension_layout() {
-        let header = build_group_video_rtp_header(
-            9,
-            18000,
-            77,
-            10,
-            false,
-            97,
-            true,
-            14,
-            5,
-            1_700_000_000_000,
-            1_700_000_000_020,
-        );
-        assert_eq!(header.len(), 40);
-        assert_eq!(header[23], (14 << 4) | 6);
-        assert_eq!(header[24], 0x03);
-        assert_eq!(u16::from_be_bytes([header[25], header[26]]), 5);
-        assert_eq!(header[31], (CAPTURE_NTP_EXT_ID << 4) | 6);
-    }
-}
+#[path = "../tests/protocol/rtp.rs"]
+mod tests;

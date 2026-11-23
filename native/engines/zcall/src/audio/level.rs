@@ -4,11 +4,12 @@
 //!   0 = full scale (maximum volume)
 //!   127 = silence (or rms < 1)
 
+#[must_use]
 pub fn compute_rfc6464_level(pcm: &[i16]) -> u8 {
     if pcm.is_empty() {
         return 127;
     }
-    let sum_sq: f64 = pcm.iter().map(|&v| (v as f64) * (v as f64)).sum();
+    let sum_sq: f64 = pcm.iter().map(|&v| f64::from(v) * f64::from(v)).sum();
     let rms = (sum_sq / pcm.len() as f64).sqrt();
     if rms < 1.0 {
         return 127;
@@ -18,18 +19,5 @@ pub fn compute_rfc6464_level(pcm: &[i16]) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_silence() {
-        let pcm = vec![0i16; 320];
-        assert_eq!(compute_rfc6464_level(&pcm), 127);
-    }
-
-    #[test]
-    fn test_full_scale() {
-        let pcm = vec![32767i16; 320];
-        assert_eq!(compute_rfc6464_level(&pcm), 0);
-    }
-}
+#[path = "../tests/audio/level.rs"]
+mod tests;

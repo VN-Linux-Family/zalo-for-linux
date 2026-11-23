@@ -1,4 +1,4 @@
-//! ZCall Rust engine core and its direct UI transport module. Zalo helper lifecycle stays in the binary.
+//! `ZCall` Rust engine core and its direct UI transport module. Zalo helper lifecycle stays in the binary.
 
 pub mod audio;
 pub mod camera;

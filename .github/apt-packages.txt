@@ -6,6 +6,7 @@ wget
 ca-certificates
 xz-utils
 build-essential
+pkg-config
 libssl-dev
 liblzma-dev
 p7zip-full

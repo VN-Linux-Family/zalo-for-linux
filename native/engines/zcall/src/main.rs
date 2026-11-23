@@ -70,13 +70,9 @@ fn main() {
 
     let mut recv_target = None;
     let mut send_target = None;
-    let mut send_udp = env::var("ZCALL_SEND_UDP")
-        .map(|v| v == "1")
-        .unwrap_or(false);
-    let mut is_group = env::var("ZCALL_GROUP").map(|v| v != "0").unwrap_or(true);
-    let mut verbose = env::var("ZCALL_VERBOSE")
-        .map(|v| !v.is_empty())
-        .unwrap_or(false);
+    let mut send_udp = env::var("ZCALL_SEND_UDP").is_ok_and(|v| v == "1");
+    let mut is_group = env::var("ZCALL_GROUP").map_or(true, |v| v != "0");
+    let mut verbose = env::var("ZCALL_VERBOSE").is_ok_and(|v| !v.is_empty());
 
     let default_dir = env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
     let default_recv = format!("{}/socketzalorecv2021", default_dir.trim_end_matches('/'));
@@ -128,8 +124,7 @@ fn main() {
     log(
         &log_file,
         &format!(
-            "Starting native zcall Rust engine: send_udp={}, group={}, sockets: recv={}, send={}",
-            send_udp, is_group, recv_path, send_path
+            "Starting native zcall Rust engine: send_udp={send_udp}, group={is_group}, sockets: recv={recv_path}, send={send_path}"
         ),
     );
 
@@ -142,7 +137,7 @@ fn main() {
         Err(e) => {
             log(
                 &log_file,
-                &format!("Failed to load callV2TransportAesKey: {}", e),
+                &format!("Failed to load callV2TransportAesKey: {e}"),
             );
             log(&log_file, &format!("FATAL: {e}"));
             std::process::exit(1);
@@ -154,7 +149,7 @@ fn main() {
         Err(e) => {
             log(
                 &log_file,
-                &format!("Failed to connect to recv socket {}: {}", recv_path, e),
+                &format!("Failed to connect to recv socket {recv_path}: {e}"),
             );
             log(&log_file, &format!("FATAL: {e}"));
             std::process::exit(1);
@@ -166,7 +161,7 @@ fn main() {
         Err(e) => {
             log(
                 &log_file,
-                &format!("Failed to connect to send socket {}: {}", send_path, e),
+                &format!("Failed to connect to send socket {send_path}: {e}"),
             );
             log(&log_file, &format!("FATAL: {e}"));
             std::process::exit(1);
@@ -219,17 +214,17 @@ fn main() {
                     match ev {
                         FrameEvent::Json(val) => {
                             if verbose {
-                                log(&log_file, &format!("<- Zalo JSON: {}", val));
+                                log(&log_file, &format!("<- Zalo JSON: {val}"));
                             }
                             engine.on_zalo_frame(val);
                         }
                         FrameEvent::Raw(raw) => {
                             if verbose {
-                                log(&log_file, &format!("<- Zalo RAW: {}", raw));
+                                log(&log_file, &format!("<- Zalo RAW: {raw}"));
                             }
                         }
                         FrameEvent::Error(err) => {
-                            log(&log_file, &format!("Frame parse error: {}", err));
+                            log(&log_file, &format!("Frame parse error: {err}"));
                         }
                         _ => {}
                     }
@@ -239,7 +234,7 @@ fn main() {
                 // No data right now
             }
             Err(e) => {
-                log(&log_file, &format!("Error reading from send socket: {}", e));
+                log(&log_file, &format!("Error reading from send socket: {e}"));
                 break;
             }
         }
@@ -256,8 +251,7 @@ fn main() {
                 .unwrap_or("?");
             let command = frame
                 .get("command")
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "?".into());
+                .map_or_else(|| "?".into(), std::string::ToString::to_string);
             if frame_type == "sendSignal"
                 || frame_type == "request"
                 || frame_type == "response"
@@ -269,11 +263,11 @@ fn main() {
                 );
             }
             if verbose {
-                log(&log_file, &format!("-> Zalo JSON: {}", frame));
+                log(&log_file, &format!("-> Zalo JSON: {frame}"));
             }
             let bytes = format_outgoing_frames(&frame, &key);
             if let Err(e) = mut_recv_stream.write_all(&bytes) {
-                log(&log_file, &format!("Error writing to recv socket: {}", e));
+                log(&log_file, &format!("Error writing to recv socket: {e}"));
                 break;
             }
             let _ = mut_recv_stream.flush();
@@ -288,13 +282,13 @@ fn main() {
 
 fn log(file_opt: &Option<File>, msg: &str) {
     let time = chrono_timestamp_time();
-    let line = format!("{} [zcall-rust] {}\n", time, msg);
+    let line = format!("{time} [zcall-rust] {msg}\n");
     if let Some(file) = file_opt {
         let mut f = file;
         let _ = f.write_all(line.as_bytes());
         let _ = f.flush();
     } else {
-        eprint!("{}", line);
+        eprint!("{line}");
     }
 }
 
@@ -343,7 +337,7 @@ fn chrono_timestamp_date() -> String {
         month += 1;
     }
     let day = d + 1;
-    format!("{:04}{:02}{:02}", year, month, day)
+    format!("{year:04}{month:02}{day:02}")
 }
 
 fn chrono_timestamp_time() -> String {
@@ -355,26 +349,9 @@ fn chrono_timestamp_time() -> String {
     let m = (secs % 3600) / 60;
     let s = secs % 60;
     let ms = now.subsec_millis();
-    format!("{:02}:{:02}:{:02}.{:03}", h, m, s, ms)
+    format!("{h:02}:{m:02}:{s:02}.{ms:03}")
 }
 
 #[cfg(test)]
-mod tests {
-    use super::load_callv2_key;
-    use std::fs;
-
-    #[test]
-    fn loads_zalo_call_v2_key_from_bundle_source() {
-        let path = std::env::temp_dir().join(format!("zcall-main-key-{}.js", std::process::id()));
-        fs::write(
-            &path,
-            format!(
-                "prefix callV2TransportAesKey:\"{}\" suffix",
-                "AQEBAQEBAQEBAQEBAQEBAQ=="
-            ),
-        )
-        .unwrap();
-        assert_eq!(load_callv2_key(&path).unwrap(), [1u8; 16]);
-        fs::remove_file(path).unwrap();
-    }
-}
+#[path = "tests/main.rs"]
+mod tests;

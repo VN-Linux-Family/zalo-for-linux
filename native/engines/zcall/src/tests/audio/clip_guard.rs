@@ -26,7 +26,9 @@ fn soft_limiter_compresses_peaks_without_hard_clipping() {
 fn clip_guard_steps_down_on_repeated_clipping() {
     let volume = Arc::new(AtomicU8::new(100));
     let mut guard = ClipGuard::new(None, Arc::clone(&volume));
-    guard.last_step = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    guard.last_step = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(1))
+        .unwrap();
     let clipped = vec![30500i16; 320];
     for _ in 0..10 {
         guard.feed(&clipped);
@@ -34,12 +36,16 @@ fn clip_guard_steps_down_on_repeated_clipping() {
     assert_eq!(volume.load(Ordering::Relaxed), 90);
 
     volume.store(42, Ordering::Relaxed);
-    guard.last_step = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    guard.last_step = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(1))
+        .unwrap();
     for _ in 0..10 {
         guard.feed(&clipped);
     }
     assert_eq!(volume.load(Ordering::Relaxed), 35);
-    guard.last_step = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    guard.last_step = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(1))
+        .unwrap();
     for _ in 0..10 {
         guard.feed(&clipped);
     }
@@ -54,7 +60,9 @@ fn clip_guard_raises_gain_for_near_end_quiet_speech_only() {
     let mut guard = ClipGuard::new(None, Arc::clone(&volume))
         .with_controls(Some(Arc::clone(&far_active)), Arc::clone(&manual));
     guard.enabled = true;
-    guard.last_step = std::time::Instant::now() - std::time::Duration::from_secs(2);
+    guard.last_step = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(2))
+        .unwrap();
 
     let noise = vec![20i16; 320];
     for _ in 0..25 {
@@ -74,7 +82,9 @@ fn clip_guard_raises_gain_for_near_end_quiet_speech_only() {
     assert_eq!(volume.load(Ordering::Relaxed), 48);
 
     manual.store(true, Ordering::Relaxed);
-    guard.last_step = std::time::Instant::now() - std::time::Duration::from_secs(2);
+    guard.last_step = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(2))
+        .unwrap();
     for _ in 0..15 {
         guard.feed(&quiet_speech);
     }
@@ -156,7 +166,9 @@ fn sync_os_volume_detects_external_changes_and_default_source_hotplug() {
         state.pct = 100;
         state.resolved_name = Some("bluez_input.2".to_owned());
     }
-    guard.last_os_sync = std::time::Instant::now() - std::time::Duration::from_secs(2);
+    guard.last_os_sync = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(2))
+        .unwrap();
     assert!(guard.sync_os_volume());
     assert_eq!(volume.load(Ordering::Relaxed), 100);
 }
@@ -192,7 +204,9 @@ fn hot_speech_and_soft_clipping_reduce_capture_gain() {
     let mut guard =
         ClipGuard::new(None, Arc::clone(&volume)).with_controls(None, Arc::clone(&manual));
     guard.enabled = true;
-    guard.last_step = std::time::Instant::now() - std::time::Duration::from_secs(10);
+    guard.last_step = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(10))
+        .unwrap();
 
     let soft_clipped = vec![28800i16; 320];
     for _ in 0..10 {
@@ -200,7 +214,9 @@ fn hot_speech_and_soft_clipping_reduce_capture_gain() {
     }
     assert_eq!(volume.load(Ordering::Relaxed), 70);
 
-    guard.last_step = std::time::Instant::now() - std::time::Duration::from_secs(2);
+    guard.last_step = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(2))
+        .unwrap();
     let hot_speech = vec![10000i16; 320];
     for _ in 0..16 {
         guard.feed(&hot_speech);

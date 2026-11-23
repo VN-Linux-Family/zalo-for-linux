@@ -37,7 +37,7 @@ impl OpusEncoder {
         }
         self.pcm_f32.clear();
         self.pcm_f32
-            .extend(pcm.iter().map(|&sample| sample as f32 / 32768.0));
+            .extend(pcm.iter().map(|&sample| f32::from(sample) / 32768.0));
         self.inner
             .encode(&self.pcm_f32, pcm.len() / self.channels, out_buf)
             .map_err(|error| format!("opus encode failed: {error:?}"))
@@ -88,48 +88,12 @@ impl OpusDecoder {
         for (dst, &src) in out_pcm.iter_mut().zip(self.pcm_f32.iter()).take(samples) {
             *dst = (src * 32768.0)
                 .round()
-                .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+                .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
         }
         Ok(decoded)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn opus_voice_frame_encodes_and_decodes_at_call_sample_rate() {
-        let pcm = vec![0i16; 320];
-        let mut encoder = OpusEncoder::new(16_000, 1, 32_000).expect("create Opus encoder");
-        let mut packet = [0u8; 1500];
-        let encoded = encoder
-            .encode(&pcm, &mut packet)
-            .expect("encode Opus frame");
-        assert!(encoded > 0 && encoded < packet.len());
-        let mut decoder = OpusDecoder::new(16_000, 1).expect("create Opus decoder");
-        let mut decoded = vec![0i16; 640];
-        let samples = decoder
-            .decode(&packet[..encoded], &mut decoded, false)
-            .expect("decode Opus frame");
-        assert_eq!(samples, 320);
-    }
-
-    #[test]
-    fn empty_packet_uses_plc_and_fec_path_is_available() {
-        let mut encoder = OpusEncoder::new(16_000, 1, 32_000).unwrap();
-        let mut packet = [0u8; 1500];
-        let len = encoder.encode(&vec![1200i16; 320], &mut packet).unwrap();
-        let mut decoder = OpusDecoder::new(16_000, 1).unwrap();
-        let mut output = [0i16; 320];
-        assert_eq!(
-            decoder.decode(&packet[..len], &mut output, false).unwrap(),
-            320
-        );
-        assert_eq!(decoder.decode(&[], &mut output, false).unwrap(), 320);
-        assert_eq!(
-            decoder.decode(&packet[..len], &mut output, true).unwrap(),
-            320
-        );
-    }
-}
+#[path = "../tests/audio/codec.rs"]
+mod tests;

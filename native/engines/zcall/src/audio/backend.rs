@@ -1,4 +1,4 @@
-//! PulseAudio / PipeWire audio backend.
+//! `PulseAudio` / `PipeWire` audio backend.
 
 use pulseaudio::{protocol, Client, PlaybackSource, PlaybackStream, RecordStream};
 use std::ffi::CString;
@@ -13,7 +13,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 const PULSE_OPERATION_TIMEOUT: Duration = Duration::from_millis(1500);
 const PA_VOLUME_NORM: u32 = 65_536;
 
-/// Synchronous control connection over PulseAudio's native Unix-socket protocol.
+/// Synchronous control connection over `PulseAudio`'s native Unix-socket protocol.
 struct PulseConnection {
     socket: BufReader<UnixStream>,
     protocol_version: u16,
@@ -60,7 +60,7 @@ impl PulseConnection {
             connection.roundtrip(protocol::Command::SetClientName(props))?;
         Ok(connection)
     }
-    fn next_sequence(&mut self) -> u32 {
+    const fn next_sequence(&mut self) -> u32 {
         let seq = self.sequence;
         self.sequence = self.sequence.wrapping_add(1);
         seq
@@ -232,7 +232,12 @@ fn fetch_source_info(
             index: None,
             name: Some(name),
         }))?;
-    let values: Vec<u32> = info.cvolume.channels().iter().map(|v| v.as_u32()).collect();
+    let values: Vec<u32> = info
+        .cvolume
+        .channels()
+        .iter()
+        .map(pulseaudio::protocol::Volume::as_u32)
+        .collect();
     let channels = u8::try_from(values.len())
         .map_err(|_| "PulseAudio source reports too many channels".to_owned())?;
     let average_volume = average_channel_volume(channels, &values)
@@ -311,6 +316,7 @@ fn set_source_output_volume_on_connection(
 }
 
 /// Read the current PulseAudio/PipeWire source volume, mute state and resolved source name.
+#[must_use]
 pub fn pulse_get_source_info(source: Option<&str>) -> Option<PulseSourceInfo> {
     let mut connection = pulse_connection().ok()?;
     let info = selected_source_info(&mut connection, source).ok()?;
@@ -321,6 +327,7 @@ pub fn pulse_get_source_info(source: Option<&str>) -> Option<PulseSourceInfo> {
     })
 }
 /// Enumerate PulseAudio-compatible sources/sinks and their current defaults.
+#[must_use]
 pub fn pulse_device_inventory() -> Option<PulseDeviceInventory> {
     let mut connection = pulse_connection().ok()?;
     let server: protocol::ServerInfo = connection
@@ -351,12 +358,10 @@ pub fn pulse_device_inventory() -> Option<PulseDeviceInventory> {
             .collect(),
         default_source: server
             .default_source_name
-            .map(|value| value.to_string_lossy().into_owned())
-            .unwrap_or_default(),
+            .map_or_default(|value| value.to_string_lossy().into_owned()),
         default_sink: server
             .default_sink_name
-            .map(|value| value.to_string_lossy().into_owned())
-            .unwrap_or_default(),
+            .map_or_default(|value| value.to_string_lossy().into_owned()),
     })
 }
 
@@ -366,7 +371,7 @@ pub fn pulse_set_source_volume(source: Option<&str>, percent: u8) -> Result<(), 
     let info = selected_source_info(&mut connection, source)?;
     set_source_volume_on_connection(&mut connection, &info, percent.min(100))
 }
-/// Set microphone mute state through the PulseAudio native protocol.
+/// Set microphone mute state through the `PulseAudio` native protocol.
 pub fn pulse_set_source_mute(source: Option<&str>, mute: bool) -> Result<(), String> {
     let mut connection = pulse_connection()?;
     let info = selected_source_info(&mut connection, source)?;
@@ -391,7 +396,12 @@ fn source_output_for_pid(
         if pid.map(parse_pid_like_atoi) != Some(target_pid) {
             return None;
         }
-        let values: Vec<u32> = info.cvolume.channels().iter().map(|v| v.as_u32()).collect();
+        let values: Vec<u32> = info
+            .cvolume
+            .channels()
+            .iter()
+            .map(pulseaudio::protocol::Volume::as_u32)
+            .collect();
         let channels = u8::try_from(values.len()).ok()?;
         let average_volume = average_channel_volume(channels, &values).unwrap_or(0);
         Some(SourceOutputSnapshot {
@@ -410,7 +420,8 @@ pub fn pulse_normalize_own_stream() {
     let Ok(mut connection) = pulse_connection() else {
         return;
     };
-    let Ok(Some(stream)) = source_output_for_pid(&mut connection, std::process::id() as i64) else {
+    let Ok(Some(stream)) = source_output_for_pid(&mut connection, i64::from(std::process::id()))
+    else {
         return;
     };
 
@@ -428,11 +439,12 @@ pub fn pulse_normalize_own_stream() {
 }
 
 /// Read PulseAudio/PipeWire source volume through the native protocol.
+#[must_use]
 pub fn get_source_volume(source: Option<&str>) -> Option<u8> {
     pulse_get_source_info(source).map(|info| info.pct)
 }
 
-/// Read-only startup diagnostics using the PulseAudio native protocol.
+/// Read-only startup diagnostics using the `PulseAudio` native protocol.
 pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
     let Ok(mut connection) = pulse_connection() else {
         crate::zcall_log!("[zcall-rust] hw: PulseAudio-compatible server unavailable");
@@ -443,8 +455,10 @@ pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
         .as_ref()
         .ok()
         .and_then(|info| info.server_name.as_ref())
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "PulseAudio-compatible".into());
+        .map_or_else(
+            || "PulseAudio-compatible".into(),
+            |name| name.to_string_lossy().into_owned(),
+        );
     crate::zcall_log!("[zcall-rust] hw: audio backend={backend}");
     crate::zcall_log!(
         "[zcall-rust] hw: target speaker='{}', mic='{}'",
@@ -462,8 +476,7 @@ pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
             let description = source
                 .description
                 .as_ref()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
+                .map_or_default(|value| value.to_string_lossy());
             let identity = format!("{name} {description}");
             if identity.to_ascii_lowercase().contains("bluez") {
                 crate::zcall_log!("[zcall-rust] hw: detected bluetooth source: {identity}");
@@ -497,8 +510,7 @@ pub fn probe_audio_hardware(speaker: Option<&str>, microphone: Option<&str>) {
             let description = sink
                 .description
                 .as_ref()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_default();
+                .map_or_default(|value| value.to_string_lossy());
             let identity = format!("{name} {description}");
             if identity.to_ascii_lowercase().contains("bluez") {
                 crate::zcall_log!("[zcall-rust] hw: detected bluetooth sink: {identity}");
@@ -559,7 +571,7 @@ fn pulse_client() -> Result<Client, String> {
     Client::from_env(name).map_err(|error| format!("could not connect to PulseAudio: {error}"))
 }
 
-fn pulse_sample_spec() -> protocol::SampleSpec {
+const fn pulse_sample_spec() -> protocol::SampleSpec {
     protocol::SampleSpec {
         format: protocol::SampleFormat::S16Le,
         channels: 1,
@@ -583,7 +595,7 @@ struct PulsePlaybackSource {
 }
 
 impl PulsePlaybackSource {
-    fn new(receiver: Receiver<Vec<u8>>) -> Self {
+    const fn new(receiver: Receiver<Vec<u8>>) -> Self {
         Self {
             receiver,
             pending: Vec::new(),
@@ -747,173 +759,5 @@ impl Drop for PulsePlayer {
 }
 
 #[cfg(test)]
-mod pulse_backend_tests {
-    use super::*;
-
-    #[test]
-    #[ignore = "requires a running PulseAudio/PipeWire session"]
-    fn live_pulseaudio_rs_streams_capture_and_playback() {
-        let mut recorder = PulseRecorder::new(None).expect("create Rust record stream");
-        let mut captured = [0_u8; 640];
-        recorder
-            .read(&mut captured)
-            .expect("read one 20 ms audio frame");
-
-        let mut player = PulsePlayer::new(None).expect("create Rust playback stream");
-        player
-            .write(&[0_u8; 640])
-            .expect("queue one silent 20 ms frame");
-        std::thread::sleep(Duration::from_millis(100));
-        assert!(player.latency_ms().is_some(), "query playback timing");
-    }
-
-    #[test]
-    #[ignore = "requires a running PulseAudio/PipeWire session; query-only test"]
-    fn live_pulse_queries_read_default_source_and_own_capture_stream() {
-        let mut connection = pulse_connection().expect("connect to PulseAudio-compatible server");
-        let source =
-            selected_source_info(&mut connection, None).expect("read default source information");
-        assert!(source
-            .resolved_name
-            .as_deref()
-            .is_some_and(|name| !name.is_empty()));
-        assert!(source.channels > 0);
-        assert!(source.average_volume <= PA_VOLUME_NORM * 3);
-
-        let _own_stream = source_output_for_pid(&mut connection, std::process::id() as i64)
-            .expect("query source-output list for current process");
-    }
-
-    #[test]
-    #[ignore = "requires a running PulseAudio/PipeWire session; sends current values unchanged"]
-    fn live_pulse_native_control_roundtrips_preserve_current_source_state() {
-        let mut connection = pulse_connection().expect("connect to PulseAudio-compatible server");
-        let _: protocol::SinkInfoList = connection
-            .roundtrip(protocol::Command::GetSinkInfoList)
-            .expect("query sink inventory");
-        let _: protocol::CardInfoList = connection
-            .roundtrip(protocol::Command::GetCardInfoList)
-            .expect("query card and active-profile inventory");
-        let inventory = pulse_device_inventory().expect("enumerate audio devices and defaults");
-        assert!(
-            !inventory.sources.is_empty(),
-            "at least one capture source should be listed"
-        );
-        assert!(
-            !inventory.sinks.is_empty(),
-            "at least one playback sink should be listed"
-        );
-        let source = selected_source_info(&mut connection, None).expect("query default source");
-        let source_name = CString::new(
-            source
-                .resolved_name
-                .as_deref()
-                .expect("resolved source name"),
-        )
-        .expect("valid source name");
-        let current: protocol::SourceInfo = connection
-            .roundtrip(protocol::Command::GetSourceInfo(protocol::GetSourceInfo {
-                index: None,
-                name: Some(source_name),
-            }))
-            .expect("read current source state");
-        connection
-            .acknowledge(protocol::Command::SetSourceVolume(
-                protocol::SetDeviceVolumeParams {
-                    device_index: Some(current.index),
-                    device_name: None,
-                    volume: current.cvolume,
-                },
-            ))
-            .expect("write unchanged per-channel source volume");
-        connection
-            .acknowledge(protocol::Command::SetSourceMute(
-                protocol::SetDeviceMuteParams {
-                    device_index: Some(current.index),
-                    device_name: None,
-                    mute: current.muted,
-                },
-            ))
-            .expect("write unchanged source mute state");
-        let _recorder = PulseRecorder::new(None).expect("create a temporary own capture stream");
-        let outputs: protocol::SourceOutputInfoList = connection
-            .roundtrip(protocol::Command::GetSourceOutputInfoList)
-            .expect("query source-output inventory");
-        let own_output = outputs
-            .into_iter()
-            .find(|output| {
-                output
-                    .props
-                    .get(protocol::Prop::ApplicationProcessId)
-                    .and_then(|value| std::str::from_utf8(value).ok())
-                    .map(|value| parse_pid_like_atoi(value.trim_end_matches('\0')))
-                    == Some(std::process::id() as i64)
-            })
-            .expect("find this process's capture stream");
-        if own_output.has_volume && own_output.volume_writable {
-            connection
-                .acknowledge(protocol::Command::SetSourceOutputVolume(
-                    protocol::SetStreamVolumeParams {
-                        index: own_output.index,
-                        volume: own_output.cvolume,
-                    },
-                ))
-                .expect("write unchanged per-channel source-output volume");
-        }
-        connection
-            .acknowledge(protocol::Command::SetSourceOutputMute(
-                protocol::SetStreamMuteParams {
-                    index: own_output.index,
-                    mute: own_output.muted,
-                },
-            ))
-            .expect("write unchanged source-output mute state");
-        let _own_stream = source_output_for_pid(&mut connection, std::process::id() as i64)
-            .expect("query own source-output snapshot");
-    }
-
-    #[test]
-    fn channel_volume_average_matches_pulse_integer_average() {
-        assert_eq!(average_channel_volume(2, &[1, 2]), Some(1));
-        assert_eq!(average_channel_volume(3, &[1, 2, 3]), Some(2));
-        assert_eq!(average_channel_volume(0, &[1, 2]), None);
-        assert_eq!(average_channel_volume(3, &[1, 2]), None);
-    }
-
-    #[test]
-    fn volume_percentage_conversion_matches_pulse_rounding_and_clamps() {
-        assert_eq!(volume_to_percent(0), 0);
-        assert_eq!(volume_to_percent(32_768), 50);
-        assert_eq!(volume_to_percent(PA_VOLUME_NORM), 100);
-        assert_eq!(volume_to_percent(PA_VOLUME_NORM * 2), 150);
-        assert_eq!(percent_to_volume(0), 0);
-        assert_eq!(percent_to_volume(50), 32_768);
-        assert_eq!(percent_to_volume(100), PA_VOLUME_NORM);
-        assert_eq!(percent_to_volume(150), PA_VOLUME_NORM * 3 / 2);
-    }
-
-    #[test]
-    fn pid_parser_matches_atoi_prefix_behavior() {
-        assert_eq!(parse_pid_like_atoi("123"), 123);
-        assert_eq!(parse_pid_like_atoi("  +123tail"), 123);
-        assert_eq!(parse_pid_like_atoi("-2"), -2);
-        assert_eq!(parse_pid_like_atoi("not-a-pid"), 0);
-    }
-
-    #[test]
-    fn invalid_or_default_source_names_resolve_through_server_info() {
-        assert!(source_name_uses_default(None));
-        assert!(source_name_uses_default(Some("")));
-        assert!(source_name_uses_default(Some("@DEFAULT_SOURCE@")));
-        assert!(source_name_uses_default(Some("bad\0name")));
-        assert!(!source_name_uses_default(Some("alsa_input.test")));
-    }
-
-    fn source_name_uses_default(source: Option<&str>) -> bool {
-        source
-            .filter(|name| {
-                !name.is_empty() && !name.as_bytes().contains(&0) && *name != "@DEFAULT_SOURCE@"
-            })
-            .is_none()
-    }
-}
+#[path = "../tests/audio/backend.rs"]
+mod pulse_backend_tests;

@@ -20,6 +20,7 @@ pub fn decode_transport_key(encoded: &str) -> Result<[u8; 16], String> {
     Ok(key)
 }
 
+#[must_use]
 pub fn encrypt(data: &[u8], key: &[u8; 16]) -> String {
     let cipher = Aes128CbcEnc::new(key.into(), &ZERO_IV.into());
     let mut buf = vec![0u8; data.len() + 16];
@@ -31,11 +32,11 @@ pub fn encrypt(data: &[u8], key: &[u8; 16]) -> String {
 }
 
 pub fn decrypt(hex_str: &str, key: &[u8; 16]) -> Result<Vec<u8>, String> {
-    let mut ciphertext = hex::decode(hex_str).map_err(|e| format!("Invalid hex: {}", e))?;
+    let mut ciphertext = hex::decode(hex_str).map_err(|e| format!("Invalid hex: {e}"))?;
     let cipher = Aes128CbcDec::new(key.into(), &ZERO_IV.into());
     let pt = cipher
         .decrypt_padded_mut::<Pkcs7>(&mut ciphertext)
-        .map_err(|e| format!("PKCS7 decrypt failed: {:?}", e))?;
+        .map_err(|e| format!("PKCS7 decrypt failed: {e:?}"))?;
     Ok(pt.to_vec())
 }
 
@@ -64,7 +65,7 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
         if val == 255 {
             return Err(format!("Invalid base64 character: {}", b as char));
         }
-        buf = (buf << 6) | (val as u32);
+        buf = (buf << 6) | u32::from(val);
         bits += 6;
         if bits >= 8 {
             bits -= 8;
@@ -75,15 +76,5 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_callv2_encrypt_decrypt_roundtrip() {
-        let key = [0x42u8; 16];
-        let original = b"{\"type\":\"ping\",\"seq\":12345}";
-        let enc = encrypt(original, &key);
-        let dec = decrypt(&enc, &key).expect("decrypt should succeed");
-        assert_eq!(dec, original);
-    }
-}
+#[path = "../tests/crypto/callv2.rs"]
+mod tests;

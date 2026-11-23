@@ -1,8 +1,8 @@
-//! Native screen capture through XDG ScreenCast Portal + PipeWire.
+//! Native screen capture through XDG `ScreenCast` Portal + `PipeWire`.
 //!
 //! The portal presents the system-owned monitor/window chooser. Captured frames
 //! are encoded in the Rust process and are never exposed as a JavaScript
-//! MediaStream or raw desktop-capture source.
+//! `MediaStream` or raw desktop-capture source.
 use openh264::encoder::{
     BitRate, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, Profile, UsageType,
 };
@@ -17,7 +17,8 @@ use std::time::Duration;
 mod portal;
 mod x11;
 
-/// True when the helper runs in an X11 session; otherwise capture uses XDG ScreenCast.
+/// True when the helper runs in an X11 session; otherwise capture uses XDG `ScreenCast`.
+#[must_use]
 pub fn is_x11_session() -> bool {
     x11::is_x11_session()
 }
@@ -35,6 +36,7 @@ fn run_capture_worker(worker: impl FnOnce() -> Result<(), String>) -> Result<(),
     })
 }
 
+#[must_use]
 pub fn is_cancelled_error(error: &str) -> bool {
     error == SCREEN_CAPTURE_CANCELLED
 }
@@ -96,7 +98,7 @@ impl RawFrameSource for Receiver<RawScreenFrame> {
         &self,
         timeout: Duration,
     ) -> Result<RawScreenFrame, std::sync::mpsc::RecvTimeoutError> {
-        Receiver::recv_timeout(self, timeout)
+        Self::recv_timeout(self, timeout)
     }
 }
 
@@ -149,7 +151,7 @@ impl ScreenCapture {
     }
 
     /// Start the native X11 backend for X11 sessions, otherwise use the
-    /// system-owned Wayland ScreenCast portal. X11 window IDs are optional.
+    /// system-owned Wayland `ScreenCast` portal. X11 window IDs are optional.
     pub fn start_with_source(
         fps: u32,
         bitrate: u32,
@@ -163,7 +165,7 @@ impl ScreenCapture {
         let target_fps = Arc::new(AtomicU32::new(fps.clamp(15, 30)));
         let worker_target_fps = target_fps.clone();
         let capture_fps = Arc::new(AtomicU32::new(fps.clamp(15, 30)));
-        let worker_capture_fps = capture_fps.clone();
+        let worker_capture_fps = capture_fps;
         let finished = Arc::new(AtomicBool::new(false));
         let worker_finished = finished.clone();
         let (tx, frames) = sync_channel(2);
@@ -302,7 +304,7 @@ fn report_worker_result(
     }
 }
 
-fn fps_tier(fps: u32) -> u32 {
+const fn fps_tier(fps: u32) -> u32 {
     match fps {
         0..=15 => 15,
         16..=24 => 24,
@@ -310,7 +312,7 @@ fn fps_tier(fps: u32) -> u32 {
     }
 }
 
-fn encoder_config(settings: &ScreenEncodeConfig, fps: u32) -> EncoderConfig {
+const fn encoder_config(settings: &ScreenEncodeConfig, fps: u32) -> EncoderConfig {
     EncoderConfig::new()
         .bitrate(BitRate::from_bps(settings.bitrate))
         .max_frame_rate(FrameRate::from_hz(fps as f32))
@@ -405,17 +407,17 @@ fn encode_frames<F: RawFrameSource>(
         convert_ema_ms = if convert_ema_ms == 0.0 {
             convert_ms
         } else {
-            convert_ema_ms * 0.85 + convert_ms * 0.15
+            convert_ms.mul_add(0.15, convert_ema_ms * 0.85)
         };
         h264_ema_ms = if h264_ema_ms == 0.0 {
             h264_ms
         } else {
-            h264_ema_ms * 0.85 + h264_ms * 0.15
+            h264_ms.mul_add(0.15, h264_ema_ms * 0.85)
         };
         encode_ema_ms = if encode_ema_ms == 0.0 {
             encode_ms
         } else {
-            encode_ema_ms * 0.85 + encode_ms * 0.15
+            encode_ms.mul_add(0.15, encode_ema_ms * 0.85)
         };
         if last_evaluation.elapsed() >= Duration::from_secs(2) {
             let budget_ms = 1000.0 / f64::from(active_fps);
@@ -443,13 +445,13 @@ fn encode_frames<F: RawFrameSource>(
             bitstream.frame_type(),
             FrameType::IDR | FrameType::I | FrameType::IPMixed
         );
-        let mut encoded = Vec::new();
-        bitstream.write_vec(&mut encoded);
-        if encoded.is_empty() {
+        let mut encoded_frame = Vec::new();
+        bitstream.write_vec(&mut encoded_frame);
+        if encoded_frame.is_empty() {
             continue;
         }
         let encoded_frame = EncodedScreenFrame {
-            data: encoded,
+            data: encoded_frame,
             key,
             width,
             height,
@@ -502,14 +504,16 @@ fn resize_bgra(
 
     let short_side = even_width.min(even_height);
     if max_short > 0 && short_side > max_short {
-        let scale = max_short as f64 / short_side as f64;
-        let target_width = (((even_width as f64 * scale).round() as u32).max(2)) & !1;
-        let target_height = (((even_height as f64 * scale).round() as u32).max(2)) & !1;
+        let scale = f64::from(max_short) / f64::from(short_side);
+        let target_width = (((f64::from(even_width) * scale).round() as u32).max(2)) & !1;
+        let target_height = (((f64::from(even_height) * scale).round() as u32).max(2)) & !1;
         let mut resized = vec![0u8; target_width as usize * target_height as usize * 4];
         for y in 0..target_height {
-            let source_y = (y as u64 * even_height as u64 / target_height as u64) as usize;
+            let source_y =
+                (u64::from(y) * u64::from(even_height) / u64::from(target_height)) as usize;
             for x in 0..target_width {
-                let source_x = (x as u64 * even_width as u64 / target_width as u64) as usize;
+                let source_x =
+                    (u64::from(x) * u64::from(even_width) / u64::from(target_width)) as usize;
                 let source_offset = (source_y * width as usize + source_x) * 4;
                 let target_offset = (y as usize * target_width as usize + x as usize) * 4;
                 resized[target_offset..target_offset + 4]
@@ -533,276 +537,5 @@ fn resize_bgra(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn x11_latest_frame_queue_replaces_stale_frames() {
-        let queue = LatestFrameQueue::default();
-        let make_frame = |value| RawScreenFrame {
-            bgra: vec![value; 16],
-            width: 2,
-            height: 2,
-        };
-
-        assert!(!queue.push(make_frame(1)));
-        assert!(queue.push(make_frame(2)));
-        let frame = Arc::new(queue)
-            .recv_timeout(Duration::from_millis(1))
-            .expect("latest raw frame");
-        assert_eq!(frame.bgra, vec![2; 16]);
-    }
-
-    #[test]
-    fn encodes_odd_sized_window_frames_after_cropping_to_even_dimensions() {
-        let (raw_tx, raw_rx) = sync_channel(2);
-        let (encoded_tx, encoded_rx) = sync_channel(2);
-        let (status_tx, status_rx) = sync_channel(2);
-        let encoded_frame_seen = Arc::new(AtomicBool::new(false));
-        let worker_encoded_frame_seen = encoded_frame_seen.clone();
-        let stop = Arc::new(AtomicBool::new(false));
-        let worker_stop = stop.clone();
-        let worker = thread::spawn(move || {
-            encode_frames(
-                raw_rx,
-                encoded_tx,
-                worker_stop,
-                ScreenEncodeConfig {
-                    bitrate: 500_000,
-                    max_short: 0,
-                    force_keyframe: Arc::new(AtomicBool::new(false)),
-                    target_fps: Arc::new(AtomicU32::new(15)),
-                    capture_fps: Arc::new(AtomicU32::new(15)),
-                },
-                status_tx,
-                worker_encoded_frame_seen,
-            )
-            .unwrap();
-        });
-
-        raw_tx
-            .send(RawScreenFrame {
-                bgra: vec![0; 953 * 646 * 4],
-                width: 953,
-                height: 646,
-            })
-            .unwrap();
-        assert_eq!(
-            status_rx.recv_timeout(Duration::from_secs(3)).unwrap(),
-            Ok(())
-        );
-        let frame = encoded_rx
-            .recv_timeout(Duration::from_secs(3))
-            .expect("native screen encoder should publish a key frame");
-        assert!(frame.key);
-        assert_eq!((frame.width, frame.height), (952, 646));
-        thread::sleep(Duration::from_millis(80));
-        raw_tx
-            .send(RawScreenFrame {
-                bgra: vec![0; 953 * 646 * 4],
-                width: 953,
-                height: 646,
-            })
-            .unwrap();
-        let _second_frame = encoded_rx
-            .recv_timeout(Duration::from_secs(3))
-            .expect("encoder should continue after becoming ready");
-        assert!(
-            status_rx.try_recv().is_err(),
-            "ready must be a one-shot event"
-        );
-        assert!(
-            frame.data.starts_with(&[0, 0, 0, 1]) || frame.data.starts_with(&[0, 0, 1]),
-            "screen frames must be H.264 Annex-B"
-        );
-        assert!(
-            crate::video::avc_codec_string(&frame.data)
-                .is_some_and(|codec| codec.starts_with("avc1.")),
-            "screen preview codec must be derived from its SPS"
-        );
-
-        stop.store(true, Ordering::Relaxed);
-        drop(raw_tx);
-        worker.join().unwrap();
-    }
-
-    /// Opt-in Wayland acceptance test. This deliberately opens the desktop's
-    /// real ScreenCast chooser and must be run interactively by selecting a
-    /// monitor/window in the portal dialog.
-    #[test]
-    #[ignore = "requires an interactive Wayland ScreenCast portal chooser"]
-    fn real_wayland_portal_captures_and_encodes_h264() {
-        assert_eq!(
-            std::env::var("XDG_SESSION_TYPE").as_deref(),
-            Ok("wayland"),
-            "this acceptance test must run in the actual Wayland session"
-        );
-        let capture = ScreenCapture::start_with_source(15, 500_000, 0, None)
-            .expect("start real Wayland ScreenCast capture");
-        let deadline = std::time::Instant::now() + Duration::from_secs(145);
-        let mut ready = false;
-
-        while std::time::Instant::now() < deadline {
-            if let Some(status) = capture.try_status() {
-                status.expect("real portal/PipeWire/encoder startup");
-                ready = true;
-            }
-            if let Some(frame) = capture.try_recv() {
-                capture.stop();
-                assert!(ready, "encoded frame arrived before the ready notification");
-                assert!(
-                    !frame.data.is_empty(),
-                    "portal encoder returned an empty frame"
-                );
-                assert!(
-                    frame.data.starts_with(&[0, 0, 0, 1]) || frame.data.starts_with(&[0, 0, 1]),
-                    "portal capture must produce H.264 Annex-B"
-                );
-                assert!(
-                    crate::video::avc_codec_string(&frame.data)
-                        .is_some_and(|codec| codec.starts_with("avc1.")),
-                    "portal frame SPS must identify an H.264 codec"
-                );
-                crate::zcall_log!(
-                    "REAL_WAYLAND_SCREEN_FRAME={}x{} bytes={} key={}",
-                    frame.width,
-                    frame.height,
-                    frame.data.len(),
-                    frame.key
-                );
-                return;
-            }
-            if capture.is_finished() {
-                let error = capture.try_status().and_then(Result::err);
-                capture.stop();
-                panic!("real portal capture worker exited early: {error:?}");
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-
-        capture.stop();
-        panic!("real Wayland portal did not produce an encoded frame within 145 seconds");
-    }
-
-    #[test]
-    fn capture_worker_panics_become_terminal_errors() {
-        let result = run_capture_worker(|| panic!("simulated portal cleanup panic"));
-        assert_eq!(
-            result.unwrap_err(),
-            "Screen capture worker panicked: simulated portal cleanup panic"
-        );
-    }
-
-    #[test]
-    fn screen_fps_uses_three_stable_quality_tiers() {
-        assert_eq!(fps_tier(5), 15);
-        assert_eq!(fps_tier(15), 15);
-        assert_eq!(fps_tier(20), 24);
-        assert_eq!(fps_tier(24), 24);
-        assert_eq!(fps_tier(30), 30);
-    }
-
-    #[test]
-    fn portal_user_cancellation_is_classified_as_a_normal_stop() {
-        assert_eq!(
-            portal_error_message(
-                "waiting for chooser",
-                "org.freedesktop.portal.Error.Cancelled"
-            ),
-            SCREEN_CAPTURE_CANCELLED
-        );
-        assert_eq!(
-            portal_error_message("starting stream", "permission denied"),
-            "starting stream: permission denied"
-        );
-        assert!(is_cancelled_error(SCREEN_CAPTURE_CANCELLED));
-        assert!(!is_cancelled_error("permission denied"));
-    }
-
-    #[test]
-    fn portal_requests_are_cancellable_and_have_a_deadline() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let cancelled = runtime.block_on(portal::portal_request(
-            std::future::pending::<Result<(), &'static str>>(),
-            Arc::new(AtomicBool::new(true)),
-            Duration::from_secs(30),
-            "test portal request",
-        ));
-        assert_eq!(
-            cancelled.unwrap_err(),
-            "Screen sharing cancelled because the call ended"
-        );
-
-        let timed_out = runtime.block_on(portal::portal_request(
-            std::future::pending::<Result<(), &'static str>>(),
-            Arc::new(AtomicBool::new(false)),
-            Duration::from_millis(10),
-            "test portal request",
-        ));
-        assert_eq!(timed_out.unwrap_err(), "Timed out test portal request");
-    }
-
-    #[test]
-    fn cancelled_capture_does_not_emit_a_second_error_after_screen_stopped() {
-        let (status_tx, status_rx) = std::sync::mpsc::sync_channel(2);
-        let stop = AtomicBool::new(true);
-        report_worker_result(Err("Screen sharing cancelled".into()), &stop, &status_tx);
-        assert!(status_rx.try_recv().is_err());
-
-        let stop = AtomicBool::new(false);
-        report_worker_result(Err("portal failed".into()), &stop, &status_tx);
-        assert_eq!(status_rx.try_recv().unwrap().unwrap_err(), "portal failed");
-    }
-
-    #[test]
-    fn stopping_capture_never_joins_worker_on_the_call_engine_thread() {
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let finished = Arc::new(AtomicBool::new(false));
-        let worker_finished = finished.clone();
-        let worker = thread::spawn(move || {
-            let _ = release_rx.recv();
-            worker_finished.store(true, Ordering::Release);
-        });
-        let (_frame_tx, frames) = sync_channel(1);
-        let (_status_tx, status) = sync_channel(1);
-        let capture = ScreenCapture {
-            stop: Arc::new(AtomicBool::new(false)),
-            frames,
-            status,
-            force_keyframe: Arc::new(AtomicBool::new(false)),
-            target_fps: Arc::new(AtomicU32::new(30)),
-            finished: finished.clone(),
-            worker: Mutex::new(Some(worker)),
-        };
-
-        let started = std::time::Instant::now();
-        capture.stop();
-        assert!(started.elapsed() < Duration::from_millis(100));
-        release_tx.send(()).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        while !finished.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(5));
-        }
-        assert!(finished.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn group_share_resolution_limits_short_side_and_preserves_aspect_ratio() {
-        let source = vec![7u8; 1920 * 1080 * 4];
-        let (resized, width, height) = resize_bgra(source, 1920, 1080, 720).unwrap();
-        assert_eq!((width, height), (1280, 720));
-        assert_eq!(resized.len(), 1280 * 720 * 4);
-        assert_eq!(resized[0], 7);
-        assert_eq!(resized[resized.len() - 1], 7);
-    }
-
-    #[test]
-    fn screen_keyframe_request_flag_is_consumed_by_encoder_worker() {
-        let flag = Arc::new(AtomicBool::new(true));
-        assert!(flag.swap(false, Ordering::AcqRel));
-        assert!(!flag.load(Ordering::Acquire));
-    }
-}
+#[path = "../tests/screen/mod.rs"]
+mod tests;

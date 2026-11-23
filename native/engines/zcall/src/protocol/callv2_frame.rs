@@ -19,6 +19,7 @@ pub enum FrameEvent {
 }
 
 impl FrameParser {
+    #[must_use]
     pub fn new(key: [u8; 16], expect_token: bool) -> Self {
         Self {
             key,
@@ -70,12 +71,11 @@ impl FrameParser {
                             entry[index] = Some(hex_part.to_string());
                         }
 
-                        if entry.iter().all(|p| p.is_some()) {
+                        if entry.iter().all(std::option::Option::is_some) {
                             raw = entry
                                 .iter()
-                                .filter_map(|p| p.clone())
-                                .collect::<Vec<_>>()
-                                .join("");
+                                .filter_map(std::clone::Clone::clone)
+                                .collect::<String>();
                             self.chunks.remove(&id);
                         } else {
                             continue;
@@ -106,6 +106,7 @@ impl FrameParser {
     }
 }
 
+#[must_use]
 pub fn format_outgoing_frames(value: &serde_json::Value, key: &[u8; 16]) -> Vec<u8> {
     let json_bytes = serde_json::to_vec(value).unwrap_or_default();
     let hex = encrypt(&json_bytes, key);
@@ -117,14 +118,13 @@ pub fn format_outgoing_frames(value: &serde_json::Value, key: &[u8; 16]) -> Vec<
     } else {
         let id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_millis() as u64);
         let total = hex.len().div_ceil(4000);
         for i in 0..total {
             let start = i * 4000;
             let end = std::cmp::min(hex.len(), (i + 1) * 4000);
             let part = &hex[start..end];
-            let chunk_str = format!("{}#{}#{}#{}#$", part, id, total, i);
+            let chunk_str = format!("{part}#{id}#{total}#{i}#$");
             out.extend_from_slice(chunk_str.as_bytes());
         }
     }

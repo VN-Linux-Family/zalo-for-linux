@@ -1,7 +1,7 @@
 //! RTCP receiver feedback for the Zalo 1:1 media path.
 //!
 //! Supports RFC 3550 SR/RR/SDES, RFC 4585 PLI/NACK and the transport-wide
-//! congestion-control feedback format used by ZaloCall. RTCP is plain on the
+//! congestion-control feedback format used by `ZaloCall`. RTCP is plain on the
 //! Zalo relay (srtcp=0), and the same compound packets are used on direct P2P.
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
@@ -14,6 +14,7 @@ const NACK_MAX_TRIES: u8 = 5;
 const NACK_DROP_MS: u64 = 400;
 const NACK_KEEP: usize = 128;
 
+#[must_use]
 pub fn read_tw_seq(rtp: &[u8]) -> Option<u16> {
     if rtp.len() < 16 || (rtp[0] & 0x10) == 0 {
         return None;
@@ -49,7 +50,7 @@ pub fn read_tw_seq(rtp: &[u8]) -> Option<u16> {
     None
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TwccFeedback {
     pub sender_ssrc: u32,
     pub media_ssrc: u32,
@@ -85,7 +86,7 @@ impl TwccRecorder {
         unwrapped
     }
 
-    /// now_ms is a monotonic millisecond clock, not wall-clock time.
+    /// `now_ms` is a monotonic millisecond clock, not wall-clock time.
     pub fn add(&mut self, seq: u16, now_ms: u64) {
         let unwrapped = self.unwrap(seq);
         if self.next.is_none() {
@@ -102,7 +103,8 @@ impl TwccRecorder {
         self.top = Some(self.top.map_or(unwrapped, |top| top.max(unwrapped)));
     }
 
-    pub fn is_pending(&self) -> bool {
+    #[must_use]
+    pub const fn is_pending(&self) -> bool {
         matches!((self.next, self.top), (Some(next), Some(top)) if top >= next)
     }
 
@@ -244,6 +246,7 @@ fn encode_twcc(
 }
 
 /// Decodes one TWCC RTPFB/FMT=15 packet. Invalid or truncated chunks are rejected.
+#[must_use]
 pub fn parse_twcc(packet: &[u8]) -> Option<TwccFeedback> {
     if packet.len() < 20 || packet[0] >> 6 != 2 || packet[0] & 0x1f != 15 || packet[1] != 205 {
         return None;
@@ -340,6 +343,7 @@ pub struct RtcpEvents {
     pub report_blocks: Vec<ReportBlock>,
 }
 
+#[must_use]
 pub fn parse_nack(packet: &[u8]) -> Option<NackFeedback> {
     if packet.len() < 16 || packet[0] >> 6 != 2 || packet[0] & 0x1f != 1 || packet[1] != 205 {
         return None;
@@ -416,14 +420,17 @@ fn write_report_block(packet: &mut [u8], offset: usize, block: ReportBlock) {
     packet[offset + 20..offset + 24].copy_from_slice(&block.dlsr.to_be_bytes());
 }
 
-pub fn ntp_now(now_ms: u64) -> (u32, u32) {
+#[must_use]
+pub const fn ntp_now(now_ms: u64) -> (u32, u32) {
     let seconds = now_ms / 1000;
     let remainder = now_ms % 1000;
     let msw = seconds.wrapping_add(NTP_EPOCH_OFFSET) as u32;
-    let lsw = ((remainder as u128 * (1u128 << 32)) / 1000) as u32;
+    let scaled = (remainder as u128 * (1u128 << 32)) / 1000;
+    let lsw = scaled as u32;
     (msw, lsw)
 }
 
+#[must_use]
 pub fn build_sr(
     ssrc: u32,
     now_ms: u64,
@@ -451,6 +458,7 @@ pub fn build_sr(
     packet
 }
 
+#[must_use]
 pub fn build_rr(ssrc: u32, blocks: &[ReportBlock]) -> Vec<u8> {
     let block_count = blocks.len().min(31);
     let mut packet = vec![0u8; 8 + block_count * 24];
@@ -465,6 +473,7 @@ pub fn build_rr(ssrc: u32, blocks: &[ReportBlock]) -> Vec<u8> {
     packet
 }
 
+#[must_use]
 pub fn build_sdes(ssrc: u32, cname: &str) -> Vec<u8> {
     let cname_bytes = &cname.as_bytes()[..cname.len().min(255)];
     let item_len = 2 + cname_bytes.len() + 1;
@@ -481,6 +490,7 @@ pub fn build_sdes(ssrc: u32, cname: &str) -> Vec<u8> {
     packet
 }
 
+#[must_use]
 pub fn build_pli(sender_ssrc: u32, media_ssrc: u32) -> [u8; 12] {
     let mut packet = [0u8; 12];
     packet[0] = 0x81;
@@ -491,6 +501,7 @@ pub fn build_pli(sender_ssrc: u32, media_ssrc: u32) -> [u8; 12] {
     packet
 }
 
+#[must_use]
 pub fn build_nack(sender_ssrc: u32, media_ssrc: u32, lost_seq: u16) -> [u8; 16] {
     let mut packet = [0u8; 16];
     packet[0] = 0x81;
@@ -502,6 +513,7 @@ pub fn build_nack(sender_ssrc: u32, media_ssrc: u32, lost_seq: u16) -> [u8; 16] 
     packet
 }
 
+#[must_use]
 pub fn build_nack_many(sender_ssrc: u32, media_ssrc: u32, seqs: &[u16]) -> Vec<u8> {
     let mut items = Vec::<(u16, u16)>::new();
     let mut index = 0usize;
@@ -656,6 +668,7 @@ pub struct RxStats {
 }
 
 impl RxStats {
+    #[must_use]
     pub fn new(clock_hz: u32) -> Self {
         Self {
             clock_hz,
@@ -669,12 +682,7 @@ impl RxStats {
         }
         let seq = u16::from_be_bytes([rtp[2], rtp[3]]);
         let timestamp = u32::from_be_bytes([rtp[4], rtp[5], rtp[6], rtp[7]]);
-        if !self.started {
-            self.started = true;
-            self.ssrc = u32::from_be_bytes([rtp[8], rtp[9], rtp[10], rtp[11]]);
-            self.base_seq = seq;
-            self.max_seq = seq;
-        } else {
+        if self.started {
             let ahead = seq.wrapping_sub(self.max_seq);
             if ahead != 0 && ahead < 0x8000 {
                 if seq < self.max_seq {
@@ -682,6 +690,11 @@ impl RxStats {
                 }
                 self.max_seq = seq;
             }
+        } else {
+            self.started = true;
+            self.ssrc = u32::from_be_bytes([rtp[8], rtp[9], rtp[10], rtp[11]]);
+            self.base_seq = seq;
+            self.max_seq = seq;
         }
         let extended = self.cycles.wrapping_add(u32::from(seq));
         if self.seen_set.contains_key(&extended) {
@@ -731,7 +744,7 @@ impl RxStats {
             ((lost_interval * 256) / expected_interval as i64).clamp(0, 255) as u8
         };
         let dlsr = if self.lsr_at_ms > 0 {
-            (now_ms.saturating_sub(self.lsr_at_ms) as u128 * 65_536 / 1000) as u32
+            (u128::from(now_ms.saturating_sub(self.lsr_at_ms)) * 65_536 / 1000) as u32
         } else {
             0
         };
@@ -740,7 +753,7 @@ impl RxStats {
             fraction_lost,
             cumulative_lost: lost.clamp(-0x80_0000, 0x7f_ffff) as i32,
             extended_highest_seq: extended_highest,
-            jitter: self.jitter.round().clamp(0.0, u32::MAX as f64) as u32,
+            jitter: self.jitter.round().clamp(0.0, f64::from(u32::MAX)) as u32,
             lsr: self.lsr,
             dlsr,
         })
@@ -766,10 +779,12 @@ impl RxStats {
         }
     }
 
-    pub fn received(&self) -> u64 {
+    #[must_use]
+    pub const fn received(&self) -> u64 {
         self.received
     }
 
+    #[must_use]
     pub fn ssrc(&self) -> Option<u32> {
         self.started.then_some(self.ssrc)
     }
@@ -793,6 +808,7 @@ pub struct RtcpFeedback {
 }
 
 impl RtcpFeedback {
+    #[must_use]
     pub fn new(local_ssrc: u32) -> Self {
         Self {
             local_ssrc,
@@ -926,110 +942,5 @@ impl RtcpFeedback {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_transport_wide_sequence_from_rfc8285_extension() {
-        let mut rtp = vec![0u8; 20];
-        rtp[0] = 0x90;
-        rtp[12..14].copy_from_slice(&0xbedeu16.to_be_bytes());
-        rtp[14..16].copy_from_slice(&1u16.to_be_bytes());
-        rtp[16] = (TWCC_EXT_ID << 4) | 1;
-        rtp[17..19].copy_from_slice(&0x1234u16.to_be_bytes());
-        assert_eq!(read_tw_seq(&rtp), Some(0x1234));
-    }
-
-    #[test]
-    fn reports_fractional_and_cumulative_loss() {
-        let mut stats = RxStats::new(90_000);
-        for (seq, ts) in [(10u16, 0u32), (11, 3000), (13, 9000), (14, 12000)] {
-            let mut rtp = vec![0u8; 12];
-            rtp[2..4].copy_from_slice(&seq.to_be_bytes());
-            rtp[4..8].copy_from_slice(&ts.to_be_bytes());
-            rtp[8..12].copy_from_slice(&222u32.to_be_bytes());
-            stats.on_packet(&rtp, u64::from(seq) * 33);
-        }
-        let report = stats.block(1000).unwrap();
-        assert_eq!(report.ssrc, 222);
-        assert_eq!(report.cumulative_lost, 1);
-        assert_eq!(report.fraction_lost, 51);
-    }
-
-    #[test]
-    fn twcc_build_and_parse_roundtrip_handles_large_and_small_deltas() {
-        let mut recorder = TwccRecorder::default();
-        for (seq, time) in [(65534u16, 1000u64), (0, 1000), (1, 1200), (2, 900)] {
-            recorder.add(seq, time);
-        }
-        let packets = recorder.build(10, 20);
-        assert_eq!(packets.len(), 1);
-        let decoded = parse_twcc(&packets[0]).unwrap();
-        assert_eq!(decoded.base, 65534);
-        assert_eq!(decoded.count, 5);
-        assert_eq!(decoded.status, vec![1, 0, 1, 2, 2]);
-        assert_eq!(decoded.delta_q, vec![160, 0, 800, -1200]);
-    }
-
-    #[test]
-    fn nack_tracker_detects_and_retries_bounded_holes() {
-        let mut tracker = NackTracker::default();
-        assert!(tracker.note(22, 10, 0).is_empty());
-        let first = tracker.note(22, 13, 10);
-        assert_eq!(first, vec![(22, vec![11, 12])]);
-        assert!(tracker.poll(49).is_empty());
-        assert_eq!(tracker.poll(50), vec![(22, vec![11, 12])]);
-        assert_eq!(tracker.poll(90), vec![(22, vec![11, 12])]);
-    }
-
-    #[test]
-    fn builds_nack_compacting_next_sixteen_sequences() {
-        let packet = build_nack_many(10, 20, &[100, 101, 104, 116, 120]);
-        assert_eq!(u16::from_be_bytes([packet[2], packet[3]]), 4);
-        assert_eq!(u16::from_be_bytes([packet[12], packet[13]]), 100);
-        assert_eq!(u16::from_be_bytes([packet[14], packet[15]]), 0x8009);
-        assert_eq!(u16::from_be_bytes([packet[16], packet[17]]), 120);
-        assert_eq!(u16::from_be_bytes([packet[18], packet[19]]), 0x0000);
-    }
-
-    #[test]
-    fn parses_nack_pid_and_bitmask_with_sequence_wrap() {
-        let nack = build_nack_many(20, 10, &[65534, 65535, 0, 2]);
-        let parsed = parse_nack(&nack).unwrap();
-        assert_eq!(parsed.sender_ssrc, 20);
-        assert_eq!(parsed.media_ssrc, 10);
-        assert_eq!(parsed.lost_sequences, vec![0, 2, 65534, 65535]);
-    }
-
-    #[test]
-    fn parses_report_blocks_and_twcc_from_compound_feedback() {
-        let block = ReportBlock {
-            ssrc: 10,
-            fraction_lost: 25,
-            cumulative_lost: -2,
-            extended_highest_seq: 99,
-            jitter: 4,
-            lsr: 5,
-            dlsr: 6,
-        };
-        let rr = build_rr(20, &[block]);
-        let mut feedback = RtcpFeedback::new(10);
-        let events = feedback.on_rtcp(true, &rr, 100);
-        assert_eq!(events.report_blocks, vec![block]);
-
-        let mut recorder = TwccRecorder::default();
-        recorder.add(1, 1000);
-        recorder.add(2, 1010);
-        let twcc = recorder.build(20, 10).remove(0);
-        let events = feedback.on_rtcp(true, &twcc, 100);
-        assert_eq!(events.twcc_feedback.len(), 1);
-        assert_eq!(events.twcc_feedback[0].count, 2);
-    }
-
-    #[test]
-    fn parses_pli_request_for_our_ssrc() {
-        let mut feedback = RtcpFeedback::new(10);
-        let pli = build_pli(20, 10);
-        assert_eq!(feedback.on_rtcp(true, &pli, 100).keyframe_targets, vec![10]);
-    }
-}
+#[path = "../tests/protocol/rtcp.rs"]
+mod tests;

@@ -1,4 +1,4 @@
-//! MicLeveler: DSP software make-up gain with adaptive noise-floor ceiling,
+//! `MicLeveler`: DSP software make-up gain with adaptive noise-floor ceiling,
 //! speech-triggered gain adaptation, far-end hold, sample-by-sample smooth ramp,
 //! and peak limiting.
 //!
@@ -33,6 +33,7 @@ pub struct MicLeveler {
 }
 
 impl MicLeveler {
+    #[must_use]
     pub fn new(far_active: Option<Arc<AtomicBool>>) -> Self {
         Self {
             gain_db: 0.0,
@@ -49,11 +50,12 @@ impl MicLeveler {
         }
     }
 
+    #[must_use]
     pub fn compute_level_db(samples: &[i16]) -> f32 {
         if samples.is_empty() {
             return -120.0;
         }
-        let sum_sq: f64 = samples.iter().map(|&v| (v as f64) * (v as f64)).sum();
+        let sum_sq: f64 = samples.iter().map(|&v| f64::from(v) * f64::from(v)).sum();
         let rms = (sum_sq / samples.len() as f64).sqrt().max(1.0);
         20.0 * (rms / 32768.0).log10() as f32
     }
@@ -91,8 +93,7 @@ impl MicLeveler {
             let far_is_talking = self
                 .far_active
                 .as_ref()
-                .map(|f| f.load(Ordering::Relaxed))
-                .unwrap_or(false);
+                .is_some_and(|f| f.load(Ordering::Relaxed));
 
             if far_is_talking {
                 self.held_frames += 1;
@@ -132,7 +133,11 @@ impl MicLeveler {
         let mut g0 = self.g_prev;
         let n_samples = samples.len();
 
-        let peak = samples.iter().map(|&v| (v as i32).abs()).max().unwrap_or(0);
+        let peak = samples
+            .iter()
+            .map(|&v| i32::from(v).abs())
+            .max()
+            .unwrap_or(0);
 
         if peak > 0 {
             let lim = 32000.0 / peak as f32;
@@ -148,94 +153,24 @@ impl MicLeveler {
 
         let step = (g - g0) / n_samples as f32;
         for (i, s) in samples.iter_mut().enumerate() {
-            let factor = g0 + step * (i + 1) as f32;
-            let val = (*s as f32 * factor).round() as i32;
+            let factor = step.mul_add((i + 1) as f32, g0);
+            let val = (f32::from(*s) * factor).round() as i32;
             *s = val.clamp(-32768, 32767) as i16;
         }
     }
     #[cfg(test)]
-    pub fn gain_db(&self) -> f32 {
+    #[must_use]
+    pub const fn gain_db(&self) -> f32 {
         self.gain_db
     }
 
     #[cfg(test)]
-    pub fn noise_db(&self) -> f32 {
+    #[must_use]
+    pub const fn noise_db(&self) -> f32 {
         self.noise_db
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_compute_level_db_bounds() {
-        let silence = vec![0i16; 320];
-        assert!(MicLeveler::compute_level_db(&silence) < -90.0);
-
-        let full_scale = vec![32767i16; 320];
-        let db = MicLeveler::compute_level_db(&full_scale);
-        assert!((db - 0.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn test_noise_floor_learning_and_speech_gain() {
-        let far_active = Arc::new(AtomicBool::new(false));
-        let mut leveler = MicLeveler::new(Some(Arc::clone(&far_active)));
-
-        // 1. Feed 25 frames of quiet noise (~ -50 dBFS)
-        // Amplitude ~ 100 on 32768 is ~ -50 dBFS
-        let noise_frame = vec![103i16; 320];
-        for _ in 0..25 {
-            let mut f = noise_frame.clone();
-            leveler.process(&mut f);
-        }
-        assert!(leveler.noise_db() > -60.0 && leveler.noise_db() < -45.0);
-
-        // 2. Feed speech frame (~ -30 dBFS, amplitude ~ 1036)
-        // Target is -22 dBFS, so gain should increase towards +8 dB
-        let speech_frame = vec![1036i16; 320];
-        let prev_gain = leveler.gain_db();
-        let mut f = speech_frame.clone();
-        leveler.process(&mut f);
-        assert!(leveler.gain_db() > prev_gain);
-        assert!(leveler.gain_db() <= prev_gain + UP_DB + 0.01);
-    }
-
-    #[test]
-    fn test_far_active_holds_gain() {
-        let far_active = Arc::new(AtomicBool::new(false));
-        let mut leveler = MicLeveler::new(Some(Arc::clone(&far_active)));
-
-        let noise_frame = vec![103i16; 320];
-        for _ in 0..25 {
-            let mut f = noise_frame.clone();
-            leveler.process(&mut f);
-        }
-
-        // Set far_active to true (remote peer is speaking)
-        far_active.store(true, Ordering::Relaxed);
-        let speech_frame = vec![1036i16; 320];
-        let gain_before = leveler.gain_db();
-        let mut f = speech_frame.clone();
-        leveler.process(&mut f);
-
-        // Gain must be frozen and NOT adapt
-        assert_eq!(leveler.gain_db(), gain_before);
-    }
-
-    #[test]
-    fn test_peak_limiting_does_not_exceed_32000() {
-        let mut leveler = MicLeveler::new(None);
-        leveler.gain_db = 12.0; // High gain (+12 dB = ~4x)
-        leveler.g_prev = 4.0;
-
-        // Input sample with peak 10000 -> 4x would be 40000 (overflows i16 without limit)
-        let mut frame = vec![10000i16; 320];
-        leveler.process(&mut frame);
-
-        for &s in &frame {
-            assert!((-32000..=32000).contains(&s));
-        }
-    }
-}
+#[path = "../tests/audio/leveler.rs"]
+mod tests;

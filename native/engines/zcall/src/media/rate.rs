@@ -92,13 +92,13 @@ impl SendRateController {
         let max_height = positive(config, "maxHeight", 720);
         let max_fps = positive(config, "codecMaxFps", 24);
         let max_kbps = positive(config, "maxBitrate", 1500);
-        let keyframe_interval_ms = positive(config, "keyFrameIntervalMs", 10_000) as u64;
+        let keyframe_interval_ms = u64::from(positive(config, "keyFrameIntervalMs", 10_000));
 
         let mut ladder = config
             .get("bwProfiles")
             .and_then(Value::as_array)
             .filter(|rows| !rows.is_empty())
-            .map(|rows| {
+            .map_or_default(|rows| {
                 rows.iter()
                     .filter_map(|row| {
                         let id = row.get("id").and_then(Value::as_u64).unwrap_or(0) as u32;
@@ -126,8 +126,7 @@ impl SendRateController {
                         })
                     })
                     .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+            });
 
         if ladder.is_empty() {
             ladder = DEFAULT_LADDER
@@ -199,11 +198,13 @@ impl SendRateController {
         }
     }
 
+    #[must_use]
     pub fn profile(&self) -> VideoProfile {
         self.ladder[self.level].profile.clone()
     }
 
-    pub fn rung_count(&self) -> usize {
+    #[must_use]
+    pub const fn rung_count(&self) -> usize {
         self.ladder.len()
     }
 
@@ -267,7 +268,7 @@ impl SendRateController {
         }
     }
 
-    /// downlink_loss is the fraction of remote RTP packets not received in the
+    /// `downlink_loss` is the fraction of remote RTP packets not received in the
     /// previous interval. Returns a new profile only when a rung changes.
     pub fn tick(
         &mut self,
@@ -285,7 +286,9 @@ impl SendRateController {
         };
 
         let queue_ms =
-            if !window.delays_ms.is_empty() {
+            if window.delays_ms.is_empty() {
+                None
+            } else {
                 let mut sorted = window.delays_ms;
                 sorted.sort_unstable();
                 let minimum = sorted[0];
@@ -302,8 +305,6 @@ impl SendRateController {
                     .min()
                     .unwrap_or(minimum);
                 Some((sorted[sorted.len() / 2] - baseline).max(0))
-            } else {
-                None
             };
 
         self.no_feedback = if twcc_valid {
@@ -328,7 +329,9 @@ impl SendRateController {
                     || loss.is_none_or(|value| value >= self.low_loss)
                     || queue_ms.is_none_or(|value| value > QUEUE_HOLD_MS)
                     || downlink_loss.is_some_and(|value| value > DOWNLINK_HOLD);
-                if !hold {
+                if hold {
+                    self.good_seconds = 0;
+                } else {
                     self.good_seconds = self.good_seconds.saturating_add(1);
                     if self.good_seconds >= UP_HOLD_S
                         && self.level < self.ceiling
@@ -339,8 +342,6 @@ impl SendRateController {
                         self.level += 1;
                         self.totals.ups = self.totals.ups.saturating_add(1);
                     }
-                } else {
-                    self.good_seconds = 0;
                 }
             }
 
@@ -360,21 +361,22 @@ impl SendRateController {
         }
 
         let current = self.profile();
-        if current != self.last_profile {
+        if current == self.last_profile {
+            None
+        } else {
             self.last_profile = current.clone();
             self.totals.changes = self.totals.changes.saturating_add(1);
             Some(current)
-        } else {
-            None
         }
     }
 
+    #[must_use]
     pub fn totals(&self) -> RateTotals {
         self.totals.clone()
     }
 }
 
-fn dimensions(resolution: u32) -> Option<(u32, u32)> {
+const fn dimensions(resolution: u32) -> Option<(u32, u32)> {
     match resolution {
         240 => Some((426, 240)),
         360 => Some((640, 360)),
@@ -394,74 +396,5 @@ fn positive(config: &Value, key: &str, fallback: u32) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn starts_at_server_startup_bitrate_or_nearest_lower_rung() {
-        let controller = SendRateController::new(&json!({"startupBitrate":500}), 10);
-        assert_eq!(controller.profile().rung, 4);
-        assert_eq!(controller.profile().width, 640);
-        assert_eq!(controller.profile().height, 360);
-    }
-
-    #[test]
-    fn uses_default_ladder_when_server_profiles_do_not_fit() {
-        let controller = SendRateController::new(&json!({"maxWidth":100,"maxHeight":100}), 10);
-        assert_ne!(controller.profile().bitrate, 0);
-        assert_eq!(controller.rung_count(), 1);
-    }
-
-    #[test]
-    fn steps_down_on_loss_and_requires_four_clean_feedback_windows_to_step_up() {
-        let mut controller = SendRateController::new(&json!({"startupBitrate":500}), 10);
-        let twcc = TwccFeedback {
-            sender_ssrc: 20,
-            media_ssrc: 10,
-            base: 1,
-            count: 20,
-            reference_time: 100,
-            feedback_count: 1,
-            status: vec![0; 20],
-            delta_q: Vec::new(),
-        };
-        controller.on_feedback(&[twcc], &[], 3000);
-        assert_eq!(controller.tick(3000, true, None).unwrap().rung, 3);
-        for second in 1u64..=20 {
-            controller.on_sent(100 + second as u16, 3000 + second * 1024);
-            let packet = TwccFeedback {
-                sender_ssrc: 20,
-                media_ssrc: 10,
-                base: 100 + second as u16,
-                count: 10,
-                reference_time: 100 + (second * 16) as u32,
-                feedback_count: second as u8,
-                status: vec![1; 10],
-                delta_q: vec![0; 10],
-            };
-            controller.on_feedback(&[packet], &[], 3000 + second * 1024);
-            let changed = controller.tick(3000 + second * 1024, true, None);
-            if second < 20 {
-                assert!(changed.is_none());
-            } else {
-                assert_eq!(changed.unwrap().rung, 4);
-            }
-        }
-    }
-
-    #[test]
-    fn ignores_report_blocks_for_another_ssrc() {
-        let mut controller = SendRateController::new(&json!({}), 10);
-        controller.on_feedback(
-            &[],
-            &[ReportBlock {
-                ssrc: 99,
-                fraction_lost: 255,
-                ..ReportBlock::default()
-            }],
-            1000,
-        );
-        assert!(controller.tick(1000, true, None).is_none());
-    }
-}
+#[path = "../tests/media/rate.rs"]
+mod tests;

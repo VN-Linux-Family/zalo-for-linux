@@ -1,4 +1,4 @@
-//! PR #220 microphone source synchronization, mute handling, and bidirectional ClipGuard.
+//! PR #220 microphone source synchronization, mute handling, and bidirectional `ClipGuard`.
 
 use super::backend::{
     pulse_get_source_info, pulse_normalize_own_stream, set_source_mute, set_source_volume,
@@ -61,6 +61,7 @@ impl VolumeBackend for NullVolumeBackend {
 }
 
 /// Apply smooth polynomial soft-saturation to prevent audio clipping.
+///
 /// For samples within [-20000, 20000], signal is untouched (strictly linear).
 /// For samples exceeding 20000, a smooth C1 cubic curve compresses peaks asymptotically
 /// towards 32000, completely eliminating harsh square-wave clipping.
@@ -69,7 +70,7 @@ pub fn apply_soft_limiter(samples: &mut [i16]) {
     const HEADROOM: f32 = 18000.0; // 20000 + 18000 * (1 - 1/3) = 32000
 
     for s in samples.iter_mut() {
-        let val = *s as f32;
+        let val = f32::from(*s);
         let abs_val = val.abs();
         if abs_val > THRESHOLD {
             let sign = if val > 0.0 { 1.0 } else { -1.0 };
@@ -80,7 +81,7 @@ pub fn apply_soft_limiter(samples: &mut [i16]) {
     }
 }
 
-/// ClipGuard monitors raw captured PCM samples for near-clipping (>= 28500),
+/// `ClipGuard` monitors raw captured PCM samples for near-clipping (>= 28500),
 /// sustained hot speech (> -12 dBFS), and sustained quiet near-end speech (< -28 dBFS),
 /// adjusting hardware source volume bidirectionally (35%..100%) and syncing DE changes.
 pub struct ClipGuard {
@@ -110,8 +111,10 @@ pub struct ClipGuard {
 
 impl ClipGuard {
     pub fn new(device: Option<String>, current_vol: Arc<AtomicU8>) -> Self {
-        let enabled = env::var("ZCALL_MIC_AGC").map(|v| v != "0").unwrap_or(true);
-        let past = std::time::Instant::now() - std::time::Duration::from_secs(10);
+        let enabled = env::var("ZCALL_MIC_AGC").map_or(true, |v| v != "0");
+        let past = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(10))
+            .unwrap();
         let backend: Arc<dyn VolumeBackend> = if cfg!(test) {
             Arc::new(NullVolumeBackend)
         } else {
@@ -156,8 +159,7 @@ impl ClipGuard {
                 actual = self
                     .backend
                     .get_source_state(self.device.as_deref())
-                    .map(|value| value.pct.min(100))
-                    .unwrap_or(70);
+                    .map_or(70, |value| value.pct.min(100));
             }
             self.current_vol.store(actual, Ordering::Relaxed);
             if self.enabled && !self.manual.load(Ordering::Relaxed) {
@@ -182,7 +184,8 @@ impl ClipGuard {
         }
     }
 
-    pub fn is_os_muted(&self) -> bool {
+    #[must_use]
+    pub const fn is_os_muted(&self) -> bool {
         self.os_muted
     }
 
@@ -209,7 +212,9 @@ impl ClipGuard {
             self.window_frame_count = 0;
             self.quiet_speech_frames = 0;
             self.hot_speech_frames = 0;
-            self.last_step = std::time::Instant::now() - std::time::Duration::from_secs(2);
+            self.last_step = std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(2))
+                .unwrap();
             if self.backend.set_source_mute(self.device.as_deref(), false) {
                 self.os_muted = false;
             }
@@ -308,8 +313,7 @@ impl ClipGuard {
             let actual = self
                 .backend
                 .get_source_state(self.device.as_deref())
-                .map(|s| s.pct.min(100))
-                .unwrap_or(new_vol);
+                .map_or(new_vol, |s| s.pct.min(100));
             if let Ok(mut ts) = self.last_vol_write.lock() {
                 *ts = std::time::Instant::now();
             }
@@ -351,7 +355,9 @@ impl ClipGuard {
             self.window_frame_count = 0;
             self.quiet_speech_frames = 0;
             self.hot_speech_frames = 0;
-            self.last_step = std::time::Instant::now() - std::time::Duration::from_secs(2);
+            self.last_step = std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(2))
+                .unwrap();
         }
         self.was_manual = is_manual;
         let agc_active = self.enabled && !is_manual;
@@ -378,8 +384,7 @@ impl ClipGuard {
         let far_is_talking = self
             .far_active
             .as_ref()
-            .map(|f| f.load(Ordering::Relaxed))
-            .unwrap_or(false);
+            .is_some_and(|f| f.load(Ordering::Relaxed));
         if far_is_talking {
             return;
         }
@@ -398,9 +403,8 @@ impl ClipGuard {
                 self.hot_speech_frames = 0;
             }
             return;
-        } else {
-            self.hot_speech_frames = self.hot_speech_frames.saturating_sub(1);
         }
+        self.hot_speech_frames = self.hot_speech_frames.saturating_sub(1);
 
         if self.os_muted {
             return;
@@ -430,5 +434,5 @@ impl ClipGuard {
 }
 
 #[cfg(test)]
-#[path = "clip_guard_tests.rs"]
+#[path = "../tests/audio/clip_guard.rs"]
 mod tests;

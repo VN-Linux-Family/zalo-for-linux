@@ -1,4 +1,5 @@
 //! Native Linux device discovery and call-device preferences.
+//!
 //! Device discovery, preference storage, and Zalo device-list formatting live here;
 //! host frontends render the returned lists and forward a user's selection.
 use crate::audio::backend::{pulse_device_inventory, PulseAudioDevice};
@@ -32,6 +33,7 @@ fn prefs_path() -> Option<PathBuf> {
         .map(|dir| dir.join("zcall-devices.json"))
 }
 
+#[must_use]
 pub fn load_prefs() -> DevicePrefs {
     prefs_path()
         .and_then(|path| fs::read(path).ok())
@@ -140,6 +142,7 @@ fn preferred_device<'a>(
     devices.first()
 }
 
+#[must_use]
 pub fn list_devices() -> Value {
     let inventory = pulse_device_inventory().unwrap_or_default();
     let mics = audio_devices(&inventory.sources);
@@ -159,6 +162,7 @@ pub fn list_devices() -> Value {
     })
 }
 
+#[must_use]
 pub fn zalo_device_list() -> Value {
     let devices = list_devices();
     let prefs = load_prefs();
@@ -185,8 +189,7 @@ pub fn zalo_device_list() -> Value {
         prefs
             .camera
             .as_ref()
-            .map(|pref| pref.id.as_str())
-            .unwrap_or_default(),
+            .map_or_default(|pref| pref.id.as_str()),
         "",
     )
     .map(to_zalo_item);
@@ -284,6 +287,7 @@ pub fn set_device(kind: &str, id: &str) -> Result<(), String> {
     save_prefs(&prefs)
 }
 
+#[must_use]
 pub fn should_block_incoming() -> bool {
     let prefs = load_prefs();
     if !prefs.no_mic_block && !prefs.no_speaker_block {
@@ -293,79 +297,13 @@ pub fn should_block_incoming() -> bool {
     (prefs.no_mic_block
         && devices["mics"]
             .as_array()
-            .is_none_or(|items| items.is_empty()))
+            .is_none_or(std::vec::Vec::is_empty))
         || (prefs.no_speaker_block
             && devices["speakers"]
                 .as_array()
-                .is_none_or(|items| items.is_empty()))
+                .is_none_or(std::vec::Vec::is_empty))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preferences_preserve_advanced_options() {
-        let preferences: DevicePrefs = serde_json::from_value(json!({
-            "mic":"alsa_input.test",
-            "speaker":"alsa_output.test",
-            "camera":{"id":"/dev/video2","label":"USB Cam"},
-            "noMicBlock":true,
-            "noSpeakerBlock":false
-        }))
-        .unwrap();
-        assert_eq!(preferences.mic, "alsa_input.test");
-        assert_eq!(preferences.speaker, "alsa_output.test");
-        assert_eq!(
-            preferences.camera.as_ref().map(|camera| camera.id.as_str()),
-            Some("/dev/video2")
-        );
-        assert!(preferences.no_mic_block);
-        assert!(!preferences.no_speaker_block);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn camera_enumeration_excludes_metadata_only_video_nodes() {
-        use v4l::capability::Flags;
-        assert!(is_capture_node(Flags::VIDEO_CAPTURE));
-        assert!(is_capture_node(Flags::VIDEO_CAPTURE_MPLANE));
-        assert!(!is_capture_node(Flags::META_CAPTURE));
-        assert!(!is_capture_node(Flags::empty()));
-    }
-
-    #[test]
-    fn audio_device_filter_excludes_monitors_and_internal_loopbacks() {
-        let devices = vec![
-            PulseAudioDevice {
-                id: "alsa_input.usb".into(),
-                label: "USB microphone".into(),
-            },
-            PulseAudioDevice {
-                id: "alsa_output.speaker.monitor".into(),
-                label: "Monitor".into(),
-            },
-            PulseAudioDevice {
-                id: "zcall_ec_virtual".into(),
-                label: "Internal".into(),
-            },
-            PulseAudioDevice {
-                id: "raop_sink.living_room".into(),
-                label: "AirPlay".into(),
-            },
-        ];
-        let listed = audio_devices(&devices);
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0]["id"], "alsa_input.usb");
-        assert_eq!(listed[0]["label"], "USB microphone");
-    }
-
-    #[test]
-    fn zalo_device_response_preserves_auto_flags() {
-        let prefs = DevicePrefs::default();
-        let value = serde_json::to_value(prefs).unwrap();
-        assert_eq!(value["mic"], "");
-        assert_eq!(value["speaker"], "");
-        assert!(value["camera"].is_null());
-    }
-}
+#[path = "tests/devices.rs"]
+mod tests;

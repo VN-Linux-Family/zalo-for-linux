@@ -1,4 +1,4 @@
-//! Wayland XDG ScreenCast portal and PipeWire capture implementation.
+//! Wayland XDG `ScreenCast` portal and `PipeWire` capture implementation.
 use super::{
     encode_frames, portal_error_message, EncodedScreenFrame, LatestFrameQueue, RawScreenFrame,
     ScreenEncodeConfig,
@@ -90,7 +90,9 @@ impl PipeWireCaptureGuard {
             remote_fd.into_raw_fd(),
             node_id,
             Some(pipewire_frame),
-            (userdata as *const CaptureData).cast_mut().cast(),
+            std::ptr::from_ref::<CaptureData>(userdata)
+                .cast_mut()
+                .cast(),
             error.as_mut_ptr(),
             error.len(),
         );
@@ -255,8 +257,8 @@ fn pipewire_frame_inner(frame: PipeWireFrame) {
 
 fn portal_source_types(source: Option<&str>) -> Result<SourceType, String> {
     match source {
-        Some("monitor") | Some("screen") | Some("screen:0") => Ok(SourceType::MONITOR),
-        Some("window") | Some("window:select") => Ok(SourceType::WINDOW),
+        Some("monitor" | "screen" | "screen:0") => Ok(SourceType::MONITOR),
+        Some("window" | "window:select") => Ok(SourceType::WINDOW),
         Some(other) => Err(format!("Unsupported Wayland screen source: {other}")),
         None => Ok(SourceType::MONITOR | SourceType::WINDOW),
     }
@@ -466,7 +468,7 @@ fn pipewire_capture(
 
     // Start the encoder only after all fallible PipeWire setup has succeeded.
     let encoder_stop = stop.clone();
-    let encoder_settings = settings.clone();
+    let encoder_settings = settings;
     let encoder_status = status.clone();
     let encoder_encoded_frame_seen = encoded_frame_seen.clone();
     let encoder_tx = tx;
@@ -537,68 +539,5 @@ fn pipewire_capture(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::portal_source_types;
-    use ashpd::desktop::screencast::SourceType;
-
-    #[test]
-    fn pipewire_failure_is_reported_before_worker_stop_suppresses_duplicates() {
-        use super::report_capture_failure;
-        use crate::screen::report_worker_result;
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::mpsc::sync_channel;
-
-        let (status_tx, status_rx) = sync_channel(2);
-        let stop = AtomicBool::new(false);
-        let result = Err("PipeWire screen source disappeared".to_string());
-
-        report_capture_failure(&result, &stop, &status_tx);
-        stop.store(true, Ordering::Release);
-        report_worker_result(result, &stop, &status_tx);
-
-        assert_eq!(
-            status_rx.try_recv().unwrap().unwrap_err(),
-            "PipeWire screen source disappeared"
-        );
-        assert!(status_rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn pipewire_capture_setup_and_teardown_can_be_repeated() {
-        use super::{CaptureData, PipeWireCaptureGuard};
-        use crate::screen::LatestFrameQueue;
-        use std::fs::File;
-        use std::sync::atomic::AtomicBool;
-        use std::sync::Arc;
-
-        let data = CaptureData {
-            raw_frames: Arc::new(LatestFrameQueue::default()),
-            raw_frame_seen: Arc::new(AtomicBool::new(false)),
-        };
-
-        for _ in 0..64 {
-            let remote_fd = File::open("/dev/null").unwrap().into();
-            if let Ok(mut capture) = PipeWireCaptureGuard::new(remote_fd, 1, &data) {
-                let _ = capture.iterate(0);
-                capture.disconnect();
-            }
-        }
-    }
-
-    #[test]
-    fn portal_source_selection_restricts_monitor_and_window_choices() {
-        assert_eq!(
-            portal_source_types(Some("monitor")).unwrap(),
-            SourceType::MONITOR
-        );
-        assert_eq!(
-            portal_source_types(Some("window")).unwrap(),
-            SourceType::WINDOW
-        );
-        assert_eq!(
-            portal_source_types(None).unwrap(),
-            SourceType::MONITOR | SourceType::WINDOW
-        );
-        assert!(portal_source_types(Some("unknown")).is_err());
-    }
-}
+#[path = "../tests/screen/portal.rs"]
+mod tests;
