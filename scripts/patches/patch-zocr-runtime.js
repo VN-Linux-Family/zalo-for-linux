@@ -8,7 +8,7 @@ const { createHash } = require('node:crypto');
 const { parseAst } = require('../utils/ast-transform');
 
 const { ROOT, APP_DIR, TEMP_DIR, ZOCR_DIR, APP_OCR_DIR, APP_NATIVE_LIBS, resolvePrebuiltBinary } = require('../utils/paths');
-const { getOnnxRuntimeUrl, ONNXRUNTIME_VERSION } = require('../download');
+const { getOnnxRuntimeUrl } = require('../download');
 // Extract the 32-byte seed used by the OCR model vault.
 function extractKey(data) {
   function requireBytes(offset, length) {
@@ -273,15 +273,16 @@ function installOnnxRuntime() {
   }
   fs.ensureDirSync(TEMP_DIR);
   const url = getOnnxRuntimeUrl();
-  const filename = url.split('/').pop();
-  const version = ONNXRUNTIME_VERSION;
+  const filename = path.basename(new URL(url).pathname);
+  const entry = `runtimes/linux-${process.arch}/native/libonnxruntime.so`;
+  const destDir = APP_OCR_DIR;
+  const prebuilt = resolvePrebuiltBinary('libonnxruntime.so', null);
+  let libraryPath = prebuilt && fs.existsSync(prebuilt) ? prebuilt : null;
 
-  const libraryName = `libonnxruntime.so.${version}`;
-  const libraryPath = resolvePrebuiltBinary(libraryName, path.join(TEMP_DIR, libraryName));
-  if (!fs.existsSync(libraryPath)) {
+  if (!libraryPath) {
     const archive = path.join(TEMP_DIR, filename);
     if (!fs.existsSync(archive)) {
-      logger.warn('ONNX Runtime archive not found in temp, attempting on-demand download...');
+      logger.warn('ONNX Runtime NuGet package not found in temp, attempting on-demand download...');
       try {
         execFileSync('wget', ['--progress=bar:force', url, '-O', archive], { stdio: 'inherit' });
       } catch (error) {
@@ -289,22 +290,22 @@ function installOnnxRuntime() {
         throw new Error(`Failed to download ONNX Runtime: ${error.message}. Please run "npm run download" first.`);
       }
     } else {
-      logger.dim(`Using cached ONNX Runtime archive: ${filename}`);
+      logger.dim(`Using cached ONNX Runtime package: ${filename}`);
     }
 
-    logger.info(`Extracting ${libraryName}...`);
-    execFileSync('tar', [
-      '-xzf', archive, '-C', TEMP_DIR, '--strip-components=2',
-      `${filename.replace(/\.tgz$/, '')}/lib/${libraryName}`,
-    ], { stdio: 'pipe' });
+    const extractDir = path.join(TEMP_DIR, 'onnxruntime');
+    fs.removeSync(extractDir);
+    fs.ensureDirSync(extractDir);
+    logger.info(`Extracting ${entry}...`);
+    execFileSync('7z', ['e', '-y', archive, entry, `-o${extractDir}`], { stdio: 'pipe' });
+    libraryPath = path.join(extractDir, 'libonnxruntime.so');
     if (!fs.existsSync(libraryPath)) {
       throw new Error(`ONNX Runtime library not found after extraction: ${libraryPath}`);
     }
   } else {
-    logger.dim(`Using cached ONNX Runtime library: ${libraryName}`);
+    logger.dim(`Using prebuilt ONNX Runtime library: ${prebuilt}`);
   }
 
-  const destDir = APP_OCR_DIR;
   fs.ensureDirSync(destDir);
   fs.copyFileSync(libraryPath, path.join(destDir, 'libonnxruntime.so'));
   logger.success('libonnxruntime.so installed');
@@ -336,4 +337,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, extractKey, patch };
+module.exports = { main, extractKey, patch, installOnnxRuntime };

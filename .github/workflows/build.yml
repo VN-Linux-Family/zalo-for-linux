@@ -133,7 +133,6 @@ jobs:
         path: |
           temp/*.dmg
           temp/*.exe
-          temp/*.tgz
         key: ${{ runner.os }}-${{ matrix.arch }}-zalo-${{ steps.zalo.outputs.version }}
 
     - name: Cache Cargo registry and build artifacts
@@ -158,6 +157,13 @@ jobs:
       if: steps.node-modules.outputs.cache-hit != 'true'
       run: npm ci --prefer-offline --no-audit --build-from-source=sqlite3 --napi_build_version=6
 
+    - name: Restore ONNX Runtime package
+      id: onnxruntime
+      uses: actions/cache/restore@v6
+      with:
+        path: temp/*.nupkg
+        key: ${{ runner.os }}-${{ matrix.arch }}-onnxruntime-${{ hashFiles('scripts/download.js') }}
+
     - name: Setup and Build
       id: build
       env:
@@ -169,6 +175,13 @@ jobs:
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: npm run main
 
+    - name: Save ONNX Runtime package
+      if: steps.build.outputs.build == 'true' && hashFiles('temp/*.nupkg') != ''
+      uses: actions/cache/save@v6
+      with:
+        path: temp/*.nupkg
+        key: ${{ runner.os }}-${{ matrix.arch }}-onnxruntime-${{ hashFiles('scripts/download.js') }}
+
     - name: Save Zalo installers
       if: steps.zalo-installers.outputs.cache-hit != 'true' && steps.build.outputs.build == 'true'
       uses: actions/cache/save@v6
@@ -176,7 +189,6 @@ jobs:
         path: |
           temp/*.dmg
           temp/*.exe
-          temp/*.tgz
         key: ${{ runner.os }}-${{ matrix.arch }}-zalo-${{ steps.zalo.outputs.version }}
 
     - name: Upload Original AppImage artifact
