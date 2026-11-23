@@ -11,6 +11,7 @@ const manifest = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', '
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const core = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'lib.rs'), 'utf8');
 const codec = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'codec.rs'), 'utf8');
+const codecTests = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'tests', 'audio', 'codec.rs'), 'utf8');
 const media = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'media', 'mod.rs'), 'utf8');
 const jitter = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'jitter.rs'), 'utf8');
 const clipGuard = fs.readFileSync(path.join(root, 'native', 'engines', 'zcall', 'src', 'audio', 'clip_guard.rs'), 'utf8');
@@ -23,7 +24,7 @@ test('audio capture/playback and Opus are integrated into the standalone zcall R
   assert.match(core, /pub mod audio/);
   assert.match(manifest, /rusty-opus\s*=\s*"/);
   assert.match(codec, /RustOpusEncoder::new/);
-  assert.match(codec, /opus_voice_frame_encodes_and_decodes_at_call_sample_rate/);
+  assert.match(codecTests, /opus_voice_frame_encodes_and_decodes_at_call_sample_rate/);
   assert.match(media, /Apm::new\(/, 'PR #220 WebRTC APM must be part of the active media pipeline');
   assert.match(media, /apm\.process_render\(/);
   assert.match(media, /apm\.process_capture\(/);
