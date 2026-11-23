@@ -2349,7 +2349,6 @@ dependencies = [
 name = "zimage"
 version = "1.0.0"
 dependencies = [
- "globset",
  "image",
  "lazy_static",
  "napi",

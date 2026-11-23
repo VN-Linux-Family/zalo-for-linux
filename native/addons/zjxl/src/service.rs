@@ -27,12 +27,15 @@ pub fn bitmap_to_jxl(options: &BitmapToJxlOptions) -> Result<Buffer> {
     Ok(encode_jxl(&options.buffer, options.width, options.height)?.into())
 }
 
+fn dims(width: u32, height: u32) -> Result<(i32, i32)> {
+    let w = i32::try_from(width).map_err(|_| err("JXL dimensions exceed i32::MAX"))?;
+    let h = i32::try_from(height).map_err(|_| err("JXL dimensions exceed i32::MAX"))?;
+    Ok((w, h))
+}
+
 pub fn resize_jxl(options: &ResizeJxlOptions) -> Result<Buffer> {
-    let pixels = resize(
-        decode(&options.buffer)?,
-        i32::try_from(options.width).expect("JXL dimensions fit in i32"),
-        i32::try_from(options.height).expect("JXL dimensions fit in i32"),
-    )?;
+    let (width, height) = dims(options.width, options.height)?;
+    let pixels = resize(decode(&options.buffer)?, width, height)?;
     Ok(encode_jxl(&pixels.data, pixels.width, pixels.height)?.into())
 }
 
@@ -108,4 +111,20 @@ fn decompress_task(
         width: pixels.width,
         height: pixels.height,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dims;
+
+    #[test]
+    fn dims_accepts_normal_sizes() {
+        assert_eq!(dims(640, 480).unwrap(), (640, 480));
+    }
+
+    #[test]
+    fn dims_rejects_overflow_instead_of_panicking() {
+        assert!(dims(u32::MAX, 1).is_err());
+        assert!(dims(1, u32::MAX).is_err());
+    }
 }

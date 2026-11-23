@@ -290,9 +290,9 @@ pub struct ClipGuard {
 impl ClipGuard {
     pub fn new(device: Option<String>, current_vol: Arc<AtomicU8>) -> Self {
         let enabled = env::var("ZCALL_MIC_AGC").map_or(true, |v| v != "0");
-        let past = std::time::Instant::now()
+        let past_vol = std::time::Instant::now()
             .checked_sub(std::time::Duration::from_secs(10))
-            .unwrap();
+            .unwrap_or_else(std::time::Instant::now);
         let backend: Arc<dyn VolumeBackend> = if cfg!(test) {
             Arc::new(NullVolumeBackend)
         } else {
@@ -309,12 +309,12 @@ impl ClipGuard {
             os_muted: false,
             last_resolved_default: None,
             backend,
-            last_os_sync: past,
-            last_vol_write: Arc::new(Mutex::new(past)),
+            last_os_sync: past_vol,
+            last_vol_write: Arc::new(Mutex::new(past_vol)),
             clipped_frames_in_window: 0,
             window_frame_count: 0,
             last_step: std::time::Instant::now(),
-            last_clip: past,
+            last_clip: past_vol,
             levels: [-70.0; 250],
             level_idx: 0,
             level_count: 0,
@@ -467,7 +467,7 @@ impl ClipGuard {
             self.hot_speech_frames = 0;
             self.last_step = std::time::Instant::now()
                 .checked_sub(std::time::Duration::from_secs(2))
-                .unwrap();
+                .unwrap_or_else(std::time::Instant::now);
         }
         self.was_manual = is_manual;
         let agc_active = self.enabled && !is_manual;
@@ -662,7 +662,7 @@ fn main() {
     let last_vol_write: Arc<Mutex<std::time::Instant>> = Arc::new(Mutex::new(
         std::time::Instant::now()
             .checked_sub(std::time::Duration::from_secs(10))
-            .unwrap(),
+            .unwrap_or_else(std::time::Instant::now),
     ));
 
     let mic_volume_val = if config.test_tone {
@@ -698,7 +698,7 @@ fn main() {
             eprintln!(
                     "[audio-io] Embedded WebRTC AudioProcessing enabled (AEC: {aec_on}, NS: {ns_on}, HPF: {hpf_on})"
                 );
-            Some(Arc::new(a))
+            Some(Arc::new(Mutex::new(a)))
         }
         Err(e) => {
             eprintln!(
@@ -709,7 +709,9 @@ fn main() {
     };
 
     if let (Some(a), Some(d)) = (&apm_instance, config.min_delay_ms) {
-        a.set_delay_ms(d);
+        a.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_delay_ms(d);
     }
 
     // 1. Microphone capture thread
@@ -840,7 +842,9 @@ fn main() {
                     // ClipGuard must inspect raw capture samples before WebRTC APM / leveler.
                     guard.feed(samples);
                     if let Some(apm) = &mic_apm {
-                        apm.process_capture(samples);
+                        apm.lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .process_capture(samples);
                     }
                     if leveler_enabled {
                         leveler.process(samples);
@@ -914,7 +918,7 @@ fn main() {
         let tick = std::time::Duration::from_millis(20);
         let mut last_far_speech = std::time::Instant::now()
             .checked_sub(std::time::Duration::from_secs(1))
-            .unwrap();
+            .unwrap_or_else(std::time::Instant::now);
         let mut last_diag = std::time::Instant::now();
         let mut last_reopen_attempt = std::time::Instant::now();
         let mut write_block_accum_ms = 0u64;
@@ -966,7 +970,9 @@ fn main() {
                     };
                     if has_frame {
                         if let Some(apm) = &playout_apm {
-                            apm.process_render(&pcm_out);
+                            apm.lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .process_render(&pcm_out);
                         }
 
                         let sum_sq: i64 =
@@ -1056,7 +1062,10 @@ fn main() {
             if !write_ok || non_blocking_streak > 6 {
                 let elapsed = loop_start.elapsed();
                 if elapsed < tick {
-                    thread::sleep(tick.checked_sub(elapsed).unwrap());
+                    thread::sleep(
+                        tick.checked_sub(elapsed)
+                            .unwrap_or(std::time::Duration::ZERO),
+                    );
                 }
             }
         }
@@ -1253,6 +1262,15 @@ fn main() {
 mod tests {
     use super::*;
 
+    fn past(d: std::time::Duration) -> std::time::Instant {
+        loop {
+            if let Some(instant) = std::time::Instant::now().checked_sub(d) {
+                return instant;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn test_soft_limiter_linear_region() {
         let mut samples = vec![0i16, 1000, -1000, 15000, -20000, 20000];
@@ -1286,9 +1304,7 @@ mod tests {
         let vol = Arc::new(AtomicU8::new(100));
         let mut guard = ClipGuard::new(None, Arc::clone(&vol));
         // Artificially reset last_step to 1 second ago so it can step
-        guard.last_step = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_millis(1000))
-            .unwrap();
+        guard.last_step = past(std::time::Duration::from_millis(1000));
 
         // Feed 10 frames with clipping (30000)
         let clipped_frame = vec![30500i16; 320];
@@ -1301,18 +1317,14 @@ mod tests {
 
         // Test floor limit at 35%
         vol.store(42, Ordering::Relaxed);
-        guard.last_step = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_millis(1000))
-            .unwrap();
+        guard.last_step = past(std::time::Duration::from_millis(1000));
         for _ in 0..10 {
             guard.feed(&clipped_frame);
         }
         assert_eq!(vol.load(Ordering::Relaxed), 35);
 
         // Feed again, must not go below 35
-        guard.last_step = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_millis(1000))
-            .unwrap();
+        guard.last_step = past(std::time::Duration::from_millis(1000));
         for _ in 0..10 {
             guard.feed(&clipped_frame);
         }
@@ -1327,16 +1339,10 @@ mod tests {
         let mut guard = ClipGuard::new(None, Arc::clone(&vol)).with_controls(
             Some(Arc::clone(&far_active)),
             Arc::clone(&manual),
-            Arc::new(Mutex::new(
-                std::time::Instant::now()
-                    .checked_sub(std::time::Duration::from_secs(10))
-                    .unwrap(),
-            )),
+            Arc::new(Mutex::new(past(std::time::Duration::from_secs(10)))),
         );
         guard.enabled = true;
-        guard.last_step = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_millis(2000))
-            .unwrap();
+        guard.last_step = past(std::time::Duration::from_millis(2000));
 
         // Learn quiet noise floor (~ -64 dBFS -> amplitude ~ 20)
         let noise = vec![20i16; 320];
@@ -1361,9 +1367,7 @@ mod tests {
 
         // Manual slider lock stops further auto-adjustments
         manual.store(true, Ordering::Relaxed);
-        guard.last_step = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_millis(2000))
-            .unwrap();
+        guard.last_step = past(std::time::Duration::from_millis(2000));
         for _ in 0..15 {
             guard.feed(&quiet_speech);
         }
@@ -1446,11 +1450,9 @@ mod tests {
         let backend = Arc::new(MockVolumeBackend::new(0, false, Some("alsa_input.1")));
         let vol = Arc::new(AtomicU8::new(0));
         let manual = Arc::new(AtomicBool::new(true));
-        let past = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_secs(10))
-            .unwrap();
+        let past_vol = past(std::time::Duration::from_secs(10));
         let mut guard = ClipGuard::new(None, Arc::clone(&vol))
-            .with_controls(None, Arc::clone(&manual), Arc::new(Mutex::new(past)))
+            .with_controls(None, Arc::clone(&manual), Arc::new(Mutex::new(past_vol)))
             .with_backend(Arc::clone(&backend) as Arc<dyn VolumeBackend>, true);
 
         // Initial sync establishes baseline resolved default
@@ -1463,9 +1465,7 @@ mod tests {
             st.pct = 100;
             st.resolved_name = Some("bluez_input.2".to_string());
         }
-        guard.last_os_sync = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_secs(2))
-            .unwrap();
+        guard.last_os_sync = past(std::time::Duration::from_secs(2));
         assert!(guard.sync_os_volume());
         assert_eq!(vol.load(Ordering::Relaxed), 100);
     }
@@ -1476,18 +1476,16 @@ mod tests {
         let vol = Arc::new(AtomicU8::new(40));
         let far_active = Arc::new(AtomicBool::new(false));
         let manual = Arc::new(AtomicBool::new(false));
-        let past = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_secs(10))
-            .unwrap();
+        let past_vol = past(std::time::Duration::from_secs(10));
         let mut guard = ClipGuard::new(None, Arc::clone(&vol))
             .with_controls(
                 Some(far_active),
                 Arc::clone(&manual),
-                Arc::new(Mutex::new(past)),
+                Arc::new(Mutex::new(past_vol)),
             )
             .with_backend(Arc::clone(&backend) as Arc<dyn VolumeBackend>, true);
         guard.enabled = true;
-        guard.last_step = past;
+        guard.last_step = past_vol;
 
         assert!(!guard.sync_os_volume());
         assert!(guard.os_muted);
@@ -1509,16 +1507,14 @@ mod tests {
     fn test_soft_clip_28500_and_hot_speech_step_down() {
         let vol = Arc::new(AtomicU8::new(80));
         let manual = Arc::new(AtomicBool::new(false));
-        let past = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_secs(10))
-            .unwrap();
+        let past_vol = past(std::time::Duration::from_secs(10));
         let mut guard = ClipGuard::new(None, Arc::clone(&vol)).with_controls(
             None,
             Arc::clone(&manual),
-            Arc::new(Mutex::new(past)),
+            Arc::new(Mutex::new(past_vol)),
         );
         guard.enabled = true;
-        guard.last_step = past;
+        guard.last_step = past_vol;
 
         // Soft-clipping ADC below 30000 (>= 28500) must step down by 10%
         let soft_clipped = vec![28800i16; 320];
@@ -1528,9 +1524,7 @@ mod tests {
         assert_eq!(vol.load(Ordering::Relaxed), 70);
 
         // Sustained hot speech (> -12 dBFS, e.g. amplitude 10000 ~ -10.3 dBFS) steps down by 5%
-        guard.last_step = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_secs(2))
-            .unwrap();
+        guard.last_step = past(std::time::Duration::from_secs(2));
         let hot_speech = vec![10000i16; 320];
         for _ in 0..16 {
             guard.feed(&hot_speech);

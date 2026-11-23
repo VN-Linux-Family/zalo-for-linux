@@ -62,8 +62,11 @@ impl Read for Stdin {
                 Ok(_) => {}
                 Err(e) => return Err(io::Error::from_raw_os_error(e.raw_os_error())),
             }
-            let mut stdin = io::stdin().lock();
-            return stdin.read(buffer);
+            return match rustix::io::read(stdin_fd, &mut *buffer) {
+                Ok(n) => Ok(n),
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(e) => Err(io::Error::from_raw_os_error(e.raw_os_error())),
+            };
         }
     }
 }
@@ -162,4 +165,19 @@ pub(crate) fn input_profile(value: &mut Value, enabled: bool, timings: &image::I
     stages["readMicros"] = json!(timings.read_micros);
     stages["imageDecodeMicros"] = json!(timings.decode_micros);
     stages["colorConvertMicros"] = json!(timings.color_micros);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pipe_read_does_not_over_read() {
+        let (reader, writer) = rustix::pipe::pipe().unwrap();
+        rustix::io::write(&writer, &b"abcd"[..]).unwrap();
+        let mut one = [0u8; 1];
+        assert_eq!(rustix::io::read(&reader, &mut one).unwrap(), 1);
+        assert_eq!(one[0], b'a');
+        let mut rest = [0u8; 8];
+        assert_eq!(rustix::io::read(&reader, &mut rest).unwrap(), 3);
+        assert_eq!(&rest[..3], b"bcd");
+    }
 }

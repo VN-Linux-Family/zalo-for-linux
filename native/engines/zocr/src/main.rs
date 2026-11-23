@@ -12,7 +12,7 @@ mod ipc;
 mod platform;
 mod runtime;
 mod vault;
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{bail, Context, Result};
 use std::{
     path::PathBuf,
     sync::{atomic::Ordering, Arc, Mutex},
@@ -23,13 +23,6 @@ fn main() {
         std::process::exit(1);
     }
 }
-fn kernel_supported(release: &str) -> bool {
-    let mut parts = release.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
-    let major = parts.next().unwrap_or(0);
-    let minor = parts.next().unwrap_or(0);
-    major > 5 || (major == 5 && minor >= 11)
-}
-
 fn run() -> Result<()> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() == 1 && (args[0] == "--help" || args[0] == "-h") {
@@ -47,14 +40,6 @@ fn run() -> Result<()> {
     if stop.load(Ordering::Relaxed) {
         return Ok(());
     }
-    let release = rustix::system::uname()
-        .release()
-        .to_string_lossy()
-        .into_owned();
-    ensure!(
-        kernel_supported(&release),
-        "zocr-host requires Linux 5.11 or newer (running {release})"
-    );
     // Restrict socket permissions from creation, including the bind/chmod interval.
     rustix::process::umask(rustix::fs::Mode::from_bits_truncate(0o077));
     let cpu = platform::Cpu::discover()?;
@@ -71,18 +56,4 @@ fn run() -> Result<()> {
     stop.store(true, Ordering::Relaxed);
     let _ = maintenance.join();
     result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::kernel_supported;
-
-    #[test]
-    fn kernel_gate_requires_linux_5_11() {
-        assert!(!kernel_supported("5.10.99"));
-        assert!(!kernel_supported("4.19"));
-        assert!(kernel_supported("5.11"));
-        assert!(kernel_supported("5.11.0"));
-        assert!(kernel_supported("6.1.0"));
-    }
 }

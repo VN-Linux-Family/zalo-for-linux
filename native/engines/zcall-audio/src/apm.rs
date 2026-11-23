@@ -31,12 +31,10 @@ pub struct Apm {
     delay_ms: AtomicI32,
 }
 
-// SAFETY: the APM handle is not thread-bound and the C API keeps no per-thread state;
-// callers synchronize access through `&self` methods that only borrow the handle.
+// SAFETY: `Apm` owns a raw C handle that is not thread-bound; it is moved into
+// `Arc<Mutex<Apm>>` and every call is serialized by that mutex, so `Send` is
+// sufficient and `Sync` is not implemented.
 unsafe impl Send for Apm {}
-// SAFETY: same as `Send`: the handle may be shared across threads as long as calls do
-// not run concurrently, which `&self` alone cannot enforce but the API permits serially.
-unsafe impl Sync for Apm {}
 
 impl Apm {
     pub fn new(
