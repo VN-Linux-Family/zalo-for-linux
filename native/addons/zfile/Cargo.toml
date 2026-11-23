@@ -10,8 +10,8 @@ name = "zfile_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "2", default-features = false, features = ["napi5", "async"] }
-napi-derive = "2"
+napi = { version = "3", default-features = false, features = ["napi5", "async"] }
+napi-derive = "3"
 rustix = { version = "1", features = ["fs", "linux_5_11"] }
 [build-dependencies]
 napi-build = "2"

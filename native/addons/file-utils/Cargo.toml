@@ -8,8 +8,8 @@ license = "ISC"
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "2", features = ["napi5", "async"] }
-napi-derive = "2"
+napi = { version = "3", features = ["napi5", "async"] }
+napi-derive = "3"
 rustix = { version = "1", features = ["fs", "linux_5_11"] }
 
 [build-dependencies]

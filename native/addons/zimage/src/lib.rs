@@ -20,10 +20,12 @@ use std::thread;
     reason = "napi takes ownership of JS arguments"
 )]
 #[napi]
-pub fn thumbnail(options: BufferOptions, callback: JsFunction) -> Result<()> {
+pub fn thumbnail(options: BufferOptions, callback: Function<Buffer, ()>) -> Result<()> {
     let mut task = BufferThumbnailTask::new(&options)?;
-    let callback: ThreadsafeFunction<Buffer> =
-        callback.create_threadsafe_function(0, |context| Ok(vec![context.value]))?;
+    let callback: ThreadsafeFunction<Buffer, ()> = callback
+        .build_threadsafe_function::<Buffer>()
+        .callee_handled::<true>()
+        .build()?;
 
     thread::spawn(move || {
         let result = task.compute().map(Buffer::from);
@@ -41,10 +43,12 @@ pub fn thumbnail(options: BufferOptions, callback: JsFunction) -> Result<()> {
     reason = "napi takes ownership of JS arguments"
 )]
 #[napi(js_name = "thumbnailFs")]
-pub fn thumbnail_fs(options: FileOptions, callback: JsFunction) -> Result<()> {
+pub fn thumbnail_fs(options: FileOptions, callback: Function<Buffer, ()>) -> Result<()> {
     let mut task = FileThumbnailTask::new(options)?;
-    let callback: ThreadsafeFunction<Buffer> =
-        callback.create_threadsafe_function(0, |context| Ok(vec![context.value]))?;
+    let callback: ThreadsafeFunction<Buffer, ()> = callback
+        .build_threadsafe_function::<Buffer>()
+        .callee_handled::<true>()
+        .build()?;
 
     thread::spawn(move || {
         let result = task.compute().map(|()| Buffer::from(Vec::new()));

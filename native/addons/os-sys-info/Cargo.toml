@@ -10,12 +10,12 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "2", default-features = false, features = ["napi5"] }
-napi-derive = "2"
+napi = { version = "3", default-features = false, features = ["napi5"] }
+napi-derive = "3"
 rustix = { version = "1", features = ["linux_5_11", "param", "system"] }
 
 [build-dependencies]
-napi-build = "2.6.0"
+napi-build = "2"
 
 [lints]
 workspace = true

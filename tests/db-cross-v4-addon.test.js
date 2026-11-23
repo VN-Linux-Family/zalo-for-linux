@@ -204,6 +204,23 @@ describe('db-cross-v4 Native Rust Addon', () => {
     assert.strictEqual(d.mentions[0].uid, 8888);
   });
 
+  it('parseBinNet reads only the Uint8Array view (byteOffset/byteLength)', { skip: !hasBinary ? 'db-cross-v4-native.node not compiled in clean checkout' : false }, () => {
+    const mod = require(NODE_PATH);
+
+    const propPayload = buildTlvInt32LE(0x1e, 5000); // PROP_SIZE
+    const payload = buildTlvEntryLE(0x05, propPayload);
+
+    // Place the payload inside a larger pool with non-TLV padding around it.
+    const pooled = Buffer.alloc(payload.length + 64, 0xee);
+    payload.copy(pooled, 16);
+    const view = new Uint8Array(pooled.buffer, pooled.byteOffset + 16, payload.length);
+
+    const parsed = mod.parseBinNet(view);
+    assert.strictEqual(parsed.result, 0, parsed.inner_error);
+    assert.strictEqual(parsed.debug.inputLen, payload.length);
+    assert.strictEqual(parsed.data.property.size, 5000);
+  });
+
   it('decompressAndDecryptDb_V2 unpacks realistic ZDB4.0 encrypted backup container', { skip: !hasBinary ? 'db-cross-v4-native.node not compiled in clean checkout' : false }, () => {
     const mod = require(NODE_PATH);
     const testDir = path.join(os.tmpdir(), 'zdb4-test-' + Date.now());

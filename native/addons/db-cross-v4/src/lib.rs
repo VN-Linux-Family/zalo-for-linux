@@ -3,13 +3,16 @@ mod container;
 mod crypto;
 mod tlv;
 
-use napi::bindgen_prelude::FromNapiValue;
-use napi::{Env, JsArrayBuffer, JsBuffer, JsFunction, JsObject, JsTypedArray, JsUnknown, Result};
+use napi::bindgen_prelude::{
+    ArrayBuffer, BufferSlice, FromNapiValue, Function, JsObjectValue, JsValue as _, Object,
+    TypedArray, Unknown,
+};
+use napi::{Env, Result};
 use napi_derive::napi;
 
 #[napi(js_name = "decompressAndDecryptDb")]
-pub fn decompress_and_decrypt_db(env: Env) -> Result<JsObject> {
-    let mut ret = env.create_object()?;
+pub fn decompress_and_decrypt_db(env: &Env) -> Result<Object<'_>> {
+    let mut ret = Object::new(env)?;
     ret.set_named_property("result", -1)?;
     ret.set_named_property(
         "err_message",
@@ -19,14 +22,14 @@ pub fn decompress_and_decrypt_db(env: Env) -> Result<JsObject> {
 }
 
 #[napi(js_name = "decompressAndDecryptDb_V2")]
-pub fn decompress_and_decrypt_db_v2(
-    env: Env,
+pub fn decompress_and_decrypt_db_v2<'env>(
+    env: &'env Env,
     input_path: Option<String>,
     output_path: Option<String>,
     private_key: Option<String>,
-    progress_cb: Option<JsFunction>,
-) -> Result<JsObject> {
-    let mut ret = env.create_object()?;
+    progress_cb: Option<Function<'env, (), ()>>,
+) -> Result<Object<'env>> {
+    let mut ret = Object::new(env)?;
 
     let (Some(input), Some(output), Some(key)) = (input_path, output_path, private_key) else {
         ret.set_named_property("result", -1)?;
@@ -37,8 +40,7 @@ pub fn decompress_and_decrypt_db_v2(
 
     let cb_closure = move || {
         if let Some(cb) = &progress_cb {
-            let empty_args: [&JsUnknown; 0] = [];
-            let _ = cb.call(None, &empty_args);
+            let _ = cb.call(());
         }
     };
 
@@ -51,8 +53,8 @@ pub fn decompress_and_decrypt_db_v2(
 }
 
 #[napi(js_name = "parseBinNet")]
-pub fn parse_bin_net(env: Env, val: Option<JsUnknown>) -> Result<JsObject> {
-    let mut ret = env.create_object()?;
+pub fn parse_bin_net<'env>(env: &'env Env, val: Option<Unknown<'env>>) -> Result<Object<'env>> {
+    let mut ret = Object::new(env)?;
     ret.set_named_property("result", 0)?;
     ret.set_named_property("error_message", "")?;
     ret.set_named_property("inner_error", "")?;
@@ -60,28 +62,26 @@ pub fn parse_bin_net(env: Env, val: Option<JsUnknown>) -> Result<JsObject> {
     let Some(val) = val else {
         ret.set_named_property("result", 1)?;
         ret.set_named_property("error_message", "Wrong arguments")?;
-        ret.set_named_property("data", env.create_object()?)?;
+        ret.set_named_property("data", Object::new(env)?)?;
         return Ok(ret);
     };
 
     if val.is_buffer()? {
-        let buf = JsBuffer::from_unknown(val)?;
-        let value = buf.into_value()?;
-        return binnet::parse_bin_net_internal(value.as_ref(), env);
+        let buf = BufferSlice::from_unknown(val)?;
+        return binnet::parse_bin_net_internal(&buf, env);
     }
 
     if val.is_typedarray()? {
-        let ta = JsTypedArray::from_unknown(val)?;
-        let value = ta.into_value()?;
-        return binnet::parse_bin_net_internal(value.as_ref(), env);
+        let ta = TypedArray::from_unknown(val)?;
+        return binnet::parse_bin_net_internal(&ta.arraybuffer, env);
     }
 
-    if let Ok(value) = JsArrayBuffer::from_unknown(val).and_then(JsArrayBuffer::into_value) {
-        return binnet::parse_bin_net_internal(value.as_ref(), env);
+    if let Ok(ab) = ArrayBuffer::from_unknown(val) {
+        return binnet::parse_bin_net_internal(&ab, env);
     }
 
     ret.set_named_property("result", 1)?;
     ret.set_named_property("error_message", "Wrong arguments")?;
-    ret.set_named_property("data", env.create_object()?)?;
+    ret.set_named_property("data", Object::new(env)?)?;
     Ok(ret)
 }

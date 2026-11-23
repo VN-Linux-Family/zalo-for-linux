@@ -8,8 +8,8 @@ license = "ISC"
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "2", features = ["napi5", "async"] }
-napi-derive = "2"
+napi = { version = "3", features = ["napi5", "async"] }
+napi-derive = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "fs"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp", "ico"] }
 
