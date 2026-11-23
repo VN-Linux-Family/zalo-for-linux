@@ -1,4 +1,4 @@
-//! MicLeveler: DSP software make-up gain with adaptive noise-floor ceiling,
+//! `MicLeveler`: DSP software make-up gain with adaptive noise-floor ceiling,
 //! speech-triggered gain adaptation, far-end hold, sample-by-sample smooth ramp,
 //! and peak limiting.
 //!
@@ -49,15 +49,23 @@ impl MicLeveler {
         }
     }
 
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "metrics/percent; precision below 2^52 is irrelevant"
+    )]
     pub fn compute_level_db(samples: &[i16]) -> f32 {
         if samples.is_empty() {
             return -120.0;
         }
-        let sum_sq: f64 = samples.iter().map(|&v| (v as f64) * (v as f64)).sum();
+        let sum_sq: f64 = samples.iter().map(|&v| f64::from(v) * f64::from(v)).sum();
         let rms = (sum_sq / samples.len() as f64).sqrt().max(1.0);
         20.0 * (rms / 32768.0).log10() as f32
     }
 
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "metrics/percent; precision below 2^52 is irrelevant"
+    )]
     pub fn process(&mut self, samples: &mut [i16]) {
         if samples.is_empty() {
             return;
@@ -75,7 +83,7 @@ impl MicLeveler {
 
         // Learn noise floor (10th percentile of pauses)
         if self.level_count >= LEARN_FRAMES
-            && (self.n % 25 == 0 || self.level_count == LEARN_FRAMES)
+            && (self.n.is_multiple_of(25) || self.level_count == LEARN_FRAMES)
         {
             let mut sorted = self.levels[..self.level_count].to_vec();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -91,8 +99,7 @@ impl MicLeveler {
             let far_is_talking = self
                 .far_active
                 .as_ref()
-                .map(|f| f.load(Ordering::Relaxed))
-                .unwrap_or(false);
+                .is_some_and(|f| f.load(Ordering::Relaxed));
 
             if far_is_talking {
                 self.held_frames += 1;
@@ -110,7 +117,7 @@ impl MicLeveler {
         }
 
         // Periodic diagnostics
-        if self.n % LOG_EVERY == 0 {
+        if self.n.is_multiple_of(LOG_EVERY) {
             if !self.speech_db.is_empty() {
                 self.speech_db
                     .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -132,7 +139,11 @@ impl MicLeveler {
         let mut g0 = self.g_prev;
         let n_samples = samples.len();
 
-        let peak = samples.iter().map(|&v| (v as i32).abs()).max().unwrap_or(0);
+        let peak = samples
+            .iter()
+            .map(|&v| i32::from(v).abs())
+            .max()
+            .unwrap_or(0);
 
         if peak > 0 {
             let lim = 32000.0 / peak as f32;
@@ -149,7 +160,7 @@ impl MicLeveler {
         let step = (g - g0) / n_samples as f32;
         for (i, s) in samples.iter_mut().enumerate() {
             let factor = g0 + step * (i + 1) as f32;
-            let val = (*s as f32 * factor).round() as i32;
+            let val = (f32::from(*s) * factor).round() as i32;
             *s = val.clamp(-32768, 32767) as i16;
         }
     }
@@ -235,7 +246,7 @@ mod tests {
         leveler.process(&mut frame);
 
         for &s in &frame {
-            assert!(s <= 32000 && s >= -32000);
+            assert!((-32000..=32000).contains(&s));
         }
     }
 }

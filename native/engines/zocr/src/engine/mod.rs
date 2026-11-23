@@ -100,16 +100,21 @@ impl Engine {
         }
         false
     }
-    pub fn recognize(&mut self, source: RgbImage) -> Result<Value> {
+    pub fn recognize(&mut self, source: &RgbImage) -> Result<Value> {
         let started = Instant::now();
         let before = platform::resources();
         let result = self.recognize_inner(source, before, started);
         self.last_active = Instant::now();
         result
     }
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::too_many_lines,
+        reason = "metrics/percent precision below 2^52 is irrelevant; single protocol pipeline, splitting hurts readability"
+    )]
     fn recognize_inner(
         &mut self,
-        source: RgbImage,
+        source: &RgbImage,
         before: platform::Resources,
         started: Instant,
     ) -> Result<Value> {
@@ -120,7 +125,7 @@ impl Engine {
         let source_height = source.height();
         let mut stages = json!({});
         let t = Instant::now();
-        let capped = pixels::cap(&source, self.cfg.max_pixel_size);
+        let capped = pixels::cap(source, self.cfg.max_pixel_size);
         stages["capResizeMicros"] = json!(t.elapsed().as_micros());
         let det_started = Instant::now();
         let t = Instant::now();
@@ -147,7 +152,12 @@ impl Engine {
         stages["detNormalizeMicros"] = json!(t.elapsed().as_micros());
         let t = Instant::now();
         let map = models.detector.run(
-            &[1, 3, resized.height() as i64, resized.width() as i64],
+            &[
+                1,
+                3,
+                i64::from(resized.height()),
+                i64::from(resized.width()),
+            ],
             &mut input,
         )?;
         stages["detInferMicros"] = json!(t.elapsed().as_micros());
@@ -172,7 +182,7 @@ impl Engine {
         let t = Instant::now();
         let cropped = detected
             .iter()
-            .map(|d| pixels::crop(&source, d.quad))
+            .map(|d| pixels::crop(source, d.quad))
             .collect::<Result<Vec<_>>>()?;
         let (mut crops, reading_quads): (Vec<_>, Vec<_>) = cropped.into_iter().unzip();
         stages["cropMicros"] = json!(t.elapsed().as_micros());
@@ -227,7 +237,7 @@ impl Engine {
         stages["clsFlippedCount"] = json!(flips.iter().filter(|&&f| f).count());
         let rec_started = Instant::now();
         let mut order: Vec<_> = (0..crops.len()).collect();
-        order.sort_by_key(|&i| crops[i].width() as u64 * 48 / crops[i].height() as u64);
+        order.sort_by_key(|&i| u64::from(crops[i].width()) * 48 / u64::from(crops[i].height()));
         let mut decoded: Vec<Option<ctc::Decoded>> = (0..crops.len()).map(|_| None).collect();
         let mut pre_us = 0;
         let mut infer_us = 0;
@@ -266,9 +276,10 @@ impl Engine {
                 ensure!(
                     output.shape
                         == [
-                            batch as i64,
+                            i64::try_from(batch).expect("batch size is capped at 16"),
                             shape[3] / 8,
-                            (models.dictionary.len() + 1) as i64
+                            i64::try_from(models.dictionary.len() + 1)
+                                .expect("dictionary size is validated at load")
                         ],
                     "seg recognizer expected [N,W/8,dictionary+blank] output"
                 );

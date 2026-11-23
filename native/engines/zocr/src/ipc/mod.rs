@@ -53,7 +53,8 @@ impl Read for Stdin {
                 events: libc::POLLIN,
                 revents: 0,
             };
-            let ready = unsafe { libc::poll(&mut fd, 1, 50) };
+            // SAFETY: `fd` is a fully initialized stack `pollfd` and `nfds` is 1, matching the single element passed.
+            let ready = unsafe { libc::poll(&raw mut fd, 1, 50) };
             if ready < 0 {
                 let e = io::Error::last_os_error();
                 if e.kind() == io::ErrorKind::Interrupted {
@@ -64,26 +65,20 @@ impl Read for Stdin {
             if ready == 0 {
                 continue;
             }
-            let n =
-                unsafe { libc::read(libc::STDIN_FILENO, buffer.as_mut_ptr().cast(), buffer.len()) };
-            if n < 0 {
-                let e = io::Error::last_os_error();
-                if e.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(e);
-            }
-            return Ok(n as usize);
+            let mut stdin = io::stdin().lock();
+            return stdin.read(buffer);
         }
     }
 }
 pub fn run(
-    engine: Arc<Mutex<Engine>>,
-    cfg: Config,
-    stop: Arc<AtomicBool>,
+    engine: &Arc<Mutex<Engine>>,
+    cfg: &Config,
+    stop: &Arc<AtomicBool>,
     socket_directory: &Path,
 ) -> Result<()> {
-    let mut stdin = Stdin { stop: stop.clone() };
+    let mut stdin = Stdin {
+        stop: Arc::clone(stop),
+    };
     if !handshake::verify_control(&mut stdin, cfg.auth_token.as_bytes())? {
         bail!("handshake token mismatch");
     }
@@ -105,9 +100,9 @@ pub fn run(
                         bail!("pipe is already open");
                     }
                     let socket = SocketServer::start(
-                        engine.clone(),
-                        cfg.clone(),
-                        stop.clone(),
+                        Arc::clone(engine),
+                        (*cfg).clone(),
+                        Arc::clone(stop),
                         socket_directory,
                         token,
                         output.clone(),
@@ -122,7 +117,7 @@ pub fn run(
                     .map_err(|_| anyhow::anyhow!("stdout mutex poisoned"))?;
                 match result {
                     Ok(payload) => {
-                        protocol::write_reply(&mut *writer, protocol::PIPE_READY, &payload)?
+                        protocol::write_reply(&mut *writer, protocol::PIPE_READY, &payload)?;
                     }
                     Err(error) => protocol::write_reply(
                         &mut *writer,
@@ -145,8 +140,8 @@ pub fn run(
                     let mut value = engine
                         .lock()
                         .map_err(|_| anyhow::anyhow!("engine mutex poisoned"))?
-                        .recognize(image)?;
-                    input_profile(&mut value, cfg.benchmark_profile, timings);
+                        .recognize(&image)?;
+                    input_profile(&mut value, cfg.benchmark_profile, &timings);
                     Ok(value)
                 })()
                 .unwrap_or_else(|error| json!({"ok":false,"error":format!("{error:#}")}));
@@ -162,7 +157,7 @@ pub fn run(
     Ok(())
 }
 
-pub(crate) fn input_profile(value: &mut Value, enabled: bool, timings: image::InputTimings) {
+pub(crate) fn input_profile(value: &mut Value, enabled: bool, timings: &image::InputTimings) {
     if !enabled {
         return;
     }

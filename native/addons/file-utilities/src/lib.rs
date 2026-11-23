@@ -1,7 +1,7 @@
 #![cfg(target_os = "linux")]
+#![allow(unsafe_code, reason = "libc statfs FFI")]
 
 use globset::Glob;
-use lazy_static::lazy_static;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use std::collections::HashMap;
@@ -11,13 +11,12 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
 use walkdir::WalkDir;
 
-lazy_static! {
-    static ref JOBS: Mutex<HashMap<u64, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
-}
+static JOBS: LazyLock<Mutex<HashMap<u64, Arc<AtomicBool>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static NEXT_JOB_ID: AtomicU64 = AtomicU64::new(1);
 
 #[napi(object)]
@@ -89,11 +88,7 @@ fn napi_err(context: &str, err: impl std::fmt::Display) -> Error {
 fn workers(value: Option<u32>) -> u32 {
     value
         .filter(|value| *value != 0)
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(|n| n.get() as u32)
-                .unwrap_or(1)
-        })
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get() as u32))
         .min(1024)
 }
 
@@ -147,16 +142,20 @@ fn scan_path(path: &Path, token: Option<&AtomicBool>) -> io::Result<Stats> {
     Ok(result)
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "byte counts as f64; precision below 2^52 is irrelevant"
+)]
 fn size_result(
-    path: PathBuf,
-    options: DirectorySizeOptions,
+    path: &Path,
+    options: &DirectorySizeOptions,
     token: Option<&AtomicBool>,
 ) -> Result<DirectorySizeResult> {
     let started = Instant::now();
     let stats =
-        scan_path(&path, token).map_err(|e| napi_err("failed to calculate directory size", e))?;
+        scan_path(path, token).map_err(|e| napi_err("failed to calculate directory size", e))?;
     Ok(DirectorySizeResult {
-        path: display_path(&path),
+        path: display_path(path),
         total_size: stats.size as f64,
         file_count: stats.files as f64,
         dir_count: stats.dirs as f64,
@@ -181,9 +180,13 @@ fn glob_base(pattern: &Path) -> PathBuf {
     }
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "byte counts as f64; precision below 2^52 is irrelevant"
+)]
 fn glob_result(
     pattern: String,
-    options: DirectorySizeOptions,
+    options: &DirectorySizeOptions,
     token: Option<&AtomicBool>,
 ) -> Result<DirectorySizeResult> {
     let started = Instant::now();
@@ -220,6 +223,10 @@ fn glob_result(
     })
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "byte counts as f64; precision below 2^52 is irrelevant"
+)]
 fn build_tree(
     path: &Path,
     root: &Path,
@@ -275,9 +282,13 @@ fn build_tree(
     ))
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "byte counts as f64; precision below 2^52 is irrelevant"
+)]
 fn tree_result(
-    path: PathBuf,
-    options: DirectoryTreeOptions,
+    path: &Path,
+    options: &DirectoryTreeOptions,
     token: Option<&AtomicBool>,
 ) -> Result<DirectoryTreeResult> {
     let started = Instant::now();
@@ -286,11 +297,11 @@ fn tree_result(
         return Err(Error::from_reason("max_depth must be >= 0"));
     }
     let metadata =
-        fs::symlink_metadata(&path).map_err(|e| napi_err("failed to read root path", e))?;
+        fs::symlink_metadata(path).map_err(|e| napi_err("failed to read root path", e))?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err(Error::from_reason("path must be a directory"));
     }
-    let (root_node, stats) = build_tree(&path, &path, 0, max_depth as u32, token)
+    let (root_node, stats) = build_tree(path, path, 0, max_depth as u32, token)
         .map_err(|e| napi_err("failed to calculate directory tree", e))?;
     let tree = if options.include_root.unwrap_or(false) {
         vec![root_node]
@@ -298,7 +309,7 @@ fn tree_result(
         root_node.children
     };
     Ok(DirectoryTreeResult {
-        path: display_path(&path),
+        path: display_path(path),
         total_size: stats.size as f64,
         file_count: stats.files as f64,
         dir_count: stats.dirs as f64,
@@ -311,8 +322,7 @@ fn tree_result(
 fn register_job(requested: Option<f64>) -> (u64, Arc<AtomicBool>) {
     let id = requested
         .filter(|v| v.is_finite() && *v >= 0.0)
-        .map(|v| v as u64)
-        .unwrap_or_else(|| NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed));
+        .map_or_else(|| NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed), |v| v as u64);
     let token = Arc::new(AtomicBool::new(false));
     JOBS.lock().unwrap().insert(id, token.clone());
     (id, token)
@@ -323,6 +333,10 @@ fn finish_job(id: u64) {
 }
 
 #[napi]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of the argument"
+)]
 pub fn detect_hardlinks_sync(path1: String, path2: String) -> Result<bool> {
     let first =
         fs::symlink_metadata(&path1).map_err(|e| napi_err("failed to lstat first path", e))?;
@@ -346,9 +360,14 @@ fn filesystem_name(path: &Path) -> Result<String> {
     let c_path = std::ffi::CString::new(bytes)
         .map_err(|_| Error::from_reason("path contains a NUL byte"))?;
     let mut info = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: `c_path` is a NUL-terminated `CString` alive across this call, and
+    // `info.as_mut_ptr()` is a valid, properly aligned out-pointer for the
+    // `[statfs]` libc expects; the contents are read only after a 0 return.
     if unsafe { libc::statfs(c_path.as_ptr(), info.as_mut_ptr()) } != 0 {
         return Err(napi_err("statfs failed", io::Error::last_os_error()));
     }
+    // SAFETY: `statfs` returned 0 just above (non-zero returns early), so the
+    // kernel/libc has initialised the whole `libc::statfs` value.
     let magic = unsafe { info.assume_init() }.f_type as u64;
     let name = match magic {
         0xEF53 => "ext2/ext3/ext4",
@@ -372,6 +391,10 @@ fn filesystem_name(path: &Path) -> Result<String> {
 }
 
 #[napi]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of the argument"
+)]
 pub fn detect_filesystem_sync(path: String) -> Result<String> {
     filesystem_name(Path::new(&path))
 }
@@ -384,11 +407,16 @@ pub async fn detect_filesystem_async(path: String) -> Result<String> {
 }
 
 #[napi]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of the argument"
+)]
 pub fn get_directory_size_sync(
     path: String,
     options: Option<DirectorySizeOptions>,
 ) -> Result<DirectorySizeResult> {
-    size_result(PathBuf::from(path), options.unwrap_or_default(), None)
+    let options = options.unwrap_or_default();
+    size_result(Path::new(&path), &options, None)
 }
 
 #[napi]
@@ -398,11 +426,10 @@ pub async fn get_directory_size_async(
 ) -> Result<DirectorySizeResult> {
     let options = options.unwrap_or_default();
     let (id, token) = register_job(options.job_id);
-    let result = tokio::task::spawn_blocking(move || {
-        size_result(PathBuf::from(path), options, Some(&token))
-    })
-    .await
-    .map_err(|e| napi_err("directory size worker failed", e))?;
+    let result =
+        tokio::task::spawn_blocking(move || size_result(Path::new(&path), &options, Some(&token)))
+            .await
+            .map_err(|e| napi_err("directory size worker failed", e))?;
     finish_job(id);
     result
 }
@@ -412,7 +439,8 @@ pub fn get_directory_size_by_glob_sync(
     pattern: String,
     options: Option<DirectorySizeOptions>,
 ) -> Result<DirectorySizeResult> {
-    glob_result(pattern, options.unwrap_or_default(), None)
+    let options = options.unwrap_or_default();
+    glob_result(pattern, &options, None)
 }
 
 #[napi]
@@ -422,7 +450,7 @@ pub async fn get_directory_size_by_glob_async(
 ) -> Result<DirectorySizeResult> {
     let options = options.unwrap_or_default();
     let (id, token) = register_job(options.job_id);
-    let result = tokio::task::spawn_blocking(move || glob_result(pattern, options, Some(&token)))
+    let result = tokio::task::spawn_blocking(move || glob_result(pattern, &options, Some(&token)))
         .await
         .map_err(|e| napi_err("glob worker failed", e))?;
     finish_job(id);
@@ -430,11 +458,16 @@ pub async fn get_directory_size_by_glob_async(
 }
 
 #[napi]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of the argument"
+)]
 pub fn get_directory_size_tree_sync(
     path: String,
     options: Option<DirectoryTreeOptions>,
 ) -> Result<DirectoryTreeResult> {
-    tree_result(PathBuf::from(path), options.unwrap_or_default(), None)
+    let options = options.unwrap_or_default();
+    tree_result(Path::new(&path), &options, None)
 }
 
 #[napi]
@@ -444,11 +477,10 @@ pub async fn get_directory_size_tree_async(
 ) -> Result<DirectoryTreeResult> {
     let options = options.unwrap_or_default();
     let (id, token) = register_job(options.job_id);
-    let result = tokio::task::spawn_blocking(move || {
-        tree_result(PathBuf::from(path), options, Some(&token))
-    })
-    .await
-    .map_err(|e| napi_err("directory tree worker failed", e))?;
+    let result =
+        tokio::task::spawn_blocking(move || tree_result(Path::new(&path), &options, Some(&token)))
+            .await
+            .map_err(|e| napi_err("directory tree worker failed", e))?;
     finish_job(id);
     result
 }
@@ -461,11 +493,10 @@ pub fn cancel_job(job_id: f64) -> bool {
     JOBS.lock()
         .unwrap()
         .get(&(job_id as u64))
-        .map(|token| {
+        .is_some_and(|token| {
             token.store(true, Ordering::Relaxed);
             true
         })
-        .unwrap_or(false)
 }
 
 #[napi(js_name = "custom_gc")]

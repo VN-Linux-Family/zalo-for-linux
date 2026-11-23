@@ -15,9 +15,13 @@ use std::thread;
 ///
 /// The callback follows Node's error-first convention and receives the encoded
 /// image Buffer as its second argument on success.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi]
 pub fn thumbnail(options: BufferOptions, callback: JsFunction) -> Result<()> {
-    let mut task = BufferThumbnailTask::new(options)?;
+    let mut task = BufferThumbnailTask::new(&options)?;
     let callback: ThreadsafeFunction<Buffer> =
         callback.create_threadsafe_function(0, |context| Ok(vec![context.value]))?;
 
@@ -32,6 +36,10 @@ pub fn thumbnail(options: BufferOptions, callback: JsFunction) -> Result<()> {
 ///
 /// JPEG is selected for `.jpg` and `.jpeg` output paths; all other paths use
 /// PNG, matching this replacement's documented JPEG/PNG output surface.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi(js_name = "thumbnailFs")]
 pub fn thumbnail_fs(options: FileOptions, callback: JsFunction) -> Result<()> {
     let mut task = FileThumbnailTask::new(options)?;

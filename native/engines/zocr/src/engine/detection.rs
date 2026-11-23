@@ -6,6 +6,11 @@ pub struct Detected {
     pub quad: Quad,
     pub score: f32,
 }
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::too_many_lines,
+    reason = "pixel coordinates bounded by image dimensions; single detection pipeline, splitting hurts readability"
+)]
 pub fn postprocess(
     probability: &[f32],
     width: usize,
@@ -100,10 +105,10 @@ pub fn postprocess(
             continue;
         };
         for p in &mut quad {
-            p[0] = (p[0] * source_width as f64 / width as f64)
-                .clamp(0., source_width.saturating_sub(1) as f64);
-            p[1] = (p[1] * source_height as f64 / height as f64)
-                .clamp(0., source_height.saturating_sub(1) as f64);
+            p[0] = (p[0] * f64::from(source_width) / width as f64)
+                .clamp(0., f64::from(source_width.saturating_sub(1)));
+            p[1] = (p[1] * f64::from(source_height) / height as f64)
+                .clamp(0., f64::from(source_height.saturating_sub(1)));
         }
         if geometry::distance(quad[0], quad[1]).min(geometry::distance(quad[1], quad[2])) < 3. {
             continue;

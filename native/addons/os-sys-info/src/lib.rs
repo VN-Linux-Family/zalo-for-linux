@@ -1,4 +1,6 @@
-//! OS and process information for Linux on x86_64 and arm64.
+#![allow(unsafe_code, reason = "glibc uname/sysconf FFI")]
+
+//! OS and process information for Linux on `x86_64` and arm64.
 //!
 //! The public fields follow `os-sys-info-technical.md`. Linux collection uses
 //! `/proc`; no third-party crates are required.
@@ -87,15 +89,19 @@ pub fn getProcessSnapshot(pids: &[f64]) -> ProcessSnapshot {
     get_process_snapshot(pids)
 }
 
+static MONOTONIC_START: LazyLock<Instant> = LazyLock::new(Instant::now);
+
 fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
     let base = format!("/proc/{pid}");
     let stat = fs::read_to_string(format!("{base}/stat"))
-        .map_err(|e| process_error(pid, "readProcessStat", e))?;
+        .map_err(|e| process_error(pid, "readProcessStat", &e))?;
     let fields = parse_stat(&stat).ok_or_else(|| ProcessError {
         pid,
         op: "parseProcessStat".to_owned(),
         code: -1,
     })?;
+    // SAFETY: `sysconf` only takes a scalar constant (`_SC_CLK_TCK == 2` on
+    // glibc), dereferences no pointer, writes no user memory and is thread-safe.
     let ticks_per_second = unsafe { sysconf(2) };
     if ticks_per_second <= 0 {
         return Err(ProcessError {
@@ -107,13 +113,13 @@ fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
     let hz = ticks_per_second as u64;
     let kernel = ticks_to_100ns(fields.stime, hz);
     let user = ticks_to_100ns(fields.utime, hz);
-    let boot_time = get_boot_time().map_err(|e| process_error(pid, "readBootTime", e))?;
+    let boot_time = get_boot_time().map_err(|e| process_error(pid, "readBootTime", &e))?;
     let creation = boot_time
         .saturating_mul(10_000_000)
         .saturating_add(ticks_to_100ns(fields.starttime, hz));
 
     let status = fs::read_to_string(format!("{base}/status"))
-        .map_err(|e| process_error(pid, "readProcessStatus", e))?;
+        .map_err(|e| process_error(pid, "readProcessStatus", &e))?;
     let rss_kib = status_value(&status, "VmRSS:").ok_or_else(|| ProcessError {
         pid,
         op: "readWorkingSet".to_owned(),
@@ -135,13 +141,11 @@ fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
             .saturating_mul(1024)
     } else {
         status_value(&status, "RssAnon:")
-            .map(|anon_kib| anon_kib.saturating_mul(1024))
-            .unwrap_or(working_set)
+            .map_or(working_set, |anon_kib| anon_kib.saturating_mul(1024))
     };
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    static MONOTONIC_START: LazyLock<Instant> = LazyLock::new(Instant::now);
     let monotonic_ms = MONOTONIC_START.elapsed().as_millis() as u64;
 
     Ok(ProcessSample {
@@ -150,10 +154,10 @@ fn collect_process(pid: u32) -> Result<ProcessSample, ProcessError> {
         creation100ns: creation,
         kernel_time100ns: kernel,
         user_time100ns: user,
-        working_set: working_set,
-        private_bytes: private_bytes,
+        working_set,
+        private_bytes,
         wall_unix_ms: now.as_millis() as u64,
-        monotonic_ms: monotonic_ms,
+        monotonic_ms,
     })
 }
 
@@ -184,10 +188,10 @@ fn status_value(text: &str, key: &str) -> Option<u64> {
 }
 
 fn ticks_to_100ns(ticks: u64, hz: u64) -> u64 {
-    ((ticks as u128 * 10_000_000u128) / hz as u128).min(u64::MAX as u128) as u64
+    ((u128::from(ticks) * 10_000_000u128) / u128::from(hz)).min(u128::from(u64::MAX)) as u64
 }
 
-fn process_error(pid: u32, op: &str, error: io::Error) -> ProcessError {
+fn process_error(pid: u32, op: &str, error: &io::Error) -> ProcessError {
     ProcessError {
         pid,
         op: op.to_owned(),
@@ -221,10 +225,16 @@ struct UtsName {
 
 fn uname_machine() -> io::Result<String> {
     let mut name = std::mem::MaybeUninit::<UtsName>::zeroed();
+    // SAFETY: `name` is a zeroed `MaybeUninit<UtsName>` on the stack, so
+    // `as_mut_ptr()` is valid and aligned; `UtsName` is `#[repr(C)]` with the
+    // glibc `struct utsname` layout (six `[c_char; 65]` fields) and non-supported
+    // targets are rejected by the `compile_error!` below.
     let rc = unsafe { uname(name.as_mut_ptr()) };
     if rc != 0 {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: `uname` returned 0 just above (non-zero returns early), so the
+    // kernel filled every byte of the `UtsName` out-parameter.
     let name = unsafe { name.assume_init() };
     let bytes: Vec<u8> = name
         .machine
@@ -241,7 +251,7 @@ fn uname_machine() -> io::Result<String> {
 )))]
 compile_error!("os-sys-info supports only Linux x86_64 and Linux arm64");
 
-unsafe extern "C" {
+extern "C" {
     fn uname(name: *mut UtsName) -> i32;
     fn sysconf(name: i32) -> isize;
 }
@@ -303,6 +313,10 @@ impl napi::Task for NodeProcessSnapshotTask {
         Ok(get_process_snapshot(&self.pids))
     }
 
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "process metrics in ns/bytes as f64; precision below 2^52 is irrelevant"
+    )]
     fn resolve(&mut self, _env: napi::Env, snapshot: Self::Output) -> napi::Result<Self::JsValue> {
         Ok(NodeProcessSnapshot {
             samples: snapshot
@@ -362,12 +376,12 @@ mod tests {
         assert_eq!(parsed.ppid, 4751);
         assert_eq!(parsed.utime, 38072);
         assert_eq!(parsed.stime, 3779);
-        assert_eq!(parsed.starttime, 2594714);
+        assert_eq!(parsed.starttime, 2_594_714);
     }
 
     #[test]
     fn test_get_process_snapshot_self() {
-        let pid = std::process::id() as f64;
+        let pid = f64::from(std::process::id());
         let snapshot = get_process_snapshot(&[pid]);
         assert_eq!(snapshot.samples.len(), 1);
         assert_eq!(snapshot.errors.len(), 0);
@@ -379,9 +393,9 @@ mod tests {
 
     #[test]
     fn test_get_process_snapshot_invalid_pids() {
-        let snapshot = get_process_snapshot(&[-1.0, 0.0, 2.5, 999999999.0]);
+        let snapshot = get_process_snapshot(&[-1.0, 0.0, 2.5, 999_999_999.0]);
         assert_eq!(snapshot.samples.len(), 0);
         assert_eq!(snapshot.errors.len(), 1);
-        assert_eq!(snapshot.errors[0].pid, 999999999);
+        assert_eq!(snapshot.errors[0].pid, 999_999_999);
     }
 }

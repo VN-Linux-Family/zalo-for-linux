@@ -10,9 +10,12 @@ use std::{
     fs,
     io::{self, BufReader, Read},
     net::Shutdown,
-    os::unix::{
-        fs::{MetadataExt, PermissionsExt},
-        net::{UnixListener, UnixStream},
+    os::{
+        fd::AsRawFd,
+        unix::{
+            fs::{MetadataExt, PermissionsExt},
+            net::{UnixListener, UnixStream},
+        },
     },
     path::{Path, PathBuf},
     sync::{
@@ -41,6 +44,7 @@ impl SocketServer {
         let mut random = [0u8; 8];
         let mut read = 0;
         while read < random.len() {
+            // SAFETY: the pointer targets the unread tail of the stack array `random` and the length matches it; the loop handles short reads and EINTR.
             let n = unsafe {
                 libc::getrandom(random[read..].as_mut_ptr().cast(), random.len() - read, 0)
             };
@@ -102,13 +106,13 @@ impl SocketServer {
                             }
                         }
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(10))
+                            thread::sleep(Duration::from_millis(10));
                         }
-                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                        Err(e) => {
+                        Err(e) if e.kind() != io::ErrorKind::Interrupted => {
                             eprintln!("[zocr-host] socket accept: {e}");
                             break;
                         }
+                        Err(_) => {}
                     }
                 }
             },
@@ -144,17 +148,18 @@ fn serve(
 ) -> Result<()> {
     stream.set_read_timeout(Some(cfg.frame_timeout))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    // SAFETY: `ucred` is plain-old-data, so all-zero is a valid value before the kernel overwrites it.
     let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
     let mut size = std::mem::size_of_val(&credentials) as libc::socklen_t;
-    use std::os::fd::AsRawFd;
     ensure!(
+        // SAFETY: the fd belongs to a live `UnixStream`; `credentials`/`size` are stack locals with `size` set to the struct's size, and a non-zero return is rejected here.
         unsafe {
             libc::getsockopt(
                 stream.as_raw_fd(),
                 libc::SOL_SOCKET,
                 libc::SO_PEERCRED,
-                (&mut credentials as *mut libc::ucred).cast(),
-                &mut size,
+                (&raw mut credentials).cast(),
+                &raw mut size,
             )
         } == 0,
         "unable to read Unix socket peer credentials"
@@ -262,13 +267,13 @@ fn serve_frames(
         let result = engine
             .lock()
             .map_err(|_| anyhow::anyhow!("engine mutex poisoned"))?
-            .recognize(image);
+            .recognize(&image);
         match result {
             Ok(mut value) => {
                 super::input_profile(
                     &mut value,
                     cfg.benchmark_profile,
-                    image::InputTimings {
+                    &image::InputTimings {
                         read_micros,
                         decode_micros: 0,
                         color_micros,

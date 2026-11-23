@@ -1,7 +1,9 @@
+#![allow(unsafe_code, reason = "libc access/statvfs FFI")]
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::UNIX_EPOCH;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -33,6 +35,8 @@ pub fn can_read(path: String) -> bool {
         return false;
     }
     if let Ok(c_path) = std::ffi::CString::new(path) {
+        // SAFETY: `c_path` is a NUL-terminated `CString` that lives across this
+        // call, which only reads it and retains no pointer.
         unsafe { libc::access(c_path.as_ptr(), libc::R_OK) == 0 }
     } else {
         false
@@ -45,6 +49,8 @@ pub fn can_write(path: String) -> bool {
         return false;
     }
     if let Ok(c_path) = std::ffi::CString::new(path) {
+        // SAFETY: `c_path` is a NUL-terminated `CString` that lives across this
+        // call, which only reads it and retains no pointer.
         unsafe { libc::access(c_path.as_ptr(), libc::W_OK) == 0 }
     } else {
         false
@@ -57,6 +63,8 @@ pub fn can_read_and_write(path: String) -> bool {
         return false;
     }
     if let Ok(c_path) = std::ffi::CString::new(path) {
+        // SAFETY: `c_path` is a NUL-terminated `CString` that lives across this
+        // call, which only reads it and retains no pointer.
         unsafe { libc::access(c_path.as_ptr(), libc::R_OK | libc::W_OK) == 0 }
     } else {
         false
@@ -92,13 +100,13 @@ fn is_real_fs(fstype: &str, dev: &str) -> bool {
         "fuse.portal",
         "efivarfs",
     ];
-    if PSEUDO.contains(&fstype) {
-        return false;
-    }
     const ALLOW: &[&str] = &[
         "ext2", "ext3", "ext4", "btrfs", "xfs", "vfat", "exfat", "ntfs", "ntfs3", "fuseblk",
         "f2fs", "zfs", "jfs", "reiserfs",
     ];
+    if PSEUDO.contains(&fstype) {
+        return false;
+    }
     if dev.starts_with("/dev/") {
         return true;
     }
@@ -136,6 +144,14 @@ fn unescape_octal(s: &str) -> String {
 }
 
 #[napi(js_name = "getDiskInfo")]
+#[allow(
+    clippy::unused_async,
+    reason = "napi async signature is part of the JS API"
+)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "disk sizes in bytes as f64; precision below 2^52 is irrelevant"
+)]
 pub async fn get_disk_info() -> Result<HashMap<String, DiskEntry>> {
     let mounts_content = fs::read_to_string("/proc/mounts").unwrap_or_default();
     let mut seen = HashSet::new();
@@ -155,13 +171,17 @@ pub async fn get_disk_info() -> Result<HashMap<String, DiskEntry>> {
             continue;
         }
 
-        let c_dir = match std::ffi::CString::new(dir.as_bytes()) {
-            Ok(c) => c,
-            Err(_) => continue,
+        let Ok(c_dir) = std::ffi::CString::new(dir.as_bytes()) else {
+            continue;
         };
 
+        // SAFETY: `libc::statvfs` is plain-old-data; an all-zero byte pattern is
+        // a valid value of the struct and it is fully overwritten by the syscall.
         let mut vfs: libc::statvfs = unsafe { std::mem::zeroed() };
-        if unsafe { libc::statvfs(c_dir.as_ptr(), &mut vfs) } != 0 {
+        // SAFETY: `c_dir` is a NUL-terminated `CString` alive across this call,
+        // and `&mut vfs` is a live, aligned, writable `statvfs`; fields are read
+        // only after the return value was checked to be 0.
+        if unsafe { libc::statvfs(c_dir.as_ptr(), &raw mut vfs) } != 0 {
             continue;
         }
 
@@ -221,16 +241,20 @@ fn walk_dir(path: &Path, total_size: &mut u64, file_count: &mut u64) {
 }
 
 #[napi(js_name = "getInfo")]
+#[allow(
+    clippy::unused_async,
+    reason = "napi async signature is part of the JS API"
+)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "file sizes/time as f64; precision below 2^52 is irrelevant"
+)]
 pub async fn get_info(path: String, is_folder: Option<bool>) -> Result<FileInfo> {
     let p = Path::new(&path);
-    let meta = match fs::metadata(p) {
-        Ok(m) => m,
-        Err(_) => {
-            return Err(Error::from_reason(format!(
-                "ENOENT: no such file or directory: {}",
-                path
-            )));
-        }
+    let Ok(meta) = fs::metadata(p) else {
+        return Err(Error::from_reason(format!(
+            "ENOENT: no such file or directory: {path}"
+        )));
     };
 
     let is_dir = meta.is_dir();
@@ -240,13 +264,11 @@ pub async fn get_info(path: String, is_folder: Option<bool>) -> Result<FileInfo>
         .unwrap_or(&path)
         .to_string();
 
-    use std::time::UNIX_EPOCH;
     let mtime_ms = meta
         .modified()
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs_f64() * 1000.0)
-        .unwrap_or(0.0);
+        .map_or(0.0, |d| d.as_secs_f64() * 1000.0);
 
     let is_folder_flag = is_folder.unwrap_or(false);
     let (size, file_count) = if is_folder_flag {
@@ -273,10 +295,10 @@ fn copy_dir_rec(src: &Path, dst: &Path) -> Result<()> {
     }
     if !dst.exists() {
         fs::create_dir_all(dst)
-            .map_err(|e| Error::from_reason(format!("copyFolder failed: {}", e)))?;
+            .map_err(|e| Error::from_reason(format!("copyFolder failed: {e}")))?;
     }
     let entries =
-        fs::read_dir(src).map_err(|e| Error::from_reason(format!("copyFolder failed: {}", e)))?;
+        fs::read_dir(src).map_err(|e| Error::from_reason(format!("copyFolder failed: {e}")))?;
 
     for entry in entries.flatten() {
         if CANCEL_COPY.load(Ordering::SeqCst) {
@@ -284,20 +306,24 @@ fn copy_dir_rec(src: &Path, dst: &Path) -> Result<()> {
         }
         let file_type = entry
             .file_type()
-            .map_err(|e| Error::from_reason(format!("copyFolder failed: {}", e)))?;
+            .map_err(|e| Error::from_reason(format!("copyFolder failed: {e}")))?;
         let target_path = dst.join(entry.file_name());
 
         if file_type.is_dir() {
             copy_dir_rec(&entry.path(), &target_path)?;
         } else if file_type.is_file() {
-            fs::copy(&entry.path(), &target_path)
-                .map_err(|e| Error::from_reason(format!("copyFolder failed: {}", e)))?;
+            fs::copy(entry.path(), &target_path)
+                .map_err(|e| Error::from_reason(format!("copyFolder failed: {e}")))?;
         }
     }
     Ok(())
 }
 
 #[napi(js_name = "copyFolder")]
+#[allow(
+    clippy::unused_async,
+    reason = "napi async signature is part of the JS API"
+)]
 pub async fn copy_folder(src: String, dst: String) -> Result<String> {
     CANCEL_COPY.store(false, Ordering::SeqCst);
     let src_path = Path::new(&src);
@@ -335,6 +361,6 @@ mod tests {
     fn test_can_read_and_write() {
         assert!(can_read("/etc/passwd".to_string()));
         assert!(!can_write("/etc/passwd".to_string()));
-        assert!(!can_read("".to_string()));
+        assert!(!can_read(String::new()));
     }
 }

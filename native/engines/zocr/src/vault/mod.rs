@@ -19,7 +19,7 @@ impl Vault {
     pub fn load(binary_dir: &Path) -> Result<Self> {
         let seed = read_key(binary_dir, "seed_key")?;
         let text_digest = read_key(binary_dir, "text_digest_key")?;
-        let bytes = read_limited(&binary_dir.join("zocr/models.zmdl"), 268435456)
+        let bytes = read_limited(&binary_dir.join("zocr/models.zmdl"), 268_435_456)
             .context("model vault not found: zocr/models.zmdl alongside binary")?;
         let index = container::Container::parse(&bytes)?;
         let prk = hmac_sha256(&index.salt, &[&*seed, &*text_digest]);

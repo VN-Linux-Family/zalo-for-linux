@@ -59,12 +59,12 @@ impl TlvBoxLite {
     }
 
     pub fn score_for_binnet_shape(&self) -> i32 {
-        let mut score = 0;
         const EXPECTED_TOP: &[u32] = &[0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b];
         const EXPECTED_ATTACH: &[u32] = &[
             0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35,
             0x36, 0x37, 0x40, 0x41, 0x42, 0x43, 0x44,
         ];
+        let mut score = 0;
 
         for &k in EXPECTED_TOP {
             if self.values.contains_key(&k) {
@@ -124,6 +124,10 @@ impl TlvBoxLite {
         keys
     }
 
+    #[allow(
+        clippy::cast_possible_wrap,
+        reason = "wire values are two's complement"
+    )]
     pub fn get_int_value(&self, key: u32) -> Option<i32> {
         let vals = self.values.get(&key)?;
         let v = vals.first()?;
@@ -135,6 +139,10 @@ impl TlvBoxLite {
         }
     }
 
+    #[allow(
+        clippy::cast_possible_wrap,
+        reason = "wire values are two's complement"
+    )]
     pub fn get_int64_value(&self, key: u32) -> Option<i64> {
         let vals = self.values.get(&key)?;
         let v = vals.first()?;
@@ -148,9 +156,9 @@ impl TlvBoxLite {
             }
         } else if cursor.remaining() >= 4 {
             if self.little_endian_used {
-                cursor.read_u32_le().map(|n| n as i32 as i64)
+                cursor.read_u32_le().map(|n| i64::from(n as i32))
             } else {
-                cursor.read_u32_be().map(|n| n as i32 as i64)
+                cursor.read_u32_be().map(|n| i64::from(n as i32))
             }
         } else {
             None
@@ -159,7 +167,7 @@ impl TlvBoxLite {
 
     pub fn get_bytes_value(&self, key: u32) -> Option<&[u8]> {
         let vals = self.values.get(&key)?;
-        vals.first().map(|v| v.as_slice())
+        vals.first().map(std::vec::Vec::as_slice)
     }
 }
 
@@ -238,14 +246,14 @@ pub fn is_likely_utf8_printable(v: &[u8]) -> bool {
 }
 
 pub fn try_decode_utf16_le_printable(v: &[u8]) -> Option<String> {
-    if v.len() < 4 || v.len() % 2 != 0 {
+    if v.len() < 4 || !v.len().is_multiple_of(2) {
         return None;
     }
     let units = v.len() / 2;
     let mut zero_hi = 0usize;
     let mut out = String::with_capacity(units);
 
-    for chunk in v.chunks_exact(2) {
+    for chunk in v.as_chunks::<2>().0 {
         let lo = chunk[0];
         let hi = chunk[1];
         if hi == 0 {

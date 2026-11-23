@@ -1,6 +1,6 @@
 //! Embedded WebRTC Audio Processing Module (AEC, Noise Suppression, High Pass Filter).
 //! Provides true acoustic echo cancellation and background noise suppression directly
-//! in-process without relying on external PipeWire filter modules.
+//! in-process without relying on external `PipeWire` filter modules.
 
 use std::os::raw::{c_int, c_void};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -31,7 +31,11 @@ pub struct Apm {
     delay_ms: AtomicI32,
 }
 
+// SAFETY: the APM handle is not thread-bound and the C API keeps no per-thread state;
+// callers synchronize access through `&self` methods that only borrow the handle.
 unsafe impl Send for Apm {}
+// SAFETY: same as `Send`: the handle may be shared across threads as long as calls do
+// not run concurrently, which `&self` alone cannot enforce but the API permits serially.
 unsafe impl Sync for Apm {}
 
 impl Apm {
@@ -42,13 +46,15 @@ impl Apm {
         ns_enabled: bool,
         hpf_enabled: bool,
     ) -> Result<Self, String> {
+        // SAFETY: `zcall_apm_create` only takes scalars; the returned pointer is
+        // null-checked immediately below before being stored.
         let raw = unsafe {
             zcall_apm_create(
                 sample_rate_hz as c_int,
                 channels as c_int,
-                if aec_enabled { 1 } else { 0 },
-                if ns_enabled { 1 } else { 0 },
-                if hpf_enabled { 1 } else { 0 },
+                i32::from(aec_enabled),
+                i32::from(ns_enabled),
+                i32::from(hpf_enabled),
             )
         };
 
@@ -67,8 +73,14 @@ impl Apm {
         if self.raw.is_null() || pcm.is_empty() {
             return;
         }
+        // SAFETY: `self.raw` is non-null until `Drop`, and `pcm.as_ptr()`/`pcm.len()`
+        // describe a live slice that the FFI only reads.
         unsafe {
-            zcall_apm_process_render(self.raw, pcm.as_ptr(), pcm.len() as c_int);
+            zcall_apm_process_render(
+                self.raw,
+                pcm.as_ptr(),
+                i32::try_from(pcm.len()).expect("APM frame length fits in c_int"),
+            );
         }
     }
 
@@ -78,11 +90,13 @@ impl Apm {
             return;
         }
         let delay = self.delay_ms.load(Ordering::Relaxed);
+        // SAFETY: `self.raw` is non-null until `Drop`; `pcm` is exclusively borrowed for
+        // the call and its pointer/length describe the same live buffer.
         unsafe {
             zcall_apm_process_capture(
                 self.raw,
                 pcm.as_mut_ptr(),
-                pcm.len() as c_int,
+                i32::try_from(pcm.len()).expect("APM frame length fits in c_int"),
                 delay as c_int,
             );
         }
@@ -96,6 +110,8 @@ impl Apm {
 impl Drop for Apm {
     fn drop(&mut self) {
         if !self.raw.is_null() {
+            // SAFETY: `raw` is non-null, came from a successful `zcall_apm_create`, and
+            // is destroyed exactly once here before being cleared.
             unsafe {
                 zcall_apm_destroy(self.raw);
             }

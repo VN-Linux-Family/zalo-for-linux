@@ -14,7 +14,7 @@ pub fn get_info(buffer: &[u8]) -> Result<JxlInfo> {
     dimensions(buffer)
 }
 
-pub fn to_jpeg(options: JxlToJpegOptions) -> Result<Buffer> {
+pub fn to_jpeg(options: &JxlToJpegOptions) -> Result<Buffer> {
     let pixels = resize(
         decode(&options.buffer)?,
         options.output_width.unwrap_or(-1),
@@ -23,15 +23,15 @@ pub fn to_jpeg(options: JxlToJpegOptions) -> Result<Buffer> {
     Ok(encode_jpeg(&pixels, options.quality.unwrap_or(0.95))?.into())
 }
 
-pub fn bitmap_to_jxl(options: BitmapToJxlOptions) -> Result<Buffer> {
+pub fn bitmap_to_jxl(options: &BitmapToJxlOptions) -> Result<Buffer> {
     Ok(encode_jxl(&options.buffer, options.width, options.height)?.into())
 }
 
-pub fn resize_jxl(options: ResizeJxlOptions) -> Result<Buffer> {
+pub fn resize_jxl(options: &ResizeJxlOptions) -> Result<Buffer> {
     let pixels = resize(
         decode(&options.buffer)?,
-        options.width as i32,
-        options.height as i32,
+        i32::try_from(options.width).expect("JXL dimensions fit in i32"),
+        i32::try_from(options.height).expect("JXL dimensions fit in i32"),
     )?;
     Ok(encode_jxl(&pixels.data, pixels.width, pixels.height)?.into())
 }

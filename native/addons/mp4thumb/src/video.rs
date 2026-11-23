@@ -14,6 +14,10 @@ use openh264::{decoder::Decoder, formats::YUVSource};
 
 const ANNEX_B_START_CODE: [u8; 4] = [0, 0, 0, 1];
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "single decode pipeline, splitting hurts readability"
+)]
 pub fn generate_thumbnail(
     input_path: &str,
     output_path: &str,
@@ -59,7 +63,7 @@ pub fn generate_thumbnail(
     let sample_count = reader
         .tracks()
         .get(&track_id)
-        .map(|track| track.sample_count())
+        .map(mp4::Mp4Track::sample_count)
         .ok_or_else(|| Error::new(Status::GenericFailure, "Video stream has no samples"))?;
     let mut decoder = Decoder::new().map_err(|err| {
         Error::new(
@@ -143,11 +147,11 @@ fn scaled_dimensions(
             "Decoded video frame has invalid dimensions",
         ));
     }
-    let scale = (max_width as f64 / width as f64)
-        .min(max_height as f64 / height as f64)
+    let scale = (f64::from(max_width) / f64::from(width))
+        .min(f64::from(max_height) / f64::from(height))
         .min(1.0);
-    let scaled_width = ((width as f64 * scale).floor() as u32) & !1;
-    let scaled_height = ((height as f64 * scale).floor() as u32) & !1;
+    let scaled_width = ((f64::from(width) * scale).floor() as u32) & !1;
+    let scaled_height = ((f64::from(height) * scale).floor() as u32) & !1;
     if scaled_width == 0 || scaled_height == 0 {
         return Err(Error::new(
             Status::InvalidArg,

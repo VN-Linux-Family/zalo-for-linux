@@ -11,7 +11,7 @@ pub enum OutputFormat {
 
 pub fn output_format(format: Option<&str>) -> OutputFormat {
     match format.map(str::to_ascii_lowercase).as_deref() {
-        Some("jpeg") | Some("jpg") => OutputFormat::Jpeg,
+        Some("jpeg" | "jpg") => OutputFormat::Jpeg,
         _ => OutputFormat::Png,
     }
 }
@@ -26,7 +26,7 @@ pub fn validate_dimensions(width: u32, height: u32) -> Result<()> {
 }
 
 /// Blends an RGBA image onto white and returns an opaque RGB image.
-pub fn flatten_alpha_to_white(image: RgbaImage) -> image::RgbImage {
+pub fn flatten_alpha_to_white(image: &RgbaImage) -> image::RgbImage {
     let (width, height) = image.dimensions();
     let mut output = image::RgbImage::new(width, height);
 
@@ -60,7 +60,7 @@ pub fn process_image_bytes(
 
     match format {
         OutputFormat::Jpeg => {
-            let rgb = flatten_alpha_to_white(resized.to_rgba8());
+            let rgb = flatten_alpha_to_white(&resized.to_rgba8());
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 85)
                 .write_image(rgb.as_raw(), width, height, image::ExtendedColorType::Rgb8)
                 .map_err(|error| {

@@ -1,3 +1,4 @@
+#![allow(unsafe_code, reason = "napi FFI: JsUnknown::cast is unsafe by API")]
 mod binnet;
 mod container;
 mod crypto;
@@ -27,14 +28,11 @@ pub fn decompress_and_decrypt_db_v2(
 ) -> Result<JsObject> {
     let mut ret = env.create_object()?;
 
-    let (input, output, key) = match (input_path, output_path, private_key) {
-        (Some(i), Some(o), Some(k)) => (i, o, k),
-        _ => {
-            ret.set_named_property("result", -1)?;
-            ret.set_named_property("inner_error", "Invalid args")?;
-            ret.set_named_property("error_message", "Invalid args")?;
-            return Ok(ret);
-        }
+    let (Some(input), Some(output), Some(key)) = (input_path, output_path, private_key) else {
+        ret.set_named_property("result", -1)?;
+        ret.set_named_property("inner_error", "Invalid args")?;
+        ret.set_named_property("error_message", "Invalid args")?;
+        return Ok(ret);
     };
 
     let cb_closure = move || {
@@ -59,30 +57,35 @@ pub fn parse_bin_net(env: Env, val: Option<JsUnknown>) -> Result<JsObject> {
     ret.set_named_property("error_message", "")?;
     ret.set_named_property("inner_error", "")?;
 
-    let val = match val {
-        Some(v) => v,
-        None => {
-            ret.set_named_property("result", 1)?;
-            ret.set_named_property("error_message", "Wrong arguments")?;
-            ret.set_named_property("data", env.create_object()?)?;
-            return Ok(ret);
-        }
+    let Some(val) = val else {
+        ret.set_named_property("result", 1)?;
+        ret.set_named_property("error_message", "Wrong arguments")?;
+        ret.set_named_property("data", env.create_object()?)?;
+        return Ok(ret);
     };
 
     if val.is_buffer()? {
+        // SAFETY: `is_buffer()` above confirmed the value is a Buffer, so the
+        // unchecked cast to `JsBuffer` matches the real napi type; `val` is owned
+        // by the live `env` for the whole function scope.
         let buf: JsBuffer = unsafe { val.cast() };
         let value = buf.into_value()?;
-        return binnet::parse_bin_net_internal(value.as_ref(), &env);
+        return binnet::parse_bin_net_internal(value.as_ref(), env);
     }
 
     if val.is_typedarray()? {
+        // SAFETY: `is_typedarray()` above confirmed the value is a TypedArray, so
+        // the unchecked cast to `JsTypedArray` matches the real napi type; `val`
+        // is owned by the live `env` for the whole function scope.
         let ta: JsTypedArray = unsafe { val.cast() };
         let value = ta.into_value()?;
-        return binnet::parse_bin_net_internal(value.as_ref(), &env);
+        return binnet::parse_bin_net_internal(value.as_ref(), env);
     }
 
+    // SAFETY: the cast only reinterprets the napi handle; `into_value()` calls
+    // `napi_get_arraybuffer_info`, which returns an error for non-ArrayBuffers.
     if let Ok(ab) = unsafe { val.cast::<JsArrayBuffer>() }.into_value() {
-        return binnet::parse_bin_net_internal(ab.as_ref(), &env);
+        return binnet::parse_bin_net_internal(ab.as_ref(), env);
     }
 
     ret.set_named_property("result", 1)?;

@@ -4,13 +4,20 @@ mod types;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use types::*;
+use types::{
+    BitmapToJxlOptions, DecompressMultiOptions, DecompressMultiOutput, GetJxlInfoOptions, JxlInfo,
+    JxlToJpegOptions, LocalPathOptions, LocalPathOutput, ResizeJxlLimitOptions, ResizeJxlOptions,
+};
 
 #[napi(js_name = "moduleReady")]
 pub fn module_ready() -> bool {
     true
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi(js_name = "getJxlInfo")]
 pub fn get_jxl_info(
     input: Either<GetJxlInfoOptions, Buffer>,
@@ -40,12 +47,16 @@ pub fn get_jxl_info(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi(js_name = "jxlToJpeg")]
 pub fn jxl_to_jpeg(
     options: JxlToJpegOptions,
     callback: Option<JsFunction>,
 ) -> Result<Option<Buffer>> {
-    match service::to_jpeg(options) {
+    match service::to_jpeg(&options) {
         Ok(buf) => {
             if let Some(cb) = callback {
                 let _: () = cb.call3(Null, buf, 1)?;
@@ -65,12 +76,16 @@ pub fn jxl_to_jpeg(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi(js_name = "bitmapToJxl")]
 pub fn bitmap_to_jxl(
     options: BitmapToJxlOptions,
     callback: Option<JsFunction>,
 ) -> Result<Option<Buffer>> {
-    match service::bitmap_to_jxl(options) {
+    match service::bitmap_to_jxl(&options) {
         Ok(buf) => {
             if let Some(cb) = callback {
                 let _: () = cb.call3(Null, buf, 1)?;
@@ -90,12 +105,16 @@ pub fn bitmap_to_jxl(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi(js_name = "resizeJxl")]
 pub fn resize_jxl(
     options: ResizeJxlOptions,
     callback: Option<JsFunction>,
 ) -> Result<Option<Buffer>> {
-    match service::resize_jxl(options) {
+    match service::resize_jxl(&options) {
         Ok(buf) => {
             if let Some(cb) = callback {
                 let _: () = cb.call3(Null, buf, 1)?;
@@ -127,7 +146,7 @@ pub fn resize_jxl_limit(
         max_threads: options.max_threads,
         api_version: options.api_version,
     };
-    match service::resize_jxl(resize_opts) {
+    match service::resize_jxl(&resize_opts) {
         Ok(buf) => {
             if let Some(cb) = callback {
                 let _: () = cb.call3(Null, buf, 1)?;

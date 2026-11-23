@@ -41,6 +41,10 @@ impl MP4Thumb {
         Ok(())
     }
 
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "napi takes ownership of JS arguments"
+    )]
     #[napi(js_name = "generateThumbnail")]
     pub fn generate_thumbnail(
         &self,

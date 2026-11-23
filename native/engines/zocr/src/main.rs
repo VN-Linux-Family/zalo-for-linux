@@ -1,3 +1,5 @@
+#![allow(unsafe_code, reason = "libc and onnxruntime FFI")]
+
 #[cfg(not(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
@@ -28,9 +30,7 @@ fn run() -> Result<()> {
         return Ok(());
     }
     let socket_dir = if args.is_empty() {
-        std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
+        std::env::var_os("XDG_RUNTIME_DIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from)
     } else if args.len() == 2 && args[0] == "--socket-dir" {
         PathBuf::from(&args[1])
     } else {
@@ -41,6 +41,7 @@ fn run() -> Result<()> {
         return Ok(());
     }
     // Restrict socket permissions from creation, including the bind/chmod interval.
+    // SAFETY: called before any socket or thread is created; `umask` only changes a process-global scalar and takes no pointers.
     unsafe {
         libc::umask(0o077);
     }
@@ -54,7 +55,7 @@ fn run() -> Result<()> {
         .to_path_buf();
     let engine = Arc::new(Mutex::new(engine::Engine::new(dir, cfg.clone(), cpu)?));
     let maintenance = platform::maintenance(engine.clone(), &cfg, stop.clone());
-    let result = ipc::run(engine, cfg, stop.clone(), &socket_dir);
+    let result = ipc::run(&engine, &cfg, &stop, &socket_dir);
     stop.store(true, Ordering::Relaxed);
     let _ = maintenance.join();
     result

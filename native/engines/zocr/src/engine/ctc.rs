@@ -21,6 +21,10 @@ pub struct Decoded {
     pub tokens: Vec<Token>,
     pub steps: usize,
 }
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "token counts are tiny relative to f32 precision"
+)]
 pub fn decode(
     data: &[f32],
     steps: usize,
@@ -93,9 +97,10 @@ pub fn decode_batch(
     padded_width: u32,
     dictionary: &[String],
 ) -> Result<Vec<Decoded>, CtcError> {
+    let batch_i64 = i64::try_from(batch).expect("batch size fits in i64");
     let (steps, classes, time_first) = match shape {
-        [n, t, c] if *n == batch as i64 && *t > 0 && *c > 0 => (*t as usize, *c as usize, false),
-        [t, n, c] if *n == batch as i64 && *t > 0 && *c > 0 => (*t as usize, *c as usize, true),
+        [n, t, c] if *n == batch_i64 && *t > 0 && *c > 0 => (*t as usize, *c as usize, false),
+        [t, n, c] if *n == batch_i64 && *t > 0 && *c > 0 => (*t as usize, *c as usize, true),
         [t, c] if batch == 1 && *t > 0 && *c > 0 => (*t as usize, *c as usize, false),
         _ => return Err(CtcError("recognizer expected [N,T,C] or [T,N,C] output")),
     };
@@ -114,8 +119,9 @@ pub fn decode_batch(
     let mut decoded = Vec::with_capacity(batch);
     for (item, &width) in widths.iter().enumerate() {
         // Discard padded timesteps before decoding and interpolating word boxes.
-        let valid_steps =
-            ((steps as u64 * width as u64).div_ceil(padded_width as u64) as usize).min(steps);
+        let valid_steps = ((steps as u64 * u64::from(width)).div_ceil(u64::from(padded_width))
+            as usize)
+            .min(steps);
         let mut sequence = Vec::with_capacity(valid_steps * classes);
         for step in 0..valid_steps {
             let offset = if time_first {
@@ -137,6 +143,10 @@ pub struct Word {
     pub start: f64,
     pub end: f64,
 }
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "token counts and step indices are tiny relative to f64 precision"
+)]
 pub fn words(decoded: &Decoded) -> Vec<Word> {
     let mut words = Vec::new();
     let mut text = String::new();

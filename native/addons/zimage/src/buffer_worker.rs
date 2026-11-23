@@ -13,7 +13,7 @@ pub struct BufferThumbnailTask {
 }
 
 impl BufferThumbnailTask {
-    pub fn new(options: BufferOptions) -> Result<Self> {
+    pub fn new(options: &BufferOptions) -> Result<Self> {
         validate_dimensions(options.width, options.height)?;
         Ok(Self {
             input: options.buffer.to_vec(),

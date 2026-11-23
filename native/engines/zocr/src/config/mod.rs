@@ -5,6 +5,10 @@ use std::{env, path::PathBuf, time::Duration};
 // drop them after a short idle period; the next request reloads them.
 const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(120);
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "configuration struct mirrors independent environment flags"
+)]
 #[derive(Clone)]
 pub struct Config {
     pub auth_token: String,

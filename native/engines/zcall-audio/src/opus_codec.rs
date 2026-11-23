@@ -47,17 +47,23 @@ pub struct OpusEncoder {
     handle: *mut std::ffi::c_void,
 }
 
+// SAFETY: Opus encoder state is not thread-bound; `encode` takes `&mut self`, so a moved
+// encoder cannot be used concurrently from two threads.
 unsafe impl Send for OpusEncoder {}
 
 impl OpusEncoder {
     pub fn new(sample_rate: i32, channels: i32, bitrate_bps: i32) -> Result<Self, String> {
         let mut err = 0;
         let handle =
-            unsafe { opus_encoder_create(sample_rate, channels, OPUS_APPLICATION_VOIP, &mut err) };
+            // SAFETY: `&mut err` points to a live stack integer; the handle and error code
+            // are both validated before the handle is used.
+            unsafe { opus_encoder_create(sample_rate, channels, OPUS_APPLICATION_VOIP, &raw mut err) };
         if err != 0 || handle.is_null() {
-            return Err(format!("opus_encoder_create failed: error code {}", err));
+            return Err(format!("opus_encoder_create failed: error code {err}"));
         }
 
+        // SAFETY: `handle` came from a successful `opus_encoder_create`, and every ctl
+        // request/value pair passes only scalars valid for an encoder.
         unsafe {
             opus_encoder_ctl(handle, OPUS_SET_BITRATE_REQUEST, bitrate_bps);
             opus_encoder_ctl(handle, OPUS_SET_COMPLEXITY_REQUEST, 10);
@@ -69,17 +75,19 @@ impl OpusEncoder {
     }
 
     pub fn encode(&mut self, pcm: &[i16], out_buf: &mut [u8]) -> Result<usize, String> {
+        // SAFETY: `self.handle` came from a successful create; `pcm` and `out_buf` are
+        // live slices whose lengths are passed to the encoder verbatim.
         let n = unsafe {
             opus_encode(
                 self.handle,
                 pcm.as_ptr(),
-                pcm.len() as c_int,
-                out_buf.as_mut_ptr() as *mut c_uchar,
-                out_buf.len() as i32,
+                i32::try_from(pcm.len()).expect("PCM frame length fits in c_int"),
+                out_buf.as_mut_ptr().cast::<c_uchar>(),
+                i32::try_from(out_buf.len()).expect("opus output buffer fits in i32"),
             )
         };
         if n < 0 {
-            Err(format!("opus_encode failed: error code {}", n))
+            Err(format!("opus_encode failed: error code {n}"))
         } else {
             Ok(n as usize)
         }
@@ -89,6 +97,8 @@ impl OpusEncoder {
 impl Drop for OpusEncoder {
     fn drop(&mut self) {
         if !self.handle.is_null() {
+            // SAFETY: `handle` came from a successful `opus_encoder_create` and is
+            // destroyed exactly once here, in `Drop`.
             unsafe { opus_encoder_destroy(self.handle) };
         }
     }
@@ -98,14 +108,18 @@ pub struct OpusDecoder {
     handle: *mut std::ffi::c_void,
 }
 
+// SAFETY: Opus decoder state is not thread-bound; `decode` takes `&mut self`, so a moved
+// decoder cannot be used concurrently from two threads.
 unsafe impl Send for OpusDecoder {}
 
 impl OpusDecoder {
     pub fn new(sample_rate: i32, channels: i32) -> Result<Self, String> {
         let mut err = 0;
-        let handle = unsafe { opus_decoder_create(sample_rate, channels, &mut err) };
+        // SAFETY: `&mut err` points to a live stack integer; the handle and error code
+        // are both validated before the handle is stored.
+        let handle = unsafe { opus_decoder_create(sample_rate, channels, &raw mut err) };
         if err != 0 || handle.is_null() {
-            return Err(format!("opus_decoder_create failed: error code {}", err));
+            return Err(format!("opus_decoder_create failed: error code {err}"));
         }
         Ok(Self { handle })
     }
@@ -119,21 +133,27 @@ impl OpusDecoder {
         let (data_ptr, len) = if payload.is_empty() {
             (std::ptr::null(), 0)
         } else {
-            (payload.as_ptr() as *const c_uchar, payload.len() as i32)
+            (
+                payload.as_ptr().cast::<c_uchar>(),
+                i32::try_from(payload.len()).expect("opus packet length fits in i32"),
+            )
         };
 
+        // SAFETY: `self.handle` came from a successful create; `out_pcm` is a live
+        // mutable slice whose length is passed, and `data_ptr` is null only for the
+        // documented empty-payload case; `len` matches that buffer.
         let n = unsafe {
             opus_decode(
                 self.handle,
                 data_ptr,
                 len,
                 out_pcm.as_mut_ptr(),
-                out_pcm.len() as c_int,
-                if decode_fec { 1 } else { 0 },
+                i32::try_from(out_pcm.len()).expect("PCM frame length fits in c_int"),
+                i32::from(decode_fec),
             )
         };
         if n < 0 {
-            Err(format!("opus_decode failed: error code {}", n))
+            Err(format!("opus_decode failed: error code {n}"))
         } else {
             Ok(n as usize)
         }
@@ -143,6 +163,8 @@ impl OpusDecoder {
 impl Drop for OpusDecoder {
     fn drop(&mut self) {
         if !self.handle.is_null() {
+            // SAFETY: `handle` came from a successful `opus_decoder_create` and is
+            // destroyed exactly once here, in `Drop`.
             unsafe { opus_decoder_destroy(self.handle) };
         }
     }

@@ -66,24 +66,13 @@ pub struct LocalPathOptions {
 }
 
 #[napi(object)]
+#[derive(Default)]
 pub struct DecompressTask {
     pub max_width: Option<i32>,
     pub max_height: Option<i32>,
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub output_path: Option<String>,
-}
-
-impl Default for DecompressTask {
-    fn default() -> Self {
-        Self {
-            max_width: None,
-            max_height: None,
-            width: None,
-            height: None,
-            output_path: None,
-        }
-    }
 }
 
 #[napi(object)]

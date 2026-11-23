@@ -28,5 +28,11 @@ pub fn build(shape: &[i64], widths: &[u32]) -> Result<([i64; 2], Vec<i32>), Segm
         let valid = width.div_ceil(8) as usize;
         data[i * steps..i * steps + valid].fill(0);
     }
-    Ok(([shape[0], steps as i64], data))
+    Ok((
+        [
+            shape[0],
+            i64::try_from(steps).expect("width is bounded to 4096, so steps fit in i64"),
+        ],
+        data,
+    ))
 }

@@ -43,6 +43,10 @@ pub fn area_perimeter(p: &[Point]) -> (f64, f64) {
 pub fn distance(a: Point, b: Point) -> f64 {
     (a[0] - b[0]).hypot(a[1] - b[1])
 }
+#[allow(
+    clippy::many_single_char_names,
+    reason = "short names follow the planar-geometry names used throughout this module"
+)]
 pub fn min_quad(p: &[Point]) -> Option<Quad> {
     if p.len() < 3 {
         return None;
@@ -114,6 +118,10 @@ pub fn word_quad(q: Quad, start: f64, end: f64) -> Quad {
     ]
 }
 /// Unit-square to quadrilateral homography (including projective skew).
+#[allow(
+    clippy::many_single_char_names,
+    reason = "short names follow the planar-geometry names used throughout this module"
+)]
 pub fn project(q: Quad, u: f64, v: f64) -> Option<Point> {
     let dx1 = q[1][0] - q[2][0];
     let dx2 = q[3][0] - q[2][0];

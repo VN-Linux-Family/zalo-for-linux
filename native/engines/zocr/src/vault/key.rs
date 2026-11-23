@@ -13,7 +13,7 @@ pub fn parse(text: &str) -> Result<[u8; 32], KeyError> {
         return Err(KeyError);
     }
     let mut key = [0u8; 32];
-    for (i, pair) in text.as_bytes().chunks_exact(2).enumerate() {
+    for (i, pair) in text.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let nibble = |b| match b {
             b'0'..=b'9' => Ok(b - b'0'),
             b'a'..=b'f' => Ok(b - b'a' + 10),

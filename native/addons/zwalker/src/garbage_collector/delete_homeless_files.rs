@@ -48,15 +48,12 @@ pub fn delete_homeless_files(
 
     for f in candidates {
         {
-            match std::fs::remove_file(&f.file_path) {
-                Ok(()) => {
-                    removed_paths.insert(f.file_path.clone());
-                    deleted.push(f);
-                }
-                Err(_) => {
-                    failed_file_number += 1;
-                    failed_size += f.size;
-                }
+            if let Ok(()) = std::fs::remove_file(&f.file_path) {
+                removed_paths.insert(f.file_path.clone());
+                deleted.push(f);
+            } else {
+                failed_file_number += 1;
+                failed_size += f.size;
             }
         }
     }

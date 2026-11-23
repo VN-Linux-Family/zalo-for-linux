@@ -32,14 +32,14 @@ fn collect_files(root: &str) -> Vec<String> {
         .follow_links(false)
         .build();
     for dent in walker.flatten() {
-        if dent.file_type().map(|t| t.is_file()).unwrap_or(false) {
+        if dent.file_type().is_some_and(|t| t.is_file()) {
             out.push(dent.path().to_string_lossy().into_owned());
         }
     }
     out
 }
 
-/// Stat one path into a fresh (unmarked) FileInfo. Returns None if it vanished/denied.
+/// Stat one path into a fresh (unmarked) `FileInfo`. Returns None if it vanished/denied.
 fn stat_file(path: &str) -> Option<FileInfo> {
     let md = std::fs::metadata(path).ok()?;
     if !md.is_file() {
@@ -47,8 +47,7 @@ fn stat_file(path: &str) -> Option<FileInfo> {
     }
     let file_name = Path::new(path)
         .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
+        .map_or_default(|s| s.to_string_lossy().into_owned());
     Some(FileInfo {
         file_name,
         file_path: path.to_string(),

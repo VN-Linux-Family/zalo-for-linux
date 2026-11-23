@@ -122,15 +122,15 @@ fn output_dimensions(
     if wanted_width <= 0 && wanted_height <= 0 {
         return (source_width, source_height);
     }
-    let ratio = source_width as f64 / source_height as f64;
+    let ratio = f64::from(source_width) / f64::from(source_height);
     match (wanted_width > 0, wanted_height > 0) {
         (true, true) => (wanted_width as u32, wanted_height as u32),
         (true, false) => (
             wanted_width as u32,
-            ((wanted_width as f64 / ratio).round() as u32).max(1),
+            ((f64::from(wanted_width) / ratio).round() as u32).max(1),
         ),
         (false, true) => (
-            ((wanted_height as f64 * ratio).round() as u32).max(1),
+            ((f64::from(wanted_height) * ratio).round() as u32).max(1),
             wanted_height as u32,
         ),
         _ => unreachable!(),
