@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, dialog, shell } = require('electron');
 const { registerMainTransport } = require('./plugins/language-core/main-transport');
 const { buildTrayMenuTemplate } = require('./plugins/tray-menu');
 const path = require('path');
@@ -85,10 +85,19 @@ const BACKGROUND_WINDOW_TITLES = ['Shared Worker', 'SQLite'];
 
 // Linux optimizations & environment defaults
 if (process.platform === 'linux') {
-  if (process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info')) {
+  const isFlatpak = Boolean(process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info'));
+  if (isFlatpak) {
     // Electron 22 crashes in Notification::Close() with libnotify's portal backend.
     // Use the already permitted org.freedesktop.Notifications service instead.
     process.env.NOTIFY_IGNORE_PORTAL = '1';
+  } else {
+    // Electron's shell.openPath() waits for xdg-open to exit on the UI thread
+    // (platform_util_linux.cc: OpenPath -> XDGUtil(..., wait_for_exit = true)).
+    // Opening a document in a handler that stays open (ONLYOFFICE, LibreOffice,
+    // an image viewer) froze the window - and MPRIS, tray and notification
+    // replies served from the same thread - until that window was closed.
+    // Flatpak builds use the async OpenURI portal instead.
+    require('./plugins/shell-open').install(shell);
   }
   const uid = process.getuid ? process.getuid() : 1000;
   const runtimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`;
