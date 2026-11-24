@@ -93,6 +93,46 @@ jobs:
         grep -vE '^[[:space:]]*(#|$)' .github/apt-packages.txt \
           | xargs apt-get install -y --no-install-recommends
 
+    - name: Cache Rust / WebRTC APM (v1.3)
+      id: webrtc-apm
+      uses: actions/cache@v6
+      with:
+        path: /opt/webrtc-apm
+        key: ${{ runner.os }}-${{ matrix.arch }}-webrtc-apm-1.3-v2
+
+    - name: Build WebRTC AudioProcessing v1.3 (static)
+      if: steps.webrtc-apm.outputs.cache-hit != 'true'
+      run: |
+        set -euo pipefail
+        apt-get install -y --no-install-recommends python3-pip ninja-build pkg-config cmake
+        pip3 install --no-cache-dir "meson>=0.63"
+        tmpdir="$(mktemp -d)"
+        trap 'rm -rf "$tmpdir"' EXIT
+        curl -fsSL "https://github.com/abseil/abseil-cpp/releases/download/20240116.2/abseil-cpp-20240116.2.tar.gz" -o "$tmpdir/absl.tar.gz"
+        tar -xf "$tmpdir/absl.tar.gz" -C "$tmpdir"
+        cmake -S "$tmpdir/abseil-cpp-20240116.2" -B "$tmpdir/absl-build" -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/opt/webrtc-apm \
+          -DCMAKE_CXX_STANDARD=17 \
+          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          -DABSL_PROPAGATE_CXX_STD=ON \
+          -DABSL_BUILD_TESTING=OFF
+        cmake --build "$tmpdir/absl-build" --target install
+        export PKG_CONFIG_PATH="/opt/webrtc-apm/lib/pkgconfig:/opt/webrtc-apm/lib/x86_64-linux-gnu/pkgconfig:/opt/webrtc-apm/lib/aarch64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}"
+        curl -fsSL "https://freedesktop.org/software/pulseaudio/webrtc-audio-processing/webrtc-audio-processing-1.3.tar.xz" -o "$tmpdir/webrtc.tar.xz"
+        tar -xf "$tmpdir/webrtc.tar.xz" -C "$tmpdir"
+        meson setup "$tmpdir/build" "$tmpdir/webrtc-audio-processing-1.3" \
+          --prefix=/opt/webrtc-apm \
+          --buildtype=release \
+          --default-library=static \
+          -Dcpp_std=c++17 \
+          -Dcpp_args="-include cstdint"
+        ninja -C "$tmpdir/build" install
+
+    - name: Configure WebRTC APM pkg-config
+      run: |
+        echo "PKG_CONFIG_PATH=/opt/webrtc-apm/lib/pkgconfig:/opt/webrtc-apm/lib/x86_64-linux-gnu/pkgconfig:/opt/webrtc-apm/lib/aarch64-linux-gnu/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
