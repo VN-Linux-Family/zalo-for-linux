@@ -14,12 +14,13 @@ pub fn derive_aes256_key_zalo_v2(private_key_str: &str) -> [u8; 32] {
 }
 
 pub fn aes256cbc_decrypt_nopad(ct: &[u8], key: &[u8; 32], iv: &[u8; 16]) -> Option<Vec<u8>> {
-    if ct.is_empty() || ct.len() % 16 != 0 {
+    if ct.is_empty() || !ct.len().is_multiple_of(16) {
         return None;
     }
     let mut pt = ct.to_vec();
-    let mut decryptor = Aes256CbcDec::new(GenericArray::from_slice(key), GenericArray::from_slice(iv));
-    for block in pt.chunks_exact_mut(16) {
+    let mut decryptor =
+        Aes256CbcDec::new(GenericArray::from_slice(key), GenericArray::from_slice(iv));
+    for block in pt.as_chunks_mut::<16>().0 {
         decryptor.decrypt_block_mut(GenericArray::from_mut_slice(block));
     }
     Some(pt)
@@ -27,7 +28,7 @@ pub fn aes256cbc_decrypt_nopad(ct: &[u8], key: &[u8; 32], iv: &[u8; 16]) -> Opti
 
 pub fn aes256cbc_decrypt_nopad_chunked_reset_iv(ct: &[u8], key: &[u8; 32]) -> Option<Vec<u8>> {
     const CHUNK_SIZE: usize = 0x10000; // 65536
-    if ct.is_empty() || ct.len() % 16 != 0 {
+    if ct.is_empty() || !ct.len().is_multiple_of(16) {
         return None;
     }
     let mut pt_out = Vec::with_capacity(ct.len());

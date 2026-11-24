@@ -77,6 +77,11 @@ pub struct EmptyFolderResult {
 
 // ---- exported functions ----------------------------------------------------------
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::cast_possible_wrap,
+    reason = "napi takes ownership of JS arguments; file sizes are reported to JS as i64"
+)]
 #[napi]
 pub fn scan_directory(root: String, tracking_folder_paths: Vec<String>) -> ScanResult {
     let o = scan_directory_impl(&root, &tracking_folder_paths);
@@ -87,6 +92,10 @@ pub fn scan_directory(root: String, tracking_folder_paths: Vec<String>) -> ScanR
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi]
 pub fn update_reference_message_id(_root: String, updates: Vec<ReferenceUpdate>) -> UpdateResult {
     UpdateResult {
@@ -94,6 +103,11 @@ pub fn update_reference_message_id(_root: String, updates: Vec<ReferenceUpdate>)
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::cast_possible_wrap,
+    reason = "napi takes ownership of JS arguments; file sizes are reported to JS as i64"
+)]
 #[napi]
 pub fn stat_unmarked_files(
     _root: String,
@@ -101,7 +115,11 @@ pub fn stat_unmarked_files(
     tracking_folder_paths: Vec<String>,
     age_thresholds: Vec<i64>,
 ) -> StatResult {
-    let o = stat_unmarked_impl(&ignore_folder_paths, &tracking_folder_paths, &age_thresholds);
+    let o = stat_unmarked_impl(
+        &ignore_folder_paths,
+        &tracking_folder_paths,
+        &age_thresholds,
+    );
     StatResult {
         file_number: o.file_number,
         size: o.size as i64,
@@ -110,6 +128,11 @@ pub fn stat_unmarked_files(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    clippy::cast_possible_wrap,
+    reason = "napi takes ownership of JS arguments; file sizes are reported to JS as i64"
+)]
 #[napi]
 pub fn delete_homeless_files(
     _root: String,
@@ -135,6 +158,10 @@ pub fn delete_homeless_files(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "napi takes ownership of JS arguments"
+)]
 #[napi]
 pub fn delete_empty_folders(root: String) -> EmptyFolderResult {
     let o = delete_empty_impl(&root);

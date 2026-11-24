@@ -44,7 +44,7 @@ The `build` job compiles and packages AppImages across two CPU architectures:
 - **`aarch64`**: Runs on `ubuntu-24.04-arm` inside an `ubuntu:22.04` container.
 
 During the job:
-1. Native addons in `nativelibs/` are compiled for the target architecture.
+1. Native addons in `native/addons/` are compiled for the target architecture.
 2. The official DMG is downloaded and extracted.
 3. JavaScript patches from `scripts/patches/` are applied.
 4. ZaDark assets are built and bundled.

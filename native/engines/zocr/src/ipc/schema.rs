@@ -1,4 +1,6 @@
-use serde::Serialize;use crate::engine::{ctc, geometry};#[derive(Debug, Serialize)]
+use crate::engine::{ctc, geometry};
+use serde::Serialize;
+#[derive(Debug, Serialize)]
 pub struct Point {
     pub x: i32,
     pub y: i32,
@@ -12,9 +14,10 @@ pub struct Quad {
 }
 impl From<geometry::Quad> for Quad {
     fn from(q: geometry::Quad) -> Self {
-        let [p1, p2, p3, p4] =
-            q.map(|p|
-                    Point { x: p[0].round() as i32, y: p[1].round() as i32 });
+        let [p1, p2, p3, p4] = q.map(|p| Point {
+            x: p[0].round() as i32,
+            y: p[1].round() as i32,
+        });
         Self { p1, p2, p3, p4 }
     }
 }
@@ -34,7 +37,10 @@ impl Word {
         Self {
             text: word.text,
             quad: geometry::word_quad(base, word.start, word.end).into(),
-            scores: WordScores { detection: None, recognition: word.score },
+            scores: WordScores {
+                detection: None,
+                recognition: word.score,
+            },
         }
     }
 }

@@ -4,11 +4,15 @@
 //!   0 = full scale (maximum volume)
 //!   127 = silence (or rms < 1)
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "metrics/percent; precision below 2^52 is irrelevant"
+)]
 pub fn compute_rfc6464_level(pcm: &[i16]) -> u8 {
     if pcm.is_empty() {
         return 127;
     }
-    let sum_sq: f64 = pcm.iter().map(|&v| (v as f64) * (v as f64)).sum();
+    let sum_sq: f64 = pcm.iter().map(|&v| f64::from(v) * f64::from(v)).sum();
     let rms = (sum_sq / pcm.len() as f64).sqrt();
     if rms < 1.0 {
         return 127;

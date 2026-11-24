@@ -56,8 +56,8 @@ node native/builder.js native/addons/<addon-name>
 
 File nhị phân sau khi biên dịch sẽ nằm tại:
 
-- `<project-root>/nativelibs/<addon-name>/build/Release/*.node` (Addon dựa trên gyp)
-- `<project-root>/nativelibs/<addon-name>/target/release/*.node` (Addon dựa trên Rust)
+- `<project-root>/native/addons/<addon-name>/build/Release/*.node` (Addon dựa trên gyp)
+- `<project-root>/native/addons/<addon-name>/target/release/*.node` (Addon dựa trên Rust)
 
 Đường dẫn này khớp với cấu trúc mà các JS binding của ứng dụng Zalo mong đợi.
 
@@ -72,7 +72,7 @@ File nhị phân sau khi biên dịch sẽ nằm tại:
 1. **Tạo cấu trúc thư mục** — sao chép một addon có sẵn làm mẫu:
 
    ```bash
-   cp -r nativelibs/db-cross-v4 nativelibs/<new-addon>
+   cp -r native/addons/db-cross-v4 native/addons/<new-addon>
    ```
 
 2. **Cập nhật các file tĩnh**:

@@ -6,14 +6,14 @@ toolchain, scripts, and how to add new patches or native addons.
 
 For an overview of how the project works, see
 [architecture.md](./architecture.md). For info on the native addons
-reimplementation, see [nativelibs/README.md](../../nativelibs/README.md).
+reimplementation, see [native/addons/README.md](../../native/addons/README.md).
 
 ## Prerequisites
 
 - Linux x86_64 or aarch64
 - Node.js (version 22+) and npm
 - `7z` (`p7zip-full`) for extracting the macOS app
-- C++ and Rust build toolchains (`cargo` / `rustup`) for native addons (see [nativelibs/README.md](../../nativelibs/README.md#requirements))
+- C++ and Rust build toolchains (`cargo` / `rustup`) for native addons (see [native/addons/README.md](../../native/addons/README.md#requirements))
 
 - **Debian / Ubuntu**:
   ```bash

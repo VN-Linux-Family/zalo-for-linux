@@ -1,7 +1,7 @@
 use crate::tlv::{is_likely_utf8_printable, try_decode_text_smart, TlvBoxLite};
 use napi::{Env, JsObject, Result};
 
-/// Zalo BinNet TLV tag constants (describing rich-message metadata fields)
+/// Zalo `BinNet` TLV tag constants (describing `rich-message` metadata fields)
 pub mod tag {
     // Top-level message TLV tags
     pub const PROPERTY: u32 = 0x05;
@@ -61,7 +61,11 @@ pub mod tag {
     pub const MENTION_TYPE: u32 = 0x68;
 }
 
-pub fn parse_attach_chat_msg_lite(buf: &[u8], env: &Env) -> Option<JsObject> {
+#[allow(
+    clippy::too_many_lines,
+    reason = "single protocol pipeline, splitting hurts readability"
+)]
+pub fn parse_attach_chat_msg_lite(buf: &[u8], env: Env) -> Option<JsObject> {
     let mut tlv = TlvBoxLite::new();
     if tlv.parse(buf).is_err() {
         return None;
@@ -71,9 +75,8 @@ pub fn parse_attach_chat_msg_lite(buf: &[u8], env: &Env) -> Option<JsObject> {
     let mut has_props = false;
 
     for k in tlv.get_all_keys() {
-        let v = match tlv.get_bytes_value(k) {
-            Some(v) => v,
-            None => continue,
+        let Some(v) = tlv.get_bytes_value(k) else {
+            continue;
         };
 
         match k {
@@ -213,7 +216,11 @@ pub fn parse_attach_chat_msg_lite(buf: &[u8], env: &Env) -> Option<JsObject> {
     }
 }
 
-pub fn parse_reference_or_quote_lite(buf: &[u8], env: &Env) -> Option<JsObject> {
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "protocol ids/timestamps as f64; precision below 2^52 is irrelevant"
+)]
+pub fn parse_reference_or_quote_lite(buf: &[u8], env: Env) -> Option<JsObject> {
     let mut tlv = TlvBoxLite::new();
     if tlv.parse(buf).is_err() {
         return None;
@@ -279,7 +286,7 @@ pub fn parse_reference_or_quote_lite(buf: &[u8], env: &Env) -> Option<JsObject> 
     }
 }
 
-pub fn parse_mention_lite(buf: &[u8], env: &Env) -> Option<JsObject> {
+pub fn parse_mention_lite(buf: &[u8], env: Env) -> Option<JsObject> {
     let mut tlv = TlvBoxLite::new();
     if tlv.parse(buf).is_err() {
         return None;
@@ -312,7 +319,15 @@ pub fn parse_mention_lite(buf: &[u8], env: &Env) -> Option<JsObject> {
     }
 }
 
-pub fn parse_bin_net_internal(p: &[u8], env: &Env) -> Result<JsObject> {
+#[allow(
+    clippy::too_many_lines,
+    reason = "single protocol pipeline, splitting hurts readability"
+)]
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "buffer lengths as f64; precision below 2^52 is irrelevant"
+)]
+pub fn parse_bin_net_internal(p: &[u8], env: Env) -> Result<JsObject> {
     let mut ret = env.create_object()?;
     ret.set_named_property("result", 0)?;
     ret.set_named_property("error_message", "")?;
@@ -481,8 +496,8 @@ pub fn parse_bin_net_internal(p: &[u8], env: &Env) -> Result<JsObject> {
 
     ret.set_named_property("data", data)?;
     debug.set_named_property("attachCandidates", attach_candidates)?;
-    debug.set_named_property("attachCandidateCount", attach_candidate_idx as f64)?;
-    debug.set_named_property("attachCount", attach_idx as f64)?;
+    debug.set_named_property("attachCandidateCount", f64::from(attach_candidate_idx))?;
+    debug.set_named_property("attachCount", f64::from(attach_idx))?;
     ret.set_named_property("debug", debug)?;
 
     Ok(ret)

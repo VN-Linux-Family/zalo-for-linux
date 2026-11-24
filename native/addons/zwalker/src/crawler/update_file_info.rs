@@ -22,7 +22,7 @@ pub fn update_reference_message_id(updates: &[ReferenceUpdate]) -> u32 {
         if let Some(&i) = state.index.get(&u.file_path) {
             // Count every applied mark (matching the mac `update_count`), including
             // re-marks, so a batch that touches a file twice reports two updates.
-            state.files[i].reference_message_id = u.id.clone();
+            state.files[i].reference_message_id.clone_from(&u.id);
             updated += 1;
         }
     }

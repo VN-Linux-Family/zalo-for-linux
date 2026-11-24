@@ -52,9 +52,9 @@ addons.
 node native/builder.js native/addons/<addon-name>
 ```
 The compiled binary stays in:
-`<project-root>/nativelibs/<addon-name>/build/Release/*.node # gyp-based addons`
+`<project-root>/native/addons/<addon-name>/build/Release/*.node # gyp-based addons`
 
-`<project-root>/nativelibs/<addon-name>/target/release/*.node # Rust-based addons`
+`<project-root>/native/addons/<addon-name>/target/release/*.node # Rust-based addons`
 
 This path matches the structure expected by the Zalo app's JS bindings.
 

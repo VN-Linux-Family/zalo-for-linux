@@ -16,7 +16,7 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
 
 ## ⚠️ Các giới hạn hiện tại
 
-- **Cuộc gọi trên ARM64 (`aarch64`)**: Engine gọi điện chạy hoàn toàn bằng Node.js + Python (`zcall-native/`, không dùng Wine của x86) và đã được kiểm thử, xác nhận hoạt động trên phần cứng ARM64 bởi tester @lolmc0587 ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
+- **Cuộc gọi trên ARM64 (`aarch64`)**: Engine gọi điện chạy hoàn toàn bằng Node.js + Python (`native/engines/zcall/`, không dùng Wine của x86) và đã được kiểm thử, xác nhận hoạt động trên phần cứng ARM64 bởi tester @lolmc0587 ([Issue #70](https://github.com/VN-Linux-Family/zalo-for-linux/issues/70)).
 - **Giới hạn Sandbox trên Ubuntu 23.10+**: Do cơ chế AppArmor mới, cần chạy với `--no-sandbox` hoặc làm theo [hướng dẫn xử lý của AM](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) để cấu hình profile AppArmor ([Issue #72](https://github.com/VN-Linux-Family/zalo-for-linux/issues/72), [Issue #143](https://github.com/VN-Linux-Family/zalo-for-linux/issues/143)).
 
 ---
@@ -28,7 +28,7 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
 
 - **Cuộc gọi (Thoại, Video, Chia sẻ màn hình, Gọi nhóm):**
   - **Lỗi:** Không gọi hay nhận cuộc gọi được trên Linux.
-  - **Khắc phục:** Sử dụng engine gọi native cho Linux ([`zcall-native/`](../../zcall-native/README.md), từ [zalo-linux-native](https://github.com/nct88/zalo-linux-native)). Hoàn toàn không dùng Wine, không cần `ZaloCall.exe`, không cần thư viện 32-bit.
+  - **Khắc phục:** Sử dụng engine gọi native cho Linux ([`native/engines/zcall/`](../../native/engines/zcall/README.md), từ [zalo-linux-native](https://github.com/nct88/zalo-linux-native)). Hoàn toàn không dùng Wine, không cần `ZaloCall.exe`, không cần thư viện 32-bit.
   - **Đóng góp:** [@nct88](https://github.com/nct88), [@collyn](https://github.com/collyn). Xem [PR #62](https://github.com/VN-Linux-Family/zalo-for-linux/pull/62), [PR #128](https://github.com/VN-Linux-Family/zalo-for-linux/pull/128), [PR #129](https://github.com/VN-Linux-Family/zalo-for-linux/pull/129), [PR #135](https://github.com/VN-Linux-Family/zalo-for-linux/pull/135), [PR #136](https://github.com/VN-Linux-Family/zalo-for-linux/pull/136), [PR #137](https://github.com/VN-Linux-Family/zalo-for-linux/pull/137).
 
 - **Tự động đổi theme Sáng / Tối theo hệ thống:**

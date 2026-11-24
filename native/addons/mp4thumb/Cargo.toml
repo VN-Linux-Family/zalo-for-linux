@@ -12,4 +12,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg"] }
 mp4 = "0.14"
 napi = { version = "2.16", default-features = false, features = ["napi5", "async"] }
 napi-derive = "2.16"
-openh264 = "0.8.0"
+openh264 = "0.8.1"
+
+[lints]
+workspace = true

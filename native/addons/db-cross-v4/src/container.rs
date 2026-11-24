@@ -21,7 +21,7 @@ pub const ZDB4_MAGIC_HEADER: &[u8; 6] = b"ZDB4.0";
 /// Offset where Table of Contents (TOC) begins: 6 bytes magic + 8 bytes padding
 pub const ZDB4_TOC_START_OFFSET: usize = 14;
 
-/// SQLite database file magic header (16 bytes)
+/// `SQLite` database file magic header (16 bytes)
 pub const SQLITE_HEADER_MAGIC: &[u8; 16] = b"SQLite format 3\0";
 
 /// XZ container stream header magic (\xFD7zXZ\x00)
@@ -111,8 +111,7 @@ fn decompress_zdb4_payload(compressed: &[u8]) -> Result<Vec<u8>, String> {
         let xz_end = compressed
             .windows(XZ_FOOTER_MAGIC.len())
             .rposition(|window| window == XZ_FOOTER_MAGIC)
-            .map(|pos| pos + XZ_FOOTER_MAGIC.len())
-            .unwrap_or(compressed.len());
+            .map_or(compressed.len(), |pos| pos + XZ_FOOTER_MAGIC.len());
         let mut out = Vec::new();
         if lzma_rs::xz_decompress(&mut &compressed[..xz_end], &mut out).is_ok() {
             return Ok(out);
@@ -130,6 +129,15 @@ fn decompress_zdb4_payload(compressed: &[u8]) -> Result<Vec<u8>, String> {
     Err("Failed to decompress LZMA/XZ payload".to_string())
 }
 
+struct CtSpan {
+    off: usize,
+    len: usize,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "single protocol pipeline, splitting hurts readability"
+)]
 pub fn process_zdb4_v2<F>(
     input_path: &str,
     output_path: &str,
@@ -144,7 +152,7 @@ where
         Err(e) => {
             return DecryptResult {
                 code: -1,
-                err: format!("Cannot open input: {}", e),
+                err: format!("Cannot open input: {e}"),
             }
         }
     };
@@ -155,11 +163,6 @@ where
             code: -1,
             err: "Input too small".to_string(),
         };
-    }
-
-    struct CtSpan {
-        off: usize,
-        len: usize,
     }
 
     let mut spans = Vec::new();
@@ -197,9 +200,7 @@ where
         let ct_slice = &ct_full[sp.off..sp.off + sp.len];
 
         // Try chunked reset IV first
-        let tmp = if let Some(dec) =
-            aes256cbc_decrypt_nopad_chunked_reset_iv(ct_slice, &aes_key)
-        {
+        let tmp = if let Some(dec) = aes256cbc_decrypt_nopad_chunked_reset_iv(ct_slice, &aes_key) {
             if has_zdb4_magic_at0(&dec) {
                 Some(dec)
             } else {
@@ -236,47 +237,38 @@ where
     // Advance past magic signature and reserved padding (14 bytes)
     cursor.read_bytes(ZDB4_TOC_START_OFFSET);
 
-    let file_count = match cursor.read_u32_be() {
-        Some(cnt) => cnt as usize,
-        None => {
-            return DecryptResult {
-                code: -2,
-                err: "Truncated file count".to_string(),
-            };
-        }
+    let Some(file_count) = cursor.read_u32_be() else {
+        return DecryptResult {
+            code: -2,
+            err: "Truncated file count".to_string(),
+        };
     };
+    let file_count = file_count as usize;
 
     let mut files = Vec::with_capacity(file_count);
     for _ in 0..file_count {
-        let nlen = match cursor.read_u32_be() {
-            Some(len) => len as usize,
-            None => {
-                return DecryptResult {
-                    code: -2,
-                    err: "Truncated file table".to_string(),
-                };
-            }
+        let Some(nlen) = cursor.read_u32_be() else {
+            return DecryptResult {
+                code: -2,
+                err: "Truncated file table".to_string(),
+            };
+        };
+        let nlen = nlen as usize;
+
+        let Some(name) = cursor.read_string_utf8_lossy(nlen) else {
+            return DecryptResult {
+                code: -2,
+                err: "Truncated file table names".to_string(),
+            };
         };
 
-        let name = match cursor.read_string_utf8_lossy(nlen) {
-            Some(s) => s,
-            None => {
-                return DecryptResult {
-                    code: -2,
-                    err: "Truncated file table names".to_string(),
-                };
-            }
+        let Some(size) = cursor.read_u32_be() else {
+            return DecryptResult {
+                code: -2,
+                err: "Truncated file table size".to_string(),
+            };
         };
-
-        let size = match cursor.read_u32_be() {
-            Some(sz) => sz as usize,
-            None => {
-                return DecryptResult {
-                    code: -2,
-                    err: "Truncated file table size".to_string(),
-                };
-            }
-        };
+        let size = size as usize;
 
         files.push(FileEntry { name, size });
     }
@@ -286,10 +278,7 @@ where
     let decompressed = match decompress_zdb4_payload(lzma_payload) {
         Ok(data) => data,
         Err(e) => {
-            return DecryptResult {
-                code: -3,
-                err: e,
-            };
+            return DecryptResult { code: -3, err: e };
         }
     };
 
@@ -297,7 +286,7 @@ where
     if let Err(e) = fs_create_dirs(out_dir) {
         return DecryptResult {
             code: -10,
-            err: format!("Failed to create output directories: {}", e),
+            err: format!("Failed to create output directories: {e}"),
         };
     }
 
@@ -315,18 +304,18 @@ where
         decomp_offset += file.size;
 
         // Path Traversal Sanitization: Prevent directory escape (e.g. "../../etc/passwd")
-        let safe_name = match Path::new(&file.name)
+        let Some(safe_name) = Path::new(&file.name)
             .file_name()
             .and_then(|n| n.to_str())
             .filter(|n| !n.is_empty() && *n != "." && *n != "..")
-        {
-            Some(n) => n,
-            None => {
-                return DecryptResult {
-                    code: -12,
-                    err: format!("Unsafe or invalid file name in container TOC: {}", file.name),
-                };
-            }
+        else {
+            return DecryptResult {
+                code: -12,
+                err: format!(
+                    "Unsafe or invalid file name in container TOC: {}",
+                    file.name
+                ),
+            };
         };
 
         let target_path = out_dir.join(safe_name);
@@ -335,7 +324,7 @@ where
             Err(e) => {
                 return DecryptResult {
                     code: -11,
-                    err: format!("Failed to open output file: {}", e),
+                    err: format!("Failed to open output file: {e}"),
                 };
             }
         };
@@ -343,7 +332,7 @@ where
         if let Err(e) = out_file.write_all(file_data) {
             return DecryptResult {
                 code: -11,
-                err: format!("Failed to write output file: {}", e),
+                err: format!("Failed to write output file: {e}"),
             };
         }
 
@@ -358,7 +347,10 @@ where
     let mut any_valid_sqlite = false;
 
     for (name, path) in &sanitized_files {
-        if name.ends_with(".db") {
+        if Path::new(name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("db"))
+        {
             any_db = true;
             if is_sqlite_db_file(path) {
                 any_valid_sqlite = true;
@@ -388,9 +380,9 @@ where
 }
 
 fn fs_create_dirs(p: &Path) -> std::io::Result<()> {
-    if !p.exists() {
-        fs::create_dir_all(p)
-    } else {
+    if p.exists() {
         Ok(())
+    } else {
+        fs::create_dir_all(p)
     }
 }

@@ -211,6 +211,12 @@ function buildPingPacket({ uid = 0, token = 0, sessId = '' }) {
   return Buffer.concat([header, u16String(sessId)]);
 }
 
+function buildChangeAddressPacket({ uid = 0, token = 0, seq = 0, sessId = '' }) {
+  // initZRTPPacketRequestChangeAddress (0x1db600): magic 1, cmd 14 (0x0e), subCmd 1, u16str sessId.
+  const header = buildControlHeader({ magic: 0x01, seq, uid, token, cmd: COMMANDS.CHANGE_ADDRESS, subCmd: 0x01 });
+  return Buffer.concat([header, u16String(sessId)]);
+}
+
 // Sent to the chosen server on hangup, and to every other server that
 // answered InitZRTP once the best one is picked (~2 s after InitZRTP).
 function buildEndCallPacket({ uid = 0, token = 0, callId = 0 }) {
@@ -355,8 +361,9 @@ function buildGroupSyncPacket({ uid = 0, token = 0, seq = 0, subCmd }) {
 //         peer as we see it (no ff)
 // kind 4  keepalive: byte 9 = 1 ping / 2 pong; the pong is the ping with our
 //         role and byte 9 = 2
+// kind 5  signal (initP2PSignalPkt 0x1db820): byte 9 = subCmd (1 start / 2 stop), u32 LE seq
 // kind 6  audio (SRTP, same keys and sequence as relay), 7 audio RTCP, 8/9 video
-const P2P = { HEADER_LEN: 9, BIND: 1, BIND_PEER: 2, BIND_ANSWER: 3, KEEPALIVE: 4, AUDIO: 6, AUDIO_RTCP: 7, VIDEO: 8, VIDEO_RTCP: 9 };
+const P2P = { HEADER_LEN: 9, BIND: 1, BIND_PEER: 2, BIND_ANSWER: 3, KEEPALIVE: 4, SIGNAL: 5, AUDIO: 6, AUDIO_RTCP: 7, VIDEO: 8, VIDEO_RTCP: 9 };
 
 function p2pHeader(role, callId, kind) {
   const h = Buffer.alloc(P2P.HEADER_LEN);
@@ -365,6 +372,13 @@ function p2pHeader(role, callId, kind) {
   h.writeUInt32LE(callId >>> 0, 3);
   h[7] = kind;
   return h;
+}
+
+function buildP2pSignal({ role, callId, subCmd = 2, seq = 0 }) {
+  const b = Buffer.alloc(5);
+  b[0] = subCmd & 0xff;
+  b.writeUInt32LE(seq >>> 0, 1);
+  return Buffer.concat([p2pHeader(role, callId, P2P.SIGNAL), b]);
 }
 
 function buildP2pBind({ role, callId, seq = 0, index }) {
@@ -496,6 +510,7 @@ module.exports = {
   buildZaviPingPacket,
   parseRoomUpdated,
   buildPingPacket,
+  buildChangeAddressPacket,
   buildEndCallPacket,
   buildReqForwardPacket,
   reqForwardStatus,
@@ -504,6 +519,7 @@ module.exports = {
   groupVideoPlan,
   buildGroupSyncPacket,
   P2P,
+  buildP2pSignal,
   buildP2pBind,
   buildP2pBindAnswer,
   buildP2pPong,

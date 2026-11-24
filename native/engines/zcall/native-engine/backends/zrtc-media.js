@@ -4,9 +4,11 @@
 //
 //   prepare()        InitZRTP to every server in recvSignal 401; each answers
 //                    (MsgType 2) with a token; the fastest is proposed in 416.
+//                    While the phone rings, Ping every 6 s to every server
+//                    that gave a token (ring ping, below).
 //   start(rtpSerIp)  peer answered: keep that server, EndCall the others,
-//                    start audio (type 3 out, type 4 in), Ping every 6 s,
-//                    ReqForward status every 1 s.
+//                    Ping it at once, start audio (type 3 out, type 4 in),
+//                    Ping every 6 s, ReqForward status every 1 s.
 //   stop()           EndCall, stop audio.
 //
 // Group calls (params.group, docs/GROUP-CALL.md): the servers of
@@ -41,6 +43,7 @@ const {
   buildZaviPingPacket,
   parseRoomUpdated,
   buildPingPacket,
+  buildChangeAddressPacket,
   buildEndCallPacket,
   buildReqForwardPacket,
   buildGroupVidQualReq,
@@ -48,6 +51,7 @@ const {
   groupVideoPlan,
   reqForwardStatus,
   P2P,
+  buildP2pSignal,
   buildP2pBind,
   buildP2pBindAnswer,
   buildP2pPong,
@@ -66,7 +70,9 @@ const { SendRate } = require('../send-rate');
 const INIT_WAIT_MS = 600;        // all servers answered InitZRTP within ~35 ms
 const INIT_RETRY_MS = 1000;
 const INIT_TRIES = 3;
-const PING_INTERVAL_MS = 6000;   // Ping to the kept server
+// Ping to the kept server, and while ringing to every server that answered
+// InitZRTP (ZCALL_PING_MS: shorter for the tests).
+const PING_INTERVAL_MS = Number(process.env.ZCALL_PING_MS) || 6000;
 const TWCC_INTERVAL_MS = 50; // ZaloCall's cadence (captures 2026-09-29)
 const RTCP_REPORT_INTERVAL_MS = 1000;
 const PLI_MIN_GAP_MS = 1000; // one key frame request per second at most
@@ -105,7 +111,8 @@ function parseHostPort(addr) {
   return { host, port };
 }
 
-// RFC 3711 §3.3.1 rollover-counter guess for received packets.
+// RFC 3711 §3.3.1 rollover-counter guess for received packets, with recovery
+// when a peer resets its RTP sequence / ROC across a network switch.
 class RocTracker {
   constructor() { this.last = null; this.roc = 0; }
   guess(seq) {
@@ -115,8 +122,31 @@ class RocTracker {
     return this.roc;
   }
   update(seq, roc) {
-    if (this.last === null || roc * 0x10000 + seq > this.roc * 0x10000 + this.last) { this.last = seq; this.roc = roc; }
+    if (this.last === null) { this.last = seq; this.roc = roc; return; }
+    const curExt = this.roc * 0x10000 + this.last;
+    const newExt = roc * 0x10000 + seq;
+    // Update on forward progression, or if peer reset its sequence backward by > 100 packets
+    // (already verified by 80-bit SRTP HMAC-SHA1 authentication tag).
+    if (newExt > curExt || curExt - newExt > 100) {
+      this.last = seq;
+      this.roc = roc;
+    }
   }
+}
+
+function unprotectWithTracker(rtp, srtpContext, tracker) {
+  const seq = rtp.readUInt16BE(2);
+  const guessed = tracker.guess(seq);
+  let got = unprotectRtp(rtp, srtpContext, guessed);
+  if (got) return { got, roc: guessed };
+  // Fallback ROC candidates if sequence jumped across rollover boundary or peer reset ROC to 0
+  const candidates = [0, (guessed + 1) >>> 0, guessed > 0 ? (guessed - 1) >>> 0 : -1];
+  for (const cand of candidates) {
+    if (cand < 0 || cand === guessed) continue;
+    got = unprotectRtp(rtp, srtpContext, cand);
+    if (got) return { got, roc: cand };
+  }
+  return { got: null, roc: guessed };
 }
 
 class ZrtcMediaBackend extends EventEmitter {
@@ -187,6 +217,13 @@ class ZrtcMediaBackend extends EventEmitter {
     this.rxTypes = {};
     this.p2pPath = null; // { host, port } once the peer reached us directly
     this.p2pSeen = false;
+    this.lastP2pRxAt = 0;
+    this.lastAudioRxAt = 0;
+    this.lastRecoveryAt = 0;
+    this.relayAudioStreak = 0;
+    this.changeAddrSeq = 0;
+    this.localIpSig = this._getLocalIpSig();
+    this.seenAudioSeqs = new Set();
     this.videoStats = { pkts: 0, bad: 0, pt: {}, head: {}, marker: 0 };
     this.videoRoc = new RocTracker();
     this.videoRocs = new Map(); // group: per member (SSRC)
@@ -194,6 +231,19 @@ class ZrtcMediaBackend extends EventEmitter {
     this.p2pSeq = 0;
     this.lastRxAt = 0;
     this.startedAt = 0;
+    this.ringPing = null; // { timer, since, sent, replies } between InitZRTP and start()
+  }
+
+  _getLocalIpSig() {
+    const ips = [];
+    try {
+      for (const list of Object.values(os.networkInterfaces())) {
+        for (const a of list || []) {
+          if (a.family === 'IPv4' && !a.internal && a.address) ips.push(a.address);
+        }
+      }
+    } catch (_) { }
+    return ips.sort().join(',');
   }
 
   _timer(fn, ms, repeat) {
@@ -351,6 +401,7 @@ class ZrtcMediaBackend extends EventEmitter {
         // Group: every cmd 32 / 33 header carries this token. 0 here means the SFU's
         // answer did not hold one where the 1-1 answer has it: the raw reply shows.
         if (this.group) this.log(`media: group InitZRTP reply, token ${best.token >>> 0}: ${best.hex}`);
+        else this._startRingPing();
         resolve(best);
       };
       let waiting = null;
@@ -369,9 +420,44 @@ class ZrtcMediaBackend extends EventEmitter {
     });
   }
 
+  // Ring ping. macOS CallController::_handleInitZRTPSuccessful starts a 6 s job,
+  // _sendRequestZRTPPing, as soon as InitZRTP has answers: before the call is
+  // connected it pings every server that gave a token, after that only the one in
+  // use. Without it the relay heard nothing from us while the phone rang; after a
+  // 13 s ring it answered nothing once the call started (tx 845, rx 0, only the 7
+  // InitZRTP replies; 2026-11-18), while a call answered after 2.8 s was fine.
+  _startRingPing() {
+    this._stopRingPing(false);
+    if (!this.replies.length) return;
+    this.ringPing = { timer: null, since: Date.now(), sent: 0, replies: 0 };
+    this.ringPing.timer = this._timer(() => this._sendRingPing(), PING_INTERVAL_MS, true);
+    this.log(`media: ping before answer: ${this.replies.length} server(s) every ${PING_INTERVAL_MS / 1000} s`);
+  }
+
+  _sendRingPing() {
+    if (!this.ringPing) return;
+    for (const r of this.replies) {
+      if (this.ended.has(`${r.server.host}:${r.server.port}`)) continue;
+      this._send(buildPingPacket({ uid: this.params.localUid || 0, token: r.token, sessId: this.params.sessId || '' }), r.server, 'Ping');
+      this.ringPing.sent++;
+    }
+  }
+
+  // log: the line the field test looks at (replies = MsgType 2 other than the
+  // InitZRTP answers, i.e. what the relays said to our pings while ringing).
+  _stopRingPing(log) {
+    const rp = this.ringPing;
+    if (!rp) return;
+    this.ringPing = null;
+    clearInterval(rp.timer);
+    this.timers.delete(rp.timer);
+    if (log) this.log(`media: ping before answer: ${rp.sent} sent, ${rp.replies} replies (MsgType 2) in ${((Date.now() - rp.since) / 1000).toFixed(1)} s of ringing`);
+  }
+
   // Peer answered: keep its server (rtpSerIp) and start media.
   start(role = 'caller', rtpSerIp = null) {
     this.active = true;
+    this._stopRingPing(true);
     if (!this.sendUdp) { this.log(`media: start role=${role} (observe-only)`); return; }
     const want = parseHostPort(rtpSerIp);
     const match = want && this.replies.find((r) => r.server.host === want.host && r.server.port === want.port);
@@ -384,8 +470,11 @@ class ZrtcMediaBackend extends EventEmitter {
     if (!this.activeServer) { this.log('media: no server'); this.emit('failed', 'no-server'); return; }
     for (const r of this.replies) if (r.server !== this.activeServer) this._sendEndCall(r.server, r.token);
     this.log('media: started');
+    if (!this.group) this._sendPing(); // the kept server, at once (then every 6 s)
     this.startedAt = Date.now();
     this.lastRxAt = Date.now();
+    this.lastAudioRxAt = Date.now();
+    this.localIpSig = this._getLocalIpSig();
     if (this.group) {
       // Members may all be muted: no media timeout, the server's cmd 3 and
       // Zalo's group_end_call end the call.
@@ -395,6 +484,7 @@ class ZrtcMediaBackend extends EventEmitter {
       if (process.env.ZCALL_CAM_LOOPBACK === '1' && this.params.localUid) this.vidWanted.add(this.params.localUid >>> 0);
       this._sendPing();
       this._timer(() => this._sendPing(), GROUP_PING_INTERVAL_MS, true);
+      this._timer(() => this._checkNetworkAndAudio(), STATUS_INTERVAL_MS, true);
       this._timer(() => this._checkGroupKey(), 3000);
       if (this.rtcp) {
         this._timer(() => this._sendTwcc(), TWCC_INTERVAL_MS, true);
@@ -441,6 +531,7 @@ class ZrtcMediaBackend extends EventEmitter {
   _onP2p(msg, rinfo) {
     const from = { host: rinfo.address, port: rinfo.port };
     const kind = msg[7];
+    this.lastP2pRxAt = Date.now();
     if (!this.p2pSeen) { this.p2pSeen = true; this.log(`media: first P2P packet from the peer (kind ${kind})`); }
     if (kind === P2P.BIND_PEER && msg.length >= 19) {
       const answer = buildP2pBindAnswer({ role: this.params.role, callId: this.params.callId, request: msg, peerAddr: `${rinfo.address}|${rinfo.port}` });
@@ -448,6 +539,11 @@ class ZrtcMediaBackend extends EventEmitter {
     } else if (kind === P2P.KEEPALIVE && msg[9] === 1) {
       this._send(buildP2pPong({ role: this.params.role, ping: msg }), from, 'P2P pong');
       this._p2pUp(from);
+    } else if (kind === P2P.SIGNAL && msg.length >= 10) {
+      const subCmd = msg[9];
+      if (subCmd === 2) {
+        this._stopP2p(false, 'peer-p2p-signal-stop');
+      }
     } else if (kind === P2P.VIDEO && msg.length > P2P.HEADER_LEN + 12) {
       this._p2pUp(from);
       this._onVideo(msg.subarray(P2P.HEADER_LEN));
@@ -459,14 +555,53 @@ class ZrtcMediaBackend extends EventEmitter {
     } else if (kind === P2P.AUDIO && msg.length > P2P.HEADER_LEN + 12) {
       this.counters.rxP2p++;
       this._p2pUp(from);
-      this._onAudio(msg.subarray(P2P.HEADER_LEN));
+      this._onAudio(msg.subarray(P2P.HEADER_LEN), true);
     }
   }
 
   _p2pUp(from) {
+    this.lastP2pRxAt = Date.now();
     if (this.p2pPath && this.p2pPath.host === from.host && this.p2pPath.port === from.port) return;
     this.p2pPath = from;
     this.log('media: P2P path up');
+  }
+
+  // Stop P2P and instruct the peer via both P2P signal (kind 5 sub 2) and relay
+  // ReqForward (cmd 32 sub 2, sent 3x as CallController::_p2pStopP2P does) to
+  // route its audio back through the relay server.
+  _stopP2p(notifyPeer = true, why = 'fallback') {
+    const oldPath = this.p2pPath;
+    this.p2pPath = null;
+    this.lastP2pRxAt = 0;
+    this.relayAudioStreak = 0;
+    if (oldPath || notifyPeer) {
+      this.log(`media: P2P stopped (${why}), routing audio via relay`);
+    }
+    if (notifyPeer && this.active && this.params) {
+      for (let seq = 0; seq < 3; seq++) {
+        if (oldPath) {
+          this._send(buildP2pSignal({ role: this.params.role, callId: this.params.callId || 0, subCmd: 2, seq }), oldPath, 'P2P stop');
+        }
+        if (this.activeServer) {
+          this._send(this._fwd(2, Buffer.alloc(0), seq), this.activeServer, 'ReqForward stopP2P');
+        }
+      }
+    }
+  }
+
+  _sendChangeAddress(why = 'network-change') {
+    if (!this.active || !this.activeServer || !this.params) return;
+    const pkt = buildChangeAddressPacket({
+      uid: this.params.localUid || 0,
+      token: this.serverToken,
+      seq: this.changeAddrSeq++,
+      sessId: this.params.sessId || '',
+    });
+    this._send(pkt, this.activeServer, `ChangeAddress(${why})`);
+    this._sendPing();
+    if (!this.group) {
+      this._send(this._fwd(8, Buffer.from([4, 0, 0, 0, 0, 0, 0, 0]), 0), this.activeServer, 'ReqForward');
+    }
   }
 
   // Our P2P candidates for 416/402: host addresses (type 0) on the socket's
@@ -496,6 +631,12 @@ class ZrtcMediaBackend extends EventEmitter {
     const pct = Math.max(0, Math.min(100, Math.round(Number(percent))));
     if (!Number.isFinite(pct) || !this.audio) return;
     this.audio.stdin.write(Buffer.from([0x56, pct]));
+  }
+
+  // Toggle automatic mic gain control: true = auto (ClipGuard), false = manual.
+  setMicAutoGain(on) {
+    if (!this.audio) return;
+    this.audio.stdin.write(Buffer.from([0x41, on ? 1 : 0]));
   }
 
   // Speaker off: keep decoding (timing, stats) but play silence.
@@ -532,6 +673,7 @@ class ZrtcMediaBackend extends EventEmitter {
     this.startedAt = 0;
     this.active = false;
     this._onInitReply = null;
+    this._stopRingPing(false);
     this._clearTimers();
     if (this.audio) {
       try { this.audio.stdin.end(); } catch (_) { }
@@ -622,6 +764,8 @@ class ZrtcMediaBackend extends EventEmitter {
         if (m && this.audio === audio) this.emit('audioFault', m[1]);
         const v = /^\[audio-io\] mic volume: (\d+)%/.exec(l);
         if (v && this.audio === audio) this.emit('micVolume', Number(v[1]));
+        const mode = /^\[audio-io\] mic mode: (auto|manual)\b/.exec(l);
+        if (mode && this.audio === audio) this.emit('micAutoGain', mode[1] === 'auto');
       }
     });
     audio.on('exit', (code, signal) => {
@@ -1047,7 +1191,38 @@ class ZrtcMediaBackend extends EventEmitter {
     return buildReqForwardPacket({ uid: this.params.localUid || 0, token: this.serverToken, seq, subCmd, payload });
   }
 
+  _checkNetworkAndAudio() {
+    if (!this.active || !this.startedAt) return;
+    const now = Date.now();
+    const sig = this._getLocalIpSig();
+    if (sig && sig !== this.localIpSig) {
+      const prev = this.localIpSig || 'none';
+      this.localIpSig = sig;
+      this.log(`media: local network change detected (${prev} -> ${sig}), stopping P2P and sending ChangeAddress`);
+      this._stopP2p(true, 'local-ip-change');
+      this._sendChangeAddress('local-ip-change');
+      this._timer(() => this._sendChangeAddress('local-ip-change-retry1'), 1000);
+      this._timer(() => this._sendChangeAddress('local-ip-change-retry2'), 2500);
+      this.lastRecoveryAt = now;
+      return;
+    }
+    if (this.p2pPath && this.lastP2pRxAt > 0 && now - this.lastP2pRxAt > 2500) {
+      this._stopP2p(true, 'p2p-rx-timeout');
+      this._sendChangeAddress('p2p-rx-timeout');
+      this.lastRecoveryAt = now;
+      return;
+    }
+    const lastAudio = this.lastAudioRxAt || this.startedAt;
+    if (!this.group && now - lastAudio > 2000 && now - lastAudio < MEDIA_TIMEOUT_MS && now - this.lastRecoveryAt > 2500) {
+      this.lastRecoveryAt = now;
+      this.log(`media: audio rx stalled for ${now - lastAudio} ms, requesting relay fallback and ChangeAddress`);
+      this._stopP2p(true, 'audio-rx-stall');
+      this._sendChangeAddress('audio-rx-stall');
+    }
+  }
+
   _sendStatus() {
+    this._checkNetworkAndAudio();
     const rx = this.counters.rxSecond;
     this.counters.rxSecond = 0;
     this._send(this._fwd(10, reqForwardStatus(rx), this.fwdSeq++), this.activeServer, 'ReqForward');
@@ -1167,7 +1342,9 @@ class ZrtcMediaBackend extends EventEmitter {
     }
     const p = unwrapPacket(msg);
     if (!p) return;
-    if (p.msgType === MSG_TYPES.SERVER_REPLY && (p.cmd === COMMANDS.INIT_CALL_CALLER || p.cmd === COMMANDS.INIT_CALL_CALLEE)) {
+    const initReply = p.msgType === MSG_TYPES.SERVER_REPLY && (p.cmd === COMMANDS.INIT_CALL_CALLER || p.cmd === COMMANDS.INIT_CALL_CALLEE);
+    if (this.ringPing && p.msgType === MSG_TYPES.SERVER_REPLY && !initReply) this.ringPing.replies++;
+    if (initReply) {
       const server = this.servers.find((s) => s.host === rinfo.address && s.port === rinfo.port);
       if (!server || this.replies.some((r) => r.server === server)) return;
       if (p.res !== 0) {
@@ -1201,9 +1378,18 @@ class ZrtcMediaBackend extends EventEmitter {
       }
       return;
     }
-    if (p.isMedia && p.msgType === MSG_TYPES.AUDIO_RTP_DOWN) this._onAudio(p.payload);
+    if (p.isMedia && p.msgType === MSG_TYPES.AUDIO_RTP_DOWN) this._onAudio(p.payload, false);
     else if (p.isMedia && p.msgType === MSG_TYPES.VIDEO_DOWN) this._onVideo(p.payload);
-    else if (this.group && !p.isMedia && p.cmd === COMMANDS.REQ_FORWARD && p.subCmd === 0x0d) this._onMemberVidQualReq(msg);
+    else if (p.msgType === MSG_TYPES.SERVER_REPLY && p.cmd === COMMANDS.CHANGE_ADDRESS) {
+      this.log('media: server acknowledged ChangeAddress (cmd 14)');
+    } else if (!this.group && !p.isMedia && p.cmd === COMMANDS.REQ_FORWARD) {
+      if (p.subCmd === 2) {
+        this._stopP2p(false, 'peer-req-forward-stop');
+      } else if (p.subCmd === 3) {
+        this.p2pPath = null;
+        this._p2pStart();
+      }
+    } else if (this.group && !p.isMedia && p.cmd === COMMANDS.REQ_FORWARD && p.subCmd === 0x0d) this._onMemberVidQualReq(msg);
     else if (this.group && !p.isMedia) this._noteUnknownReply(p, msg);
   }
 
@@ -1258,12 +1444,16 @@ class ZrtcMediaBackend extends EventEmitter {
       tracker = this.videoRocs.get(ssrc);
       if (!tracker) { tracker = new RocTracker(); this.videoRocs.set(ssrc, tracker); }
     }
-    const roc = tracker.guess(seq);
+    let roc = tracker.guess(seq);
     let got = null;
     if (this.plainMedia) {
       const p = (rtp[0] >> 6) === 2 ? parseRtp(rtp) : null;
       if (p && p.payload.length) got = { seq: p.seq, ssrc: p.ssrc, opus: p.payload };
-    } else got = unprotectRtp(rtp, this.srtpContext, roc);
+    } else {
+      const res = unprotectWithTracker(rtp, this.srtpContext, tracker);
+      got = res.got;
+      roc = res.roc;
+    }
     const v = this.videoStats;
     v.pkts++;
     if (!got) { v.bad++; return; }
@@ -1435,7 +1625,7 @@ class ZrtcMediaBackend extends EventEmitter {
     }
   }
 
-  _onAudio(rtp) {
+  _onAudio(rtp, isP2p = false) {
     if ((!this.srtpContext && !this.plainMedia) || rtp.length < 12) return;
     const seq = rtp.readUInt16BE(2);
     let tracker = this.rxRoc;
@@ -1447,24 +1637,48 @@ class ZrtcMediaBackend extends EventEmitter {
       tracker = this.rxRocs.get(ssrc);
       if (!tracker) { tracker = new RocTracker(); this.rxRocs.set(ssrc, tracker); }
     }
-    const roc = tracker.guess(seq);
+    let roc = tracker.guess(seq);
     let got = null;
     if (this.plainMedia) {
       const p = (rtp[0] >> 6) === 2 ? parseRtp(rtp) : null;
       if (p && p.payload.length) got = { seq: p.seq, ssrc: p.ssrc, opus: p.payload };
-    } else got = unprotectRtp(rtp, this.srtpContext, roc);
+    } else {
+      const res = unprotectWithTracker(rtp, this.srtpContext, tracker);
+      got = res.got;
+      roc = res.roc;
+    }
     if (!got) { this.counters.rxBad++; return; }
     tracker.update(seq, roc);
+    const now = Date.now();
+    this.lastRxAt = now;
+    this.lastAudioRxAt = now;
+    if (isP2p) {
+      this.relayAudioStreak = 0;
+    } else if (this.p2pPath) {
+      this.relayAudioStreak = (this.relayAudioStreak || 0) + 1;
+      // CallController::receiveAudioData (0x1f99cd): after 25 consecutive relay audio
+      // packets (~500 ms) while P2P was active, stop P2P so both sides use relay.
+      if (this.relayAudioStreak >= 25) {
+        this._stopP2p(true, 'relay-audio-streak');
+      }
+    }
+    const extSeq = (roc * 0x10000 + seq) >>> 0;
+    const dedupKey = `${got.ssrc >>> 0}:${extSeq}`;
+    if (this.seenAudioSeqs.has(dedupKey)) return;
+    this.seenAudioSeqs.add(dedupKey);
+    if (this.seenAudioSeqs.size > 256) {
+      const oldest = this.seenAudioSeqs.values().next().value;
+      this.seenAudioSeqs.delete(oldest);
+    }
     if (this.group) {
       const n = (this.members.get(got.ssrc) || 0) + 1;
       this.members.set(got.ssrc, n);
       if (n === 1) { this.log('media: first audio from member', got.ssrc); this.emit('memberAudio', got.ssrc); }
       this._noteSpeaking(got.ssrc, rtp);
     }
-    if (this.rtcp) this.rtcp.onRtp('audio', rtp, Date.now());
+    if (this.rtcp) this.rtcp.onRtp('audio', rtp, now);
     this.counters.rx++;
     this.counters.rxSecond++;
-    this.lastRxAt = Date.now();
     if (this.counters.rx === 1) this.log('media: first audio from peer');
     // Answer usually arrives with the first audio. When the control channel
     // dropped it (2026-10-12 01:17), RTP still came and the window stayed on
@@ -1475,7 +1689,7 @@ class ZrtcMediaBackend extends EventEmitter {
     if (this.audio) {
       const h = Buffer.alloc(11);
       h[0] = 0x46;
-      h.writeUInt32BE((roc * 0x10000 + seq) >>> 0, 1);
+      h.writeUInt32BE(extSeq, 1);
       h.writeUInt32BE(got.ssrc >>> 0, 5);
       h.writeUInt16BE(got.opus.length, 9);
       this.audio.stdin.write(Buffer.concat([h, got.opus]));

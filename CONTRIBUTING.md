@@ -17,13 +17,13 @@ Read the documents that explain how the project works:
 
 Then look through the [issues](https://github.com/VN-Linux-Family/zalo-for-linux/issues) and pull requests that already exist before starting: someone may be doing the same work.
 
-Zalo itself is proprietary. Please never commit Zalo binaries, extracted `app.asar` contents, or prebuilt `.node` files — the native addons are always rebuilt from source and no proprietary code ships in this repository ([nativelibs/README.md](./nativelibs/README.md)).
+Zalo itself is proprietary. Please never commit Zalo binaries, extracted `app.asar` contents, or prebuilt `.node` files — the native addons are always rebuilt from source and no proprietary code ships in this repository ([native/addons/README.md](./native/addons/README.md)).
 
 ## Ways to contribute
 
 - **Bug reports** — see [Reporting bugs](#reporting-bugs).
 - **Feature requests** — see [Feature requests](#feature-requests).
-- **Code** — JavaScript patches in `scripts/patches/`, Rust and gyp addons in `nativelibs/` and `zocr/`, Node.js and Python in `zcall-native/`.
+- **Code** — JavaScript patches in `scripts/patches/`, Rust and gyp addons in `native/addons/` and `native/engines/zocr/`, Node.js and Python in `native/engines/zcall/`.
 - **Documentation** — keep documentation accurate and clear (see [Documentation](#documentation)).
 - **Testing** — especially on aarch64
 - **Packaging** — the AppImage is the official artifact; the repository also has a Nix flake (see the NixOS section in [README.md](./README.md)).
@@ -73,8 +73,8 @@ Add tests under `tests/<area>-<topic>.test.js` — for example `scripts-patches.
 The Rust crates:
 
 ```bash
-cargo test --manifest-path zocr/Cargo.toml --locked
-for c in nativelibs/*/Cargo.toml; do cargo test --manifest-path "$c" --locked; done
+cargo test --manifest-path native/engines/zocr/Cargo.toml --locked
+for c in native/addons/*/Cargo.toml; do cargo test --manifest-path "$c" --locked; done
 ```
 
 Optional benchmarks: `npm run bench` and `npm run bench:patches`.
@@ -83,7 +83,7 @@ Documentation is organized centrally with full bilingual support (English & Viet
 
 - **Developer & Technical Documentation** (`docs/dev/`): Architecture, development, patch guide, and CI workflow (`<doc>.md` and `<doc>.vi.md`).
 - **User Documentation** (`docs/user/` and root `README`): Available in English and Vietnamese (`README.md` / `docs/user/README.vi.md`, `known-issues.md` / `known-issues.vi.md`, `features.md` / `features.vi.md`).
-- **Component Documentation**: Native addons in `nativelibs/` contain their own dedicated README files.
+- **Component Documentation**: Native addons in `native/addons/` contain their own dedicated README files.
 
 ## Commits and pull requests
 
@@ -94,17 +94,17 @@ Pull requests target **`main`**.
 - Always rebase on `main` before opening the PR.
 - The `app.setName` in `main.js` and the StartupWMClass entry in the `build` section of `package.json` **must be `Zalo`**.
 - If you develop a new feature, please test it locally first, then capture a screenshot (if it contains your private infomation, please blur them, otherwise **we will delete your screenshot for your privacy**).
-- If you add/update a new Native addon, please update [architecture.md](./docs/dev/architecture.md) and [nativelibs/README.md](./nativelibs/README.md), so that newcomers can understand what your addon will do.
+- If you add/update a new Native addon, please update [architecture.md](./docs/dev/architecture.md) and [native/addons/README.md](./native/addons/README.md), so that newcomers can understand what your addon will do.
 - Commit subject: follow the convention — see [this link](https://www.conventionalcommits.org/en/v1.0.0/).
 - Pull request description: what changed and why, `Closes #N` when it fixes an issue, the platform you tested (x86_64 or aarch64, X11 or Wayland), and screenshots for UI changes.
-- No reverse-engineered codes or nativelibs may violate our guidelines; please refer to [the guidelines below](#re-and-rea-guidelines-for-nativelibs) for more information.
+- No reverse-engineered codes or native addons may violate our guidelines; please refer to [the guidelines below](#re-and-rea-guidelines-for-native-addons) for more information.
 
 Checklist before opening:
 
 - [ ] `npm test` passes, and the Rust tests above pass if you touched a crate.
 - [ ] No generated files (`app/`, `temp/`, `dist/`, `node_modules/`).
 - [ ] No prebuilt binaries or `.node` files.
-- [ ] No RE codes or nativelibs may violate the guidelines (mandatory)
+- [ ] No RE codes or native addons may violate the guidelines (mandatory)
 - [ ] Tested locally and captured the screenshot.
 - [ ] Documentation updated (if your change affects user guides or dev specs).
 
@@ -127,9 +127,9 @@ We welcome the responsible use of AI tools (such as Codex, Claude Code, etc.) to
 
 - **Review everything:** You are fully responsible for all code and content you submit. Ensure you thoroughly review, test, and understand any AI-generated output before opening a pull request.
 - **Disclose significant use:** If a pull request or a major part of a patch/documentation is heavily generated or assisted by AI, please briefly mention it in the pull request description for transparency.
-- **No unverified code:** Do not blindly copy-paste AI-generated code, especially for native addons (`nativelibs/`, `zocr/`) or security-sensitive components, as they may introduce memory safety issues or regressions.
+- **No unverified code:** Do not blindly copy-paste AI-generated code, especially for native addons (`native/addons/`, `native/engines/zocr/`) or security-sensitive components, as they may introduce memory safety issues or regressions.
 
-## RE and REA guidelines for `nativelibs`
+## RE and REA guidelines for native addons
 
 This project welcome reverse engineering (RE) and Reverse Engineer Anything (REA) efforts to help add back native addons or fix issues. However, to protect the project from proprietary contamination and legal risks, strict protocols must be followed:
 

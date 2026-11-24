@@ -46,31 +46,31 @@ impl Container {
             if entries[id].is_some() {
                 return Err(err("model vault has duplicate entries"));
             }
-            let offset =
-                usize::try_from(u64::from_le_bytes(b[13..21].try_into().unwrap())).map_err(|_|
-                            err("model vault offset overflow"))?;
-            let len =
-                usize::try_from(u64::from_le_bytes(b[21..29].try_into().unwrap()))
-                    .map_err(|_| err("model vault length overflow"))?;
-            let end =
-                offset.checked_add(len).ok_or_else(||
-                            err("model vault length overflow"))?;
+            let offset = usize::try_from(u64::from_le_bytes(b[13..21].try_into().unwrap()))
+                .map_err(|_| err("model vault offset overflow"))?;
+            let len = usize::try_from(u64::from_le_bytes(b[21..29].try_into().unwrap()))
+                .map_err(|_| err("model vault length overflow"))?;
+            let end = offset
+                .checked_add(len)
+                .ok_or_else(|| err("model vault length overflow"))?;
             if offset < 140 || len < 16 || end > bytes.len() {
                 return Err(err("model vault entry is out of bounds"));
             }
-            if entries.iter().flatten().any(|e|
-                        offset < e.range.end && end > e.range.start) {
+            if entries
+                .iter()
+                .flatten()
+                .any(|e| offset < e.range.end && end > e.range.start)
+            {
                 return Err(err("model vault entries overlap"));
             }
-            entries[id] =
-                Some(Entry {
-                        range: offset..end,
-                        nonce: b[1..13].try_into().unwrap(),
-                    });
+            entries[id] = Some(Entry {
+                range: offset..end,
+                nonce: b[1..13].try_into().unwrap(),
+            });
         }
         Ok(Self {
-                salt: bytes[8..24].try_into().unwrap(),
-                entries: entries.map(Option::unwrap),
-            })
+            salt: bytes[8..24].try_into().unwrap(),
+            entries: entries.map(Option::unwrap),
+        })
     }
 }

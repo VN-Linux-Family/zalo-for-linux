@@ -13,9 +13,10 @@ napi-derive = "2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "fs"] }
 globset = "0.4"
 walkdir = "2"
-libc = "0.2"
-lazy_static = "1"
+rustix = { version = "1", features = ["fs", "linux_5_11"] }
 
 [build-dependencies]
 napi-build = "2"
 
+[lints]
+workspace = true

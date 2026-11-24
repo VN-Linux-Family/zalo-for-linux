@@ -4,14 +4,14 @@
 
 Tài liệu này hướng dẫn cách build Zalo for Linux từ mã nguồn, bao gồm bộ công cụ build, các script hỗ trợ và quy trình thêm patch hoặc native addon mới.
 
-Để nắm tổng quan cách dự án hoạt động, xem [architecture.vi.md](./architecture.vi.md). Để tìm hiểu về việc viết lại các native addon, xem [nativelibs/README.vi.md](../../nativelibs/README.vi.md).
+Để nắm tổng quan cách dự án hoạt động, xem [architecture.vi.md](./architecture.vi.md). Để tìm hiểu về việc viết lại các native addon, xem [native/addons/README.vi.md](../../native/addons/README.vi.md).
 
 ## Yêu cầu môi trường
 
 - Linux x86_64 hoặc aarch64
 - Node.js (phiên bản 22+) và npm
 - `7z` (`p7zip-full`) để giải nén gói ứng dụng macOS
-- Bộ công cụ biên dịch C++ và Rust (`cargo` / `rustup`) cho các native addon (xem [nativelibs/README.vi.md](../../nativelibs/README.vi.md))
+- Bộ công cụ biên dịch C++ và Rust (`cargo` / `rustup`) cho các native addon (xem [native/addons/README.vi.md](../../native/addons/README.vi.md))
 
 - **Debian / Ubuntu**:
 
