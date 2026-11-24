@@ -265,8 +265,31 @@ async function main() {
   logger.success('Auto Dark/Light theme patch applied');
 }
 
+function collectMainEdits(content, root) {
+  if (THEME_MAIN_BLOCK_RE.test(content) || content.includes('zalo-linux-theme-change')) {
+    return { edits: [] };
+  }
+  const targetCall = root.find('$OBJ.setMainWindow($WIN)') || root.find('$OBJ.createWithMultiWindow($$$ARGS)');
+  if (targetCall) {
+    return { edits: [targetCall.replace(`${targetCall.text()};\n${THEME_MAIN_INJECTION}\n`)] };
+  }
+  return { edits: [] };
+}
+
+function patchPreload(mainDistDir = APP_MAIN_DIST) {
+  const preloadJsPath = path.join(mainDistDir, 'preload-render.js');
+  if (fs.existsSync(preloadJsPath)) {
+    let content = fs.readFileSync(preloadJsPath, 'utf8');
+    if (!content.includes('zalo-linux-theme-change')) {
+      content = content.trimEnd() + '\n' + THEME_PRELOAD_INJECTION + '\n';
+      fs.writeFileSync(preloadJsPath, content, 'utf8');
+      logger.dim('Injected auto theme sync into preload-render.js');
+    }
+  }
+}
+
 if (require.main === module) {
   main();
 }
 
-module.exports = { main };
+module.exports = { main, collectMainEdits, patchPreload };

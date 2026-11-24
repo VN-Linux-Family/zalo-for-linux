@@ -73,8 +73,18 @@ async function main(appDir = APP_DIR) {
  if (patched > 0) logger.success(`Quit flow patched (${patched} files)`);
 }
 
+function collectEdits(content, root) {
+ if (content.includes(PATCHED)) return { edits: [] };
+ const match = root.find('$COND || this.mainWindow.show()');
+ if (match) {
+  const cond = match.getMatch('COND').text();
+  return { edits: [match.replace(`${cond} || "linux" === process.platform || this.mainWindow.show()`)] };
+ }
+ return { edits: [] };
+}
+
 if (require.main === module) {
  main();
 }
 
-module.exports = { main, patchQuitContent, patchFile };
+module.exports = { main, patchQuitContent, patchFile, collectEdits };

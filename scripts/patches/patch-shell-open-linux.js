@@ -6,7 +6,7 @@ const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 const { APP_DIR, APP_MAIN_DIST: MAIN_DIR } = require('../utils/paths');
 const LINUX_DIRECTORY_GUARD_PATTERN =
-  /if\("linux"===process\.platform&&([A-Za-z_$][\w$]*)\.isDirectory\(\)\)return [A-Za-z_$][\w$]*\(e\)/;
+  /if\("linux"===process\.platform&&([A-Za-z_$][\w$]*)\.isDirectory\(\)\)return [A-Za-z_$][\w$]*\(([A-Za-z_$][\w$]*)\)/;
 
 function patchShellOpenLinux(content) {
   if (LINUX_DIRECTORY_GUARD_PATTERN.test(content)) return content;
@@ -17,10 +17,11 @@ function patchShellOpenLinux(content) {
     const dirCheck = root.find('if (!$STAT.isDirectory()) { $$$BODY }');
     if (openFn && dirCheck) {
       const openPath = openFn.getMatch('FN').text();
+      const argName = openFn.getMatch('E').text();
       const stat = dirCheck.getMatch('STAT').text();
       const body = dirCheck.field('consequence');
       const edit = dirCheck.replace(
-        `if("linux"===process.platform&&${stat}.isDirectory())return ${openPath}(e);if(!${stat}.isDirectory()){${body.text().slice(1)}`
+        `if("linux"===process.platform&&${stat}.isDirectory())return ${openPath}(${argName});if(!${stat}.isDirectory()){${body.text().slice(1)}`
       );
       logger.dim('Patched shell.openPath via AST');
       return applyEdits(root, [edit]);
@@ -105,6 +106,26 @@ async function main() {
   );
 }
 
+function collectEdits(content, root) {
+  if (LINUX_DIRECTORY_GUARD_PATTERN.test(content)) return { edits: [] };
+  const openFn = root.find('function $FN($E) { return $OBJ.shell.openPath($E); }');
+  const dirCheck = root.find('if (!$STAT.isDirectory()) { $$$BODY }');
+  if (openFn && dirCheck) {
+    const openPath = openFn.getMatch('FN').text();
+    const argName = openFn.getMatch('E').text();
+    const stat = dirCheck.getMatch('STAT').text();
+    const body = dirCheck.field('consequence');
+    return {
+      edits: [
+        dirCheck.replace(
+          `if("linux"===process.platform&&${stat}.isDirectory())return ${openPath}(${argName});if(!${stat}.isDirectory()){${body.text().slice(1)}`
+        ),
+      ],
+    };
+  }
+  return { edits: [] };
+}
+
 if (require.main === module) {
   main().catch((error) => {
     logger.error('Linux folder-opening patch failed:', error.message);
@@ -115,5 +136,6 @@ if (require.main === module) {
 module.exports = {
   main,
   patchShellOpenLinux,
-  patchFile
+  patchFile,
+  collectEdits,
 };

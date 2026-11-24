@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 const { spawnSync } = require('child_process');
-const { parseAst, applyEdits } = require('../utils/ast-transform');
+const { parseAst, applyEdits, extractEnclosingBlock } = require('../utils/ast-transform');
 
 const { APP_DIR, APP_MAIN_DIST: MAIN_DIST_DIR } = require('../utils/paths');
 const AUTO_LAUNCH_BUNDLES = ['main.js', 'compact-app.js'];
@@ -113,9 +113,13 @@ function patchAutoLaunch(content) {
 
   content = injectHelper(content);
 
-  // Attempt AST detection for getZaloLauncher variable
+  let astPatchedWin32 = false;
+  // Attempt Snippet AST detection for getZaloLauncher variable
   try {
-    const root = parseAst(content);
+    const anchorIdx = content.indexOf('getZaloLauncher:');
+    const block = anchorIdx !== -1 ? extractEnclosingBlock(content, anchorIdx, { levels: 2 }) : null;
+    const targetSource = block ? block.snippet : content;
+    const root = parseAst(targetSource);
     const getter = root.find('getZaloLauncher: () => $VAR');
     if (getter) {
       const varName = getter.getMatch('VAR').text();
@@ -126,7 +130,11 @@ function patchAutoLaunch(content) {
         const edit = win32Assign.replace(
           `${win32Assign.text().replace(new RegExp(`${varName}\\s*=\\s*new\\s*${r}\\(${e}\\)$`), '')}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;${varName}=__zaloWrapLinuxLauncher(new ${r}(${e}))`
         );
-        content = applyEdits(root, [edit]);
+        const patchedTarget = applyEdits(root, [edit]);
+        content = block
+          ? content.slice(0, block.start) + patchedTarget + content.slice(block.end)
+          : patchedTarget;
+        astPatchedWin32 = true;
         logger.dim(`Patched launcher initialization via AST for variable: ${varName}`);
       }
     }
@@ -135,22 +143,26 @@ function patchAutoLaunch(content) {
   }
 
   const isMainVariant = content.includes(LAUNCHER_OPTIONS_ORIGINAL) ||
-    content.includes(LAUNCHER_OPTIONS_PATCHED) || content.includes(GET_LAUNCHER_PATCHED);
-  const isCompactVariant = content.includes(COMPACT_LAUNCHER_OPTIONS_ORIGINAL) ||
-    content.includes(COMPACT_LAUNCHER_OPTIONS_PATCHED) || content.includes(COMPACT_GET_LAUNCHER_PATCHED);
+    content.includes(LAUNCHER_OPTIONS_PATCHED) ||
+    content.includes(GET_LAUNCHER_ORIGINAL) ||
+    content.includes(GET_LAUNCHER_PATCHED);
   content = injectHelper(content);
 
   if (isMainVariant) {
-    content = replaceRequired(
-      content, LAUNCHER_OPTIONS_ORIGINAL, LAUNCHER_OPTIONS_PATCHED, 'Linux path'
-    );
+    if (!astPatchedWin32) {
+      content = replaceRequired(
+        content, LAUNCHER_OPTIONS_ORIGINAL, LAUNCHER_OPTIONS_PATCHED, 'Linux path'
+      );
+    }
     content = replaceRequired(
       content, GET_LAUNCHER_ORIGINAL, GET_LAUNCHER_PATCHED, 'lazy initialization'
     );
   } else {
-    content = replaceRequired(
-      content, COMPACT_LAUNCHER_OPTIONS_ORIGINAL, COMPACT_LAUNCHER_OPTIONS_PATCHED, 'Linux path'
-    );
+    if (!astPatchedWin32) {
+      content = replaceRequired(
+        content, COMPACT_LAUNCHER_OPTIONS_ORIGINAL, COMPACT_LAUNCHER_OPTIONS_PATCHED, 'Linux path'
+      );
+    }
     content = replaceRequired(
       content, COMPACT_GET_LAUNCHER_ORIGINAL, COMPACT_GET_LAUNCHER_PATCHED, 'lazy initialization'
     );

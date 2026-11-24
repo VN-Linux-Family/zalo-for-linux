@@ -9,8 +9,7 @@ const FRAME_FLAG = '!global.__zaloNativeWayland';
 // The login/main window is the only one sized by MIN_LOGIN_HEIGHT. Matching the
 // first `frame:` in the file broke when Zalo 26.11 added an earlier window (#188).
 function findMainFramePair(root) {
-  return root.findAll({ rule: { kind: 'pair' } }).find(pair => {
-    if (pair.field('key')?.text() !== 'frame') return false;
+  return root.findAll({ rule: { kind: 'pair', has: { field: 'key', regex: '^frame$' } } }).find(pair => {
     const object = pair.parent();
     if (!object || object.kind() !== 'object') return false;
     return object.children().some(sibling =>
@@ -62,8 +61,17 @@ async function main() {
   }
 }
 
+function collectEdits(content, root) {
+  const pair = findMainFramePair(root);
+  if (pair) {
+    if (pair.field('value').text() === FRAME_FLAG) return { edits: [], status: 'already' };
+    return { edits: [pair.replace(`frame:${FRAME_FLAG}`)], status: 'patched' };
+  }
+  return { edits: [], status: 'missing' };
+}
+
 if (require.main === module) {
   main();
 }
 
-module.exports = { main, patchContent };
+module.exports = { main, patchContent, collectEdits };

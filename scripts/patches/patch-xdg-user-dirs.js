@@ -190,23 +190,28 @@ async function main() {
   logger.info('Patching XDG user directories...');
   const NEEDLE1 = Buffer.from('getDefaultZaloReceivedFiles');
   const NEEDLE2 = Buffer.from('createAppPathManager');
-  const candidates = BUNDLE_DIRS.flatMap(findJavaScriptFiles);
+  const candidates = BUNDLE_DIRS.flatMap(findJavaScriptFiles).filter(
+    filePath => !filePath.includes('utility-process-media.js')
+  );
   let checkedCount = 0;
   let updatedCount = 0;
 
-  for (const filePath of candidates) {
-    if (filePath.includes('utility-process-media.js')) continue;
-    const buf = await fs.promises.readFile(filePath);
-    if (!buf.includes(NEEDLE1) || !buf.includes(NEEDLE2)) continue;
+  const CONCURRENCY = 8;
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const batch = candidates.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(async (filePath) => {
+      const buf = await fs.promises.readFile(filePath);
+      if (!buf.includes(NEEDLE1) || !buf.includes(NEEDLE2)) return;
 
-    checkedCount += 1;
-    const content = buf.toString('utf8');
-    const patched = patchXdgUserDirs(content);
-    if (patched !== content) {
-      await fs.promises.writeFile(filePath, patched, 'utf8');
-      updatedCount += 1;
-      logger.dim(`Patched localized user directories in ${path.relative(APP_DIR, filePath)}`);
-    }
+      checkedCount += 1;
+      const content = buf.toString('utf8');
+      const patched = patchXdgUserDirs(content);
+      if (patched !== content) {
+        await fs.promises.writeFile(filePath, patched, 'utf8');
+        updatedCount += 1;
+        logger.dim(`Patched localized user directories in ${path.relative(APP_DIR, filePath)}`);
+      }
+    }));
   }
 
   if (checkedCount === 0) {
