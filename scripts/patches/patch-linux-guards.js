@@ -12,8 +12,7 @@ function patchMainContent(source) {
   if (source.includes(PLATFORM_GUARD)) return source;
 
   const root = parseAst(source);
-  const matches = root.findAll({ rule: { kind: 'method_definition' } }).filter(method =>
-    method.field('name')?.text() === 'checkAppSigned' &&
+  const matches = root.findAll({ rule: { kind: 'method_definition', has: { field: 'name', regex: '^checkAppSigned$' } } }).filter(method =>
     method.text().includes('codesign') &&
     method.text().includes('isAppSigned')
   );
@@ -52,6 +51,22 @@ async function main(mainDist = APP_MAIN_DIST) {
   logger.success('Linux platform guards verified');
 }
 
+function collectEdits(source, root) {
+  if (source.includes(PLATFORM_GUARD)) return { edits: [] };
+  const matches = root.findAll({ rule: { kind: 'method_definition', has: { field: 'name', regex: '^checkAppSigned$' } } }).filter(method =>
+    method.text().includes('codesign') &&
+    method.text().includes('isAppSigned')
+  );
+  if (matches.length !== 1) {
+    throw new Error(`Linux guards: expected one codesign checkAppSigned method, found ${matches.length}`);
+  }
+  const body = matches[0].field('body');
+  if (!body || !body.text().startsWith('{')) {
+    throw new Error('Linux guards: checkAppSigned method has no supported body');
+  }
+  return { edits: [body.replace(`{${PLATFORM_GUARD}${body.text().slice(1)}`)] };
+}
+
 if (require.main === module) {
   main().catch(error => {
     logger.error('Linux guards patch failed:', error.message);
@@ -59,4 +74,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, patchMainContent, patchFile, PLATFORM_GUARD };
+module.exports = { main, patchMainContent, patchFile, collectEdits, PLATFORM_GUARD };

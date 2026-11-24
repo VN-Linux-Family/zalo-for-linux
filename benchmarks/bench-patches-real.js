@@ -135,7 +135,68 @@ async function benchmarkRealPatches() {
   if (failed) process.exitCode = 1;
 }
 
-benchmarkRealPatches().catch((error) => {
+function runScript(scriptPath) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [scriptPath], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+
+    const start = performance.now();
+    let peakMemory = { rss: 0, pss: 0, processes: 0 };
+    const sample = () => {
+      peakMemory = maxMemory(peakMemory, readProcessTree(child.pid));
+    };
+
+    const sampler = setInterval(sample, 100);
+    sample();
+
+    child.on('error', (error) => {
+      clearInterval(sampler);
+      resolve({ elapsedMs: performance.now() - start, peakMemory, error });
+    });
+
+    child.on('close', (code, signal) => {
+      sample();
+      clearInterval(sampler);
+      resolve({
+        elapsedMs: performance.now() - start,
+        peakMemory,
+        error: code === 0 ? null : new Error(stderr.trim() || `Child exited with ${signal || `code ${code}`}`),
+      });
+    });
+  });
+}
+
+async function benchmarkApplyPatches() {
+  if (process.platform !== 'linux' || !fs.existsSync('/proc/self/smaps_rollup')) {
+    throw new Error('This benchmark requires Linux /proc with smaps_rollup support.');
+  }
+
+  console.log('='.repeat(104));
+  console.log(`BENCHMARK: Full apply-patches pipeline | Runtime: Node.js ${process.version}`);
+  console.log('Sampling: 100 ms | RAM includes coordinator, worker_threads, and child-process tree.');
+  console.log('='.repeat(104));
+
+  const applyPatchesPath = path.join(__dirname, '..', 'scripts', 'apply-patches.js');
+  const result = await runScript(applyPatchesPath);
+  console.log(`Wall time: ${result.elapsedMs.toFixed(2)} ms`);
+  console.log(`Aggregate peak: RSS ${toMiB(result.peakMemory.rss)} | PSS ${toMiB(result.peakMemory.pss)} | processes ${result.peakMemory.processes}`);
+  console.log(`Result: ${result.error ? 'FAILED' : 'OK'}`);
+  if (result.error) {
+    console.error(result.error.message);
+    process.exitCode = 1;
+  }
+  console.log('='.repeat(104));
+}
+
+const isApplyPatchesMode = process.argv.includes('--apply-patches');
+(isApplyPatchesMode ? benchmarkApplyPatches() : benchmarkRealPatches()).catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
