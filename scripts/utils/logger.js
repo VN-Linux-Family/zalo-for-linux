@@ -26,5 +26,9 @@ module.exports = {
   warn: (...args) => console.warn('  \x1b[33m⚠\x1b[0m', ...cleanArgs(args)),
   error: (...args) => console.error('  \x1b[31m✖\x1b[0m', ...cleanArgs(args)),
   dim: (...args) => console.log('    \x1b[2m' + cleanArgs(args).join(' ') + '\x1b[0m'),
+  progress: (done, total, label) => {
+    const line = `  \x1b[36m[${done}/${total}]\x1b[0m ${label}`;
+    console.log(line);
+  },
   formatPath
 };

@@ -5,7 +5,7 @@ const path = require('path');
 const vm = require('vm');
 const { spawnSync } = require('child_process');
 const logger = require('../utils/logger');
-const { parseAst } = require('../utils/ast-transform');
+const { parseAst, extractBlockFrom } = require('../utils/ast-transform');
 const { APP_PC_DIST } = require('../utils/paths');
 
 const MARKER = 'zalo-language-bridge';
@@ -43,14 +43,51 @@ function validateJavaScript(source, filename = 'zalo-language-bridge.js') {
   new vm.Script(source, { filename });
 }
 
+function findLanguageManagerBlock(source) {
+  const re = /new\s+class\s*\{/g;
+  const blocks = [];
+  while (true) {
+    const m = re.exec(source);
+    if (!m) break;
+    const preview = source.slice(m.index, m.index + 16384);
+    if (
+      preview.includes('currentLanguageIndex') &&
+      preview.includes('getCurrentLanguageName') &&
+      preview.includes('callUpdate') &&
+      preview.includes('removeUpdate')
+    ) {
+      const braceIdx = source.indexOf('{', m.index);
+      const block = extractBlockFrom(source, braceIdx, { includePrefixRe: /new\s+class\s*$/ });
+      if (block) {
+        blocks.push(block);
+        if (blocks.length > 1) return null; // ambiguous: let full-file AST report exact count
+      }
+    }
+  }
+  return blocks.length === 1 ? blocks[0] : null;
+}
+
 function patchContent(source) {
   if (typeof source !== 'string') throw new TypeError('Bundle source must be a string');
   let working = source;
-  let root = parseAst(working);
-  let manager = managerClass(root);
   const markerWasPresent = working.includes('/* ' + MARKER + ' */');
   if (markerWasPresent && working.split('/* ' + MARKER + ' */').length - 1 !== 1) {
     throw new Error('Duplicate Zalo language bridge markers; refusing to continue');
+  }
+
+  // Fast Snippet AST path: parse only the enclosing `new class { ... }` (~5 KB) instead of 20+ MB
+  const block = findLanguageManagerBlock(working);
+  let targetSource = block ? block.snippet : working;
+  let root = parseAst(targetSource);
+  let manager;
+  try {
+    manager = managerClass(root);
+  } catch (err) {
+    if (!block) throw err;
+    // Fallback to full-file AST if snippet missed an edge case
+    targetSource = working;
+    root = parseAst(working);
+    manager = managerClass(root);
   }
 
   if (markerWasPresent) {
@@ -71,9 +108,12 @@ function patchContent(source) {
     throw new Error('Zalo Language Manager change method is ambiguous; refusing unsafe patch');
   }
   const changeText = changeMethods[0].text();
-  const updated = root.commitEdits([
+  const updatedTarget = root.commitEdits([
     changeMethods[0].replace(changeText.slice(0, -1) + EVENT_BRIDGE + '}')
   ]);
+  const updated = targetSource === working
+    ? updatedTarget
+    : working.slice(0, block.start) + updatedTarget + working.slice(block.end);
 
   validateJavaScript(updated);
   const count = updated.split('/* ' + MARKER + ' */').length - 1;

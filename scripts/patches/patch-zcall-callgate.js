@@ -24,7 +24,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const logger = require('../utils/logger');
-const { parseAst, applyEdits } = require('../utils/ast-transform');
+const { parseAst, applyEdits, extractEnclosingBlock } = require('../utils/ast-transform');
 
 const { APP_PC_DIST: PC_DIST } = require('../utils/paths');
 
@@ -89,24 +89,34 @@ async function main() {
   } else {
    let astPatched = false;
    try {
-    const root = parseAst(content);
-    const edits = [];
-    // 1. Kernel gate: Number(e.split(".")[0]) < 17
-    const kernelMatch = root.find('Number($E.split(".")[0]) < 17');
-    if (kernelMatch) {
-     edits.push(kernelMatch.replace(`("linux"!==$znode.os.platform()&&${kernelMatch.text()})`));
-    }
-    // 2. Default feature toggles
-    const callPair = root.findAll('!1').find(n => n.parent().kind() === 'pair' && n.parent().field('key').text() === 'enableCall');
-    if (callPair) edits.push(callPair.parent().replace('enableCall:!0'));
-    const videoPair = root.findAll('!1').find(n => n.parent().kind() === 'pair' && n.parent().field('key').text() === 'enableVideoCall');
-    if (videoPair) edits.push(videoPair.parent().replace('enableVideoCall:!0'));
-
-    if (edits.length > 0) {
-     content = applyEdits(root, edits);
+    const snippetRes = patchCallgateViaSnippetAst(content);
+    if (snippetRes.editCount > 0) {
+     content = snippetRes.content;
      changed = true;
      astPatched = true;
-     logger.dim(`Patched callgate via AST in ${file} (${edits.length} edits)`);
+     logger.dim(`Patched callgate via Snippet AST in ${file} (${snippetRes.editCount} edits)`);
+    } else {
+     const root = parseAst(content);
+     const edits = [];
+     // 1. Kernel gate: Number(e.split(".")[0]) < 17
+     const kernelMatch = root.find('Number($E.split(".")[0]) < 17');
+     if (kernelMatch) {
+      edits.push(kernelMatch.replace(`("linux"!==$znode.os.platform()&&${kernelMatch.text()})`));
+     }
+     // 2. Default feature toggles (scoped pair query instead of scanning all !1 literals)
+     const callPair = root.findAll({ rule: { kind: 'pair', has: { field: 'key', regex: '^enableCall$' } } })
+      .find(p => p.field('value')?.text() === '!1');
+     if (callPair) edits.push(callPair.replace('enableCall:!0'));
+     const videoPair = root.findAll({ rule: { kind: 'pair', has: { field: 'key', regex: '^enableVideoCall$' } } })
+      .find(p => p.field('value')?.text() === '!1');
+     if (videoPair) edits.push(videoPair.replace('enableVideoCall:!0'));
+
+     if (edits.length > 0) {
+      content = applyEdits(root, edits);
+      changed = true;
+      astPatched = true;
+      logger.dim(`Patched callgate via AST in ${file} (${edits.length} edits)`);
+     }
     }
    } catch (err) {
     logger.warn(`AST callgate patch skipped on ${file}, falling back:`, err.message);
@@ -141,8 +151,92 @@ async function main() {
  if (!workerFile) logger.success(`zcall callgate patched (${patchedCount} files)`);
 }
 
+function patchCallgateViaSnippetAst(content) {
+ let updated = content;
+ let editCount = 0;
+
+ const kernelIdx = updated.indexOf('split(".")[0])<17');
+ if (kernelIdx !== -1) {
+  const block = extractEnclosingBlock(updated, kernelIdx, { levels: 1 });
+  if (block) {
+   const root = parseAst(block.snippet);
+   const kernelMatch = root.find('Number($E.split(".")[0]) < 17');
+   if (kernelMatch) {
+    const patched = applyEdits(root, [
+     kernelMatch.replace(`("linux"!==$znode.os.platform()&&${kernelMatch.text()})`),
+    ]);
+    updated = updated.slice(0, block.start) + patched + updated.slice(block.end);
+    editCount++;
+   }
+  }
+ }
+
+ const toggleIdx = updated.indexOf('enableCall:');
+ if (toggleIdx !== -1) {
+  const block = extractEnclosingBlock(updated, toggleIdx, { levels: 1 });
+  if (block) {
+   const root = parseAst(block.snippet);
+   const edits = [];
+   const callPair = root.findAll({ rule: { kind: 'pair', has: { field: 'key', regex: '^enableCall$' } } })
+    .find(p => p.field('value')?.text() === '!1');
+   if (callPair) edits.push(callPair.replace('enableCall:!0'));
+   const videoPair = root.findAll({ rule: { kind: 'pair', has: { field: 'key', regex: '^enableVideoCall$' } } })
+    .find(p => p.field('value')?.text() === '!1');
+   if (videoPair) edits.push(videoPair.replace('enableVideoCall:!0'));
+   if (edits.length > 0) {
+    const patched = applyEdits(root, edits);
+    updated = updated.slice(0, block.start) + patched + updated.slice(block.end);
+    editCount += edits.length;
+   }
+  }
+ }
+
+ return { content: updated, editCount };
+}
+
+function collectCallgateEdits(content, root) {
+ if (content.includes('"linux"!==$znode.os.platform()') || content.includes('"linux" !== $znode.os.platform()')) {
+  return { edits: [], alreadyPatched: true };
+ }
+ const edits = [];
+ // 1. Kernel gate: Number(e.split(".")[0]) < 17
+ const kernelMatch = root.find('Number($E.split(".")[0]) < 17');
+ if (kernelMatch) {
+  edits.push(kernelMatch.replace(`("linux"!==$znode.os.platform()&&${kernelMatch.text()})`));
+ }
+ // 2. Default feature toggles (scoped pair query instead of scanning all !1 literals)
+ const callPair = root.findAll({ rule: { kind: 'pair', has: { field: 'key', regex: '^enableCall$' } } })
+  .find(p => p.field('value')?.text() === '!1');
+ if (callPair) edits.push(callPair.replace('enableCall:!0'));
+ const videoPair = root.findAll({ rule: { kind: 'pair', has: { field: 'key', regex: '^enableVideoCall$' } } })
+  .find(p => p.field('value')?.text() === '!1');
+ if (videoPair) edits.push(videoPair.replace('enableVideoCall:!0'));
+
+ return { edits, alreadyPatched: false };
+}
+
+function resolveGlobTarget(pattern) {
+ const dir = path.dirname(pattern);
+ const base = path.basename(pattern);
+ const [prefix, suffix] = base.split('*');
+ const file = fs.existsSync(dir)
+  ? (fs.readdirSync(dir).find(f => f.startsWith(prefix) && f.endsWith(suffix || '')) || null)
+  : null;
+ return file ? path.join(dir, file) : null;
+}
+
 if (require.main === module) {
  main();
 }
 
-module.exports = { main };
+module.exports = {
+ main,
+ GLOB_TARGETS,
+ collectCallgateEdits,
+ patchCallgateViaSnippetAst,
+ resolveGlobTarget,
+ ORIGINAL,
+ PATCHED,
+ DEFAULTS_ORIGINAL,
+ DEFAULTS_PATCHED,
+};
