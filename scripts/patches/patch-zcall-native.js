@@ -51,24 +51,26 @@ function getSteps(content) {
    '$1="win32"===n("$2").platform(),$3=$1?"\\\\\\\\.\\\\pipe\\\\PipeZCallSend":"linux"===n("$2").platform()?29632:"/tmp/socketzalosend2021",' +
    '$4=$1?"\\\\\\\\.\\\\pipe\\\\PipeZCallRecv":"linux"===n("$2").platform()?29631:"/tmp/socketzalorecv2021"'],
   ['listen on 127.0.0.1 (recv & send)',
-   /([$\w]+)\.listen\(([$\w]+),(\(\(\)=>\{[$\w.]+\(\d+,"[^"]+",\["server(?:Recv|Send) (?:recovered|on listening)")/g,
+   /([$\w]+)\.listen\(([$\w]+),(\(?\(\)=>\{[$\w.]+\(\d+,"[^"]+",\["server(?:Recv|Send) (?:recovered|on listening)")/g,
    '$1.listen("linux"===process.platform?{port:$2,host:"127.0.0.1"}:$2,$3'],
   // EADDRINUSE recovery unlinks the socket file. On Linux the path is a port.
   ['no unlink of a port (recv)',
-   /([$\w]+)\|\|([$\w]+)\.unlink\(([$\w]+),\(e=>\{e&&[$\w.]+\(\d+,"[^"]+",\["serverRecv address in use unlink error"/,
-   '"linux"===process.platform||$1||$2.unlink($3,(e=>{e&&d.zsymb(22,"mh-YXX",["serverRecv address in use unlink error"'],
+   /([$\w]+)\|\|([$\w]+)\.unlink\(([$\w]+),\(?e=>\{e&&([$\w.]+)\((\d+),"([^"]+)",\["serverRecv address in use unlink error"/,
+   '"linux"===process.platform||$1||$2.unlink($3,(e=>{e&&$4($5,"$6",["serverRecv address in use unlink error"'],
   ['no unlink of a port (send)',
-   /([$\w]+)\|\|\(([$\w]+=!1),([$\w]+)\.unlink\(([$\w]+),\(e=>\{e&&[$\w.]+\(\d+,"[^"]+",\["serverSend address in use unlink error"/,
-   '"linux"===process.platform||$1||($2,$3.unlink($4,(e=>{e&&d.zsymb(22,"61oFhd",["serverSend address in use unlink error"'],
+   /([$\w]+)\|\|\(([$\w]+=!1),([$\w]+)\.unlink\(([$\w]+),\(?e=>\{e&&([$\w.]+)\((\d+),"([^"]+)",\["serverSend address in use unlink error"/,
+   '"linux"===process.platform||$1||($2,$3.unlink($4,(e=>{e&&$5($6,"$7",["serverSend address in use unlink error"'],
   ['token variable',
-   /({DO_LOAD:1,NOT_REPLY:2,DID_FINISH_LOAD:3,DID_LOAD_FAIL:4,CRASH:5,UNRESPONSIVE:6,NO_RESPONSE:7};let [^;]+);/,
+   /(getCallV2TransportAesKey\(\);[\s\S]{0,120}?let [$\w,=!01\[\]]+);/,
    '$1,TK=null;'],
   ['token check (recv)',
-   /e\.on\("data",\(([$\w]+)=>\{([$\w]+)\(\1\)\}\)\),e\.on\("end"/,
-   `e.on("data",(n=>{${tokenCheck('n')}n&&$2(n)})),e.on("end"`],
+   /e\.on\("data",\(?(?:([$\w]+)=>\{([$\w]+)\(\1\)\}|e=>\{(\(e=>\{[\s\S]{0,500}?\}\)\(e\))\})\)?\),e\.on\("end"/,
+   (m, param, fn, iife) => iife
+    ? `e.on("data",(zflD=>{${tokenCheck('zflD')}zflD&&(${iife.slice(0, -3)}(zflD))})),e.on("end"`
+    : `e.on("data",(zflD=>{${tokenCheck('zflD')}zflD&&${fn}(zflD)})),e.on("end"`],
   ['token check (send)',
-   /e\.on\("data",\(([$\w]+)=>\{d\.zsymb\((\d+),"([^"]+)",\["serverSend on data","([^"]+)"\],\1\),([$\w]+)\|\|\(([$\w]+=!1),([$\w]+)\(e\)\)\}\)\)/,
-   `e.on("data",($1=>{${tokenCheck('$1')}d.zsymb($2,"$3",["serverSend on data","$4"],$1),$5||($6,$7(e))}))`],
+   /e\.on\("data",\(?([$\w]+)\)?=>\{([$\w.]+)\((\d+),"([^"]+)",\["serverSend on data","([^"]+)"\],\1\),([$\w]+)\|\|\(([$\w]+=!1),([$\w]+)\(e\)\)\}\)?\)/,
+   `e.on("data",($1=>{${tokenCheck('$1')}$2($3,"$4",["serverSend on data","$5"],$1),$6||($7,$8(e))}))`],
   ['engine path on Linux',
    /:\(([$\w]+)=[$\w]+\(\)\?[$\w]+\.join\(__dirname,"..","native","qt-call-cap-mac","ZaloHelper\.app"\)/,
    ':("linux"===process.platform?$1=process.env.ZCALL_ENGINE_JS||"":($1=u()?o.join(__dirname,"..","native","qt-call-cap-mac","ZaloHelper.app")'],
@@ -77,7 +79,7 @@ function getSteps(content) {
    '$1),$2}();'],
   // plugins/zcall checks the system packages (and tells the user) first.
   ['await __zcallPrepare',
-   /\}\(\);([$\w]+)\(([$\w]+),([$\w]+)\)\.then\(\(([$\w]+)=>\{if\(([$\w]+)&&!\4\)return ([$\w]+=!1)/,
+   /\}\(\);([$\w]+)\(([$\w]+),([$\w]+)\)\.then\(\(?([$\w]+)\)?=>\{if\(([$\w]+)&&!\4\)return ([$\w]+=!1)/,
    '}();("linux"===process.platform&&global.__zcallPrepare?global.__zcallPrepare().then((()=>$1($2,$3))):$1($2,$3)).then(($4=>{if($5&&!$4)return $6'],
   ['spawn the engine',
    /([$\w]+)=([$\w]+)\(([$\w]+),\[([$\w]+),([$\w]+)\]\),\1\.stdout\.setEncoding\("utf8"\)/,
@@ -87,13 +89,16 @@ function getSteps(content) {
   // A failed or ended engine must not leave "started" set, or no call
   // would start it again until Zalo restarts.
   ['restart after the engine ends',
-   /([$\w]+)\.on\("error",\((\w+)=>\{([$\w.]+)\((\d+),"([^"]+)",\["client error","([^"]+)"\],\2\)\}\)\)/,
-   '$1.on("error",($2=>{L=!1,$3($4,"$5",["client error","$6"],$2)})),$1.on("exit",(()=>{L=!1}))'],
+   /([$\w]+)\.on\("error",\(?(\w+)\)?=>\{(?:([$\w]+)=!1,)?([$\w.]+)\((\d+),"([^"]+)",\["client error","([^"]+)"\],\2\)\}\)?\)/,
+   (m, proc, errVar, startedVar, logFn, lvl, id, msg) => {
+    const flag = startedVar || 'L';
+    return `${proc}.on("error",(${errVar}=>{${flag}=!1,${logFn}(${lvl},"${id}",["client error","${msg}"],${errVar})})),${proc}.on("exit",(()=>{${flag}=!1}))`;
+   }],
   // The helper rejects makeCall (-11 "init_error") before it has seen init:
   // send init first (same stream, order kept). $1 is the send function,
   // $2 is the cached init payload (they swap names between Zalo versions).
   ['init before makeCall',
-   /\.on\("call-send-to-native",\(\(e,t\)=>\{t\._optional\?delete t\._optional:([$\w]+)\(\),([$\w]+)\(t\)\}\)\)\.on\("call-init",\(\(e,t\)=>\{t&&t\._optional&&delete t\._optional,([$\w]+)=t\}\)\)/,
+   /\.on\("call-send-to-native",\(?\(e,t\)=>\{t\._optional\?delete t\._optional:([$\w]+)\(\),([$\w]+)\(t\)\}\)?\)\.on\("call-init",\(?\(e,t\)=>\{t&&t\._optional&&delete t\._optional,([$\w]+)=t\}\)?\)/,
    '.on("call-send-to-native",((e,t)=>{t._optional?delete t._optional:$1(),t&&"makeCall"===t.command&&$3&&$2($3),$2(t)})).on("call-init",((e,t)=>{t&&t._optional&&delete t._optional,$3=t}))'],
   // Off Windows the "sending" flag is only cleared when the helper writes on
   // the send channel, which it hardly ever does: every message after the
