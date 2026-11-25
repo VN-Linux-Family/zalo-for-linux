@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { APP_MAIN_DIST, APP_PC_DIST } = require('./paths');
+const { APP_MAIN_DIST, APP_PC_DIST, resolveLazyLoginBundles } = require('./paths');
 const { runFileGroup } = require('./patch-pipeline');
 
 const patchTitlebar = require('../patches/patch-titlebar');
@@ -21,18 +21,23 @@ const PC_DIST_TARGETS = {
   'compact-app-pc': {
     pattern: path.join(APP_PC_DIST, 'compact-app-pc.*.js'),
     withLanguageBridge: true,
+    requireCallgate: true,
   },
   'lazy-login': {
-    pattern: path.join(APP_PC_DIST, 'lazy', 'default-login-main-startup-shared-worker-znotification.*.js'),
+    resolve: () => resolveLazyLoginBundles(APP_PC_DIST)[0] || null,
+    pattern: path.join(APP_PC_DIST, 'lazy', 'default-login-main-startup-shared-worker.*.js'),
     withLanguageBridge: true,
+    requireCallgate: true,
   },
   'search-worker': {
     pattern: path.join(APP_PC_DIST, 'search-worker.*.js'),
     withLanguageBridge: false,
+    requireCallgate: false,
   },
   'sync-v2-sub-worker': {
     pattern: path.join(APP_PC_DIST, 'sync-v2-sub-worker.*.js'),
     withLanguageBridge: false,
+    requireCallgate: false,
   },
 };
 
@@ -41,7 +46,7 @@ function runPcDistBundleGroup(bundleKey) {
   if (!spec) {
     throw new Error(`Unknown pc-dist bundle key: ${bundleKey}`);
   }
-  const targetPath = patchCallgate.resolveGlobTarget(spec.pattern);
+  const targetPath = spec.resolve ? spec.resolve() : patchCallgate.resolveGlobTarget(spec.pattern);
   if (!targetPath) {
     throw new Error(`pc-dist target not found for ${bundleKey}: ${spec.pattern}`);
   }
@@ -72,6 +77,9 @@ function runPcDistBundleGroup(bundleKey) {
           const { edits } = patchCallgate.collectCallgateEdits(content, root);
           if (edits.length > 0) return { content: applyEdits(root, edits) };
         } catch (_) {}
+        if (!spec.requireCallgate && !content.includes('split(".")[0])<17') && !content.includes(patchCallgate.ORIGINAL)) {
+          return { content };
+        }
         if (!content.includes(patchCallgate.ORIGINAL)) {
           throw new Error(`callgate patch not applied: ${path.basename(targetPath)}: kernel gate`);
         }

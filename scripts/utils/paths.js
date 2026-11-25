@@ -61,6 +61,25 @@ function resolvePrebuiltBinary(binaryName, fallbackPath) {
  return fallbackPath;
 }
 
+/**
+ * Locate the lazy login/main/startup/shared-worker bundle(s) inside pc-dist/lazy.
+ * Zalo 26.11.20+ split `-znotification` into a separate small chunk, so prefer
+ * `default-login-main-startup-shared-worker.<hash>.js` and fall back to
+ * `default-login-main-startup-shared-worker-znotification.<hash>.js` for older versions/tests.
+ */
+function resolveLazyLoginBundles(appPcDist = APP_PC_DIST) {
+ const lazyDir = path.join(appPcDist, 'lazy');
+ if (!fs.existsSync(lazyDir)) return [];
+ const entries = fs.readdirSync(lazyDir);
+ const primary = entries
+  .filter((name) => /^default-login-main-startup-shared-worker\.[^.]+\.js$/.test(name))
+  .map((name) => path.join(lazyDir, name));
+ if (primary.length > 0) return primary;
+ return entries
+  .filter((name) => /^default-login-main-startup-shared-worker-znotification\.[^.]+\.js$/.test(name))
+  .map((name) => path.join(lazyDir, name));
+}
+
 module.exports = Object.freeze({
  ROOT,
  APP_DIR,
@@ -68,6 +87,7 @@ module.exports = Object.freeze({
  DIST_DIR,
  PREBUILT_DIR,
  resolvePrebuiltBinary,
+ resolveLazyLoginBundles,
  PLUGINS_DIR,
  NODE_MODULES_DIR,
  VENDOR_DIR,

@@ -26,14 +26,16 @@ const { spawnSync } = require('child_process');
 const logger = require('../utils/logger');
 const { parseAst, applyEdits, extractEnclosingBlock } = require('../utils/ast-transform');
 
-const { APP_PC_DIST: PC_DIST } = require('../utils/paths');
+const { APP_PC_DIST: PC_DIST, resolveLazyLoginBundles } = require('../utils/paths');
 
 // Hash part of the filenames changes per Zalo version — glob by prefix.
 const GLOB_TARGETS = [
  path.join(PC_DIST, 'compact-app-pc.*.js'),
  path.join(PC_DIST, 'search-worker.*.js'),
  path.join(PC_DIST, 'sync-v2-sub-worker.*.js'),
- path.join(PC_DIST, 'lazy', 'default-login-main-startup-shared-worker-znotification.*.js'),
+ ...(resolveLazyLoginBundles(PC_DIST).length > 0
+  ? resolveLazyLoginBundles(PC_DIST)
+  : [path.join(PC_DIST, 'lazy', 'default-login-main-startup-shared-worker-znotification.*.js')]),
 ];
 
 const ORIGINAL = 'let ae=()=>{{const e=$znode.os.release();if(e){if(Number(e.split(".")[0])<17)return ae=()=>!1,!1}}return ae=()=>!0,ae()};';
