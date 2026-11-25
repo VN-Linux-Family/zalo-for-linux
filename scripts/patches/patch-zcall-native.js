@@ -55,11 +55,11 @@ function getSteps(content) {
    '$1.listen("linux"===process.platform?{port:$2,host:"127.0.0.1"}:$2,$3'],
   // EADDRINUSE recovery unlinks the socket file. On Linux the path is a port.
   ['no unlink of a port (recv)',
-   /([$\w]+)\|\|([$\w]+)\.unlink\(([$\w]+),\(?e=>\{e&&([$\w.]+)\((\d+),"([^"]+)",\["serverRecv address in use unlink error"/,
-   '"linux"===process.platform||$1||$2.unlink($3,(e=>{e&&$4($5,"$6",["serverRecv address in use unlink error"'],
+   /([$\w]+)\|\|([$\w]+)\.unlink\(([$\w]+),(\(?e=>\{)e&&([$\w.]+)\((\d+),"([^"]+)",\["serverRecv address in use unlink error"/,
+   '"linux"===process.platform||$1||$2.unlink($3,$4e&&$5($6,"$7",["serverRecv address in use unlink error"'],
   ['no unlink of a port (send)',
-   /([$\w]+)\|\|\(([$\w]+=!1),([$\w]+)\.unlink\(([$\w]+),\(?e=>\{e&&([$\w.]+)\((\d+),"([^"]+)",\["serverSend address in use unlink error"/,
-   '"linux"===process.platform||$1||($2,$3.unlink($4,(e=>{e&&$5($6,"$7",["serverSend address in use unlink error"'],
+   /([$\w]+)\|\|\(([$\w]+=!1),([$\w]+)\.unlink\(([$\w]+),(\(?e=>\{)e&&([$\w.]+)\((\d+),"([^"]+)",\["serverSend address in use unlink error"/,
+   '"linux"===process.platform||$1||($2,$3.unlink($4,$5e&&$6($7,"$8",["serverSend address in use unlink error"'],
   ['token variable',
    /(getCallV2TransportAesKey\(\);[\s\S]{0,120}?let [$\w,=!01\[\]]+);/,
    '$1,TK=null;'],
@@ -79,8 +79,8 @@ function getSteps(content) {
    '$1),$2}();'],
   // plugins/zcall checks the system packages (and tells the user) first.
   ['await __zcallPrepare',
-   /\}\(\);([$\w]+)\(([$\w]+),([$\w]+)\)\.then\(\(?([$\w]+)\)?=>\{if\(([$\w]+)&&!\4\)return ([$\w]+=!1)/,
-   '}();("linux"===process.platform&&global.__zcallPrepare?global.__zcallPrepare().then((()=>$1($2,$3))):$1($2,$3)).then(($4=>{if($5&&!$4)return $6'],
+   /\}\(\);([$\w]+)\(([$\w]+),([$\w]+)\)\.then\((\(?([$\w]+)\)?=>\{)if\(([$\w]+)&&!\5\)return ([$\w]+=!1)/,
+   '}();("linux"===process.platform&&global.__zcallPrepare?global.__zcallPrepare().then((()=>$1($2,$3))):$1($2,$3)).then($4if($6&&!$5)return $7'],
   ['spawn the engine',
    /([$\w]+)=([$\w]+)\(([$\w]+),\[([$\w]+),([$\w]+)\]\),\1\.stdout\.setEncoding\("utf8"\)/,
    ';"linux"===process.platform?(TK="zcall-"+Math.random().toString(36).slice(2)+Date.now().toString(36),' +
@@ -89,10 +89,11 @@ function getSteps(content) {
   // A failed or ended engine must not leave "started" set, or no call
   // would start it again until Zalo restarts.
   ['restart after the engine ends',
-   /([$\w]+)\.on\("error",\(?(\w+)\)?=>\{(?:([$\w]+)=!1,)?([$\w.]+)\((\d+),"([^"]+)",\["client error","([^"]+)"\],\2\)\}\)?\)/,
-   (m, proc, errVar, startedVar, logFn, lvl, id, msg) => {
+   /([$\w]+)\.on\("error",(\(?)(\w+)(\)?=>\{)(?:([$\w]+)=!1,)?([$\w.]+)\((\d+),"([^"]+)",\["client error","([^"]+)"\],\3\)\}\)/,
+   (m, proc, openParen, errVar, arrow, startedVar, logFn, lvl, id, msg) => {
     const flag = startedVar || 'L';
-    return `${proc}.on("error",(${errVar}=>{${flag}=!1,${logFn}(${lvl},"${id}",["client error","${msg}"],${errVar})})),${proc}.on("exit",(()=>{${flag}=!1}))`;
+    const closeParen = openParen ? ')' : '';
+    return `${proc}.on("error",${openParen}${errVar}${arrow}${flag}=!1,${logFn}(${lvl},"${id}",["client error","${msg}"],${errVar})}${closeParen}),${proc}.on("exit",(()=>{${flag}=!1}))`;
    }],
   // The helper rejects makeCall (-11 "init_error") before it has seen init:
   // send init first (same stream, order kept). $1 is the send function,
@@ -159,6 +160,8 @@ async function main(mainJs = MAIN_JS) {
   // A partial patch would leave calls half wired: keep main.js as it was.
   throw new Error('native call patch not applied, Zalo changed: ' + missing.join('; '));
  }
+ const vm = require('vm');
+ new vm.Script(content, { filename: mainJs });
  fs.writeFileSync(mainJs, content, 'utf8');
  logger.success('native call patch applied');
  return true;
