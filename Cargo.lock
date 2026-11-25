@@ -1307,6 +1307,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mmap-io"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "033ea625e4736d207fc6fc3a8840ce1c84799abed241cc62c2fca29841397506"
+dependencies = [
+ "libc",
+ "log",
+ "parking_lot",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1480,6 +1491,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "num"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23"
+dependencies = [
+ "num-bigint",
+ "num-complex",
+ "num-integer",
+ "num-iter",
+ "num-rational",
+ "num-traits",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1504,6 +1529,16 @@ version = "0.1.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
 dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "num-iter"
+version = "0.1.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c92800bd69a1eac91786bcfe9da64a897eb72911b8dc3095decbd07429e8048b"
+dependencies = [
+ "num-integer",
  "num-traits",
 ]
 
@@ -1634,6 +1669,47 @@ name = "pin-project-lite"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c938015719552d665fd0553b90d96cd7ff58e83e4c061ca99e6bb78865a72752"
+
+[[package]]
+name = "pipewire-client"
+version = "0.1.0"
+dependencies = [
+ "mmap-io",
+ "pipewire-native-spa",
+ "rustix 1.1.6",
+]
+
+[[package]]
+name = "pipewire-native-macros"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a3b0afbc81de0c2eb9e4f0f89381209f35d5fc07187f41d5920d69a54e47010"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "pipewire-native-spa"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a76f5c1b9a076141bb117531891da911e642b41ef12b85de055405084d07443d"
+dependencies = [
+ "bitflags 2.13.2",
+ "cc",
+ "libc",
+ "libloading 0.9.1",
+ "num",
+ "pipewire-native-macros",
+ "pkg-config",
+]
+
+[[package]]
+name = "pkg-config"
+version = "0.3.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "png"
@@ -2644,12 +2720,11 @@ dependencies = [
  "ashpd",
  "bytemuck",
  "cbc",
- "cc",
  "futures-util",
  "hex",
- "libc",
  "nix",
  "openh264",
+ "pipewire-client",
  "pulseaudio",
  "rusty-opus",
  "serde",

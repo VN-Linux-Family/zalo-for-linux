@@ -11,9 +11,9 @@ libssl-dev
 liblzma-dev
 p7zip-full
 libclang-dev
+libspa-0.2-dev
 libx11-dev
 libxcb1-dev
 libxext-dev
 zlib1g-dev
 zsync
-libpipewire-0.3-dev

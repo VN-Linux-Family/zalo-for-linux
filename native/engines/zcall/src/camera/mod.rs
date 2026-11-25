@@ -7,7 +7,6 @@ use openh264::encoder::{
     BitRate, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, Profile, UsageType,
 };
 use openh264::formats::YUVBuffer;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, TrySendError};
 use std::sync::{Arc, Mutex};
@@ -46,17 +45,46 @@ fn open_camera_device(
     width: u32,
     height: u32,
 ) -> Result<(Device, String, usize, usize, usize), String> {
-    let path = device_path
-        .filter(|path| !path.is_empty())
-        .map(str::to_owned)
-        .or_else(first_camera_device)
-        .ok_or_else(|| "No V4L2 camera device was found".to_string())?;
-
-    if !Path::new(&path).exists() {
-        return Err(format!("Camera device does not exist: {path}"));
+    // Inventory only advertises nodes with V4L2 capture + streaming capability
+    // and YUYV support. Probe the saved choice first, then try the other verified
+    // nodes; a metadata node or a capture node that rejects our format is not a
+    // usable camera for this pipeline.
+    let available = crate::devices::camera_device_paths();
+    let mut candidates = Vec::with_capacity(available.len());
+    if let Some(preferred) = device_path.filter(|path| !path.is_empty()) {
+        if available.iter().any(|(path, _)| path == preferred) {
+            candidates.push(preferred.to_owned());
+        }
+    }
+    for (path, _) in available {
+        if !candidates.iter().any(|candidate| candidate == &path) {
+            candidates.push(path);
+        }
     }
 
-    let device = Device::with_path(&path).map_err(|error| format!("Open {path}: {error}"))?;
+    let mut errors = Vec::new();
+    for path in candidates {
+        match try_open_camera_device(&path, width, height) {
+            Ok((device, actual_width, actual_height, stride)) => {
+                return Ok((device, path, actual_width, actual_height, stride));
+            }
+            Err(error) => errors.push(error),
+        }
+    }
+    if errors.is_empty() {
+        Err("No usable V4L2 camera found (requires capture, streaming, and YUYV)".into())
+    } else {
+        Err(format!("No usable V4L2 camera: {}", errors.join("; ")))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn try_open_camera_device(
+    path: &str,
+    width: u32,
+    height: u32,
+) -> Result<(Device, usize, usize, usize), String> {
+    let device = Device::with_path(path).map_err(|error| format!("Open {path}: {error}"))?;
     let mut format = device
         .format()
         .map_err(|error| format!("Read camera format {path}: {error}"))?;
@@ -87,13 +115,7 @@ fn open_camera_device(
         ));
     }
 
-    Ok((
-        device,
-        path,
-        actual_width,
-        actual_height,
-        format.stride as usize,
-    ))
+    Ok((device, actual_width, actual_height, format.stride as usize))
 }
 
 #[cfg(target_os = "linux")]
@@ -269,19 +291,6 @@ impl Drop for CameraCapture {
     fn drop(&mut self) {
         self.stop();
     }
-}
-
-#[cfg(target_os = "linux")]
-fn first_camera_device() -> Option<String> {
-    crate::devices::camera_device_paths()
-        .into_iter()
-        .next()
-        .map(|(path, _)| path)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn first_camera_device() -> Option<String> {
-    None
 }
 
 /// Convert packed YUYV 4:2:2 into planar I420 4:2:0, averaging chroma across

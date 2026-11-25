@@ -1,23 +1,12 @@
-fn main() {
-    println!("cargo:rerun-if-changed=src/screen/pipewire.c");
+use std::env;
 
-    let pipewire_cflags = std::process::Command::new("pkg-config")
-        .args(["--cflags", "libpipewire-0.3"])
-        .output()
-        .expect("pkg-config is required to locate PipeWire headers");
+fn main() {
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
+
+    let target_os = env::var("CARGO_CFG_TARGET_OS")
+        .expect("Cargo must provide CARGO_CFG_TARGET_OS to the zcall build script");
     assert!(
-        pipewire_cflags.status.success(),
-        "libpipewire-0.3 development files are required (pkg-config libpipewire-0.3)"
+        target_os == "linux",
+        "zcall requires Linux (target OS: {target_os})"
     );
-    let mut pipewire_build = cc::Build::new();
-    pipewire_build.file("src/screen/pipewire.c").warnings(false);
-    for flag in String::from_utf8_lossy(&pipewire_cflags.stdout).split_whitespace() {
-        if let Some(include) = flag.strip_prefix("-I") {
-            pipewire_build.include(include);
-        } else {
-            pipewire_build.flag(flag);
-        }
-    }
-    pipewire_build.compile("zcall_pipewire");
-    println!("cargo:rustc-link-lib=dl");
 }

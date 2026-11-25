@@ -39,7 +39,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config python3 libclang-dev libpipewire-0.3-dev libxcb1-dev
+          sudo apt-get install -y --no-install-recommends pkg-config python3 libclang-dev libspa-0.2-dev libxcb1-dev
 
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v6

@@ -11,10 +11,10 @@ path = "src/main.rs"
 [dependencies]
 bytemuck = "1.25.2"
 signal-hook = "0.3.18"
-libc = "0.2"
 rusty-opus = "1.2.1"
 sonora = "0.3.0"
 nix = { version = "0.31.3", default-features = false, features = ["net"] }
+pipewire-client = { path = "../../crates/pipewire-client" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 aes = "0.8"
@@ -30,8 +30,6 @@ v4l = "0.14"
 
 x11rb = { version = "0.14.0", default-features = false, features = ["composite", "shm", "xfixes"] }
 
-[build-dependencies]
-cc = "1.0"
 
 [lints]
 workspace = true

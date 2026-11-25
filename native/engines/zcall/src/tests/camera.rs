@@ -37,6 +37,12 @@ fn rejects_invalid_yuyv_layouts() {
 fn real_v4l2_camera_captures_and_encodes_h264() {
     let device =
         std::env::var("ZCALL_TEST_CAMERA_DEVICE").unwrap_or_else(|_| "/dev/video0".to_string());
+    assert!(
+        crate::devices::camera_device_paths()
+            .iter()
+            .any(|(path, _)| path == &device),
+        "camera inventory must include the requested usable capture node {device}"
+    );
     let capture = CameraCapture::start(Some(&device), 640, 360, 30, 500_000)
         .unwrap_or_else(|error| panic!("open real camera {device}: {error}"));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -62,6 +68,42 @@ fn real_v4l2_camera_captures_and_encodes_h264() {
 
     capture.stop();
     panic!("real camera {device} did not produce an encoded frame within 10 seconds");
+}
+
+#[test]
+#[ignore = "requires a physical V4L2 camera and a non-capture video node"]
+fn real_camera_selection_skips_metadata_node_preference() {
+    let available = crate::devices::camera_device_paths();
+    let metadata_node = std::fs::read_dir("/dev")
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("video"))
+                && !available
+                    .iter()
+                    .any(|(capture, _)| path.to_str() == Some(capture.as_str()))
+        });
+    let Some(metadata_node) = metadata_node else {
+        return;
+    };
+    let preferred = metadata_node.to_string_lossy().into_owned();
+    let capture =
+        CameraCapture::start(Some(&preferred), 640, 360, 30, 500_000).unwrap_or_else(|error| {
+            panic!("metadata preference {preferred} should select a usable camera: {error}")
+        });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        if capture.try_recv().is_some() {
+            capture.stop();
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    capture.stop();
+    panic!("valid camera did not produce a frame after rejecting metadata preference {preferred}");
 }
 
 #[test]

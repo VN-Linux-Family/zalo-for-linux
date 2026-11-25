@@ -10,6 +10,7 @@ members = [
     "native/addons/zwalker",
     "native/addons/zfile",
     "native/addons/db-cross-v4",
+    "native/crates/pipewire-client",
     "native/engines/zocr",
     "native/engines/zcall",
 ]

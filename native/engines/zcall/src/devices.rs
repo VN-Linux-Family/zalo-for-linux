@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use v4l::{format::FourCC, video::Capture};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -97,7 +99,20 @@ pub(crate) fn camera_device_paths() -> Vec<(String, String)> {
         let Ok(capabilities) = device.query_caps() else {
             continue;
         };
-        if !is_capture_node(capabilities.capabilities) {
+        if !is_capture_node(capabilities.capabilities)
+            || !capabilities
+                .capabilities
+                .contains(v4l::capability::Flags::STREAMING)
+        {
+            continue;
+        }
+        let Ok(formats) = device.enum_formats() else {
+            continue;
+        };
+        if !formats
+            .iter()
+            .any(|format| format.fourcc == FourCC::new(b"YUYV"))
+        {
             continue;
         }
         let label = fs::read_to_string(entry.path().join("name"))
