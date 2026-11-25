@@ -6,6 +6,7 @@
 
 pub use pipewire_native_spa as spa;
 
+pub mod audio;
 pub mod client;
 pub mod format;
 pub mod node;
@@ -18,6 +19,10 @@ pub mod build_info {
     include!(concat!(env!("OUT_DIR"), "/build_info.rs"));
 }
 
+pub use audio::{AudioControls, AudioFormatCaps, AudioSampleFormat, NegotiatedAudioFormat};
+pub use client::{PipeWireGlobal, PipeWireObject, PipeWireParam};
 pub use node::{ClientNode, ClientNodeEvent, IoBuffers, PipeWireBuffer, PortDirection};
 pub use remote::PipeWireRemote;
-pub use stream::{PipeWireStream, Stream, StreamOptions, VideoFrame};
+pub use stream::{
+    AudioFrame, AudioStream, PipeWireStream, PipeWireStreamState, Stream, StreamOptions, VideoFrame,
+};

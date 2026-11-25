@@ -2369,7 +2369,7 @@ impl EngineCore {
             let Some(group) = self.group.as_ref() else {
                 return;
             };
-            if id.is_some_and(|id| id as u32 != group.call_id) {
+            if id.is_some_and(|id| u32::try_from(id).ok() != Some(group.call_id)) {
                 return;
             }
             (
@@ -2504,8 +2504,16 @@ impl EngineCore {
         false
     }
 
+    #[allow(clippy::too_many_lines)]
     fn group_incoming(&mut self, data: &Value) {
         if self.call.is_some() || self.group.is_some() {
+            return;
+        }
+        if number_at(data, "id")
+            .and_then(|id| u32::try_from(id).ok())
+            .is_none()
+        {
+            Self::log("ignoring incoming group call with missing or invalid id");
             return;
         }
         let setting = parse_json_value(data.get("callSetting"));
@@ -2630,7 +2638,7 @@ impl EngineCore {
             .or_else(|| data.get("callId"))
             .or_else(|| data.get("id"))
             .and_then(number_value)
-            .map(|id| id as u32);
+            .and_then(|id| u32::try_from(id).ok());
         let current_id = self.call.as_ref().map(|call| call.id);
         match act {
             "request" => self.incoming_call(&payload),
@@ -2779,7 +2787,10 @@ impl EngineCore {
             Self::log("incoming call while busy; ignored");
             return;
         }
-        let call_id = number_at(data, "callId").unwrap_or(0).max(0) as u32;
+        let Some(call_id) = number_at(data, "callId").and_then(|id| u32::try_from(id).ok()) else {
+            Self::log("ignoring incoming call with missing or invalid callId");
+            return;
+        };
         if self.last_ended_call == Some(call_id) {
             Self::log("late incoming event for ended call; ignored");
             return;
@@ -2866,7 +2877,8 @@ impl EngineCore {
             "12433" => self.group_request_answered(data),
             "12044" => {
                 if self.group.as_ref().is_some_and(|group| {
-                    number_at(data, "callId").is_some_and(|id| id as u32 != group.call_id)
+                    number_at(data, "callId")
+                        .is_some_and(|id| u32::try_from(id).ok() != Some(group.call_id))
                 }) {
                     Self::log("ignoring stale group screen-share response");
                     return;
@@ -2879,7 +2891,7 @@ impl EngineCore {
                 };
                 let signal_id = number_at(data, "callId")
                     .or_else(|| number_at(data, "id"))
-                    .map(|value| value as u32);
+                    .and_then(|value| u32::try_from(value).ok());
                 if signal_id != Some(current_id) {
                     Self::log(&format!(
                         "ignoring stale/unmatched recvSignal {command} for call {signal_id:?}; active call is {current_id}"
@@ -2894,11 +2906,10 @@ impl EngineCore {
     }
 
     fn caller_init_answer(&mut self, data: &Value) {
-        if !self
-            .call
-            .as_ref()
-            .is_some_and(|c| c.role == CallRole::Caller && c.phase == CallPhase::Outgoing)
-        {
+        if !self.call.as_ref().is_some_and(|call| {
+            call.role == CallRole::Caller
+                && matches!(call.phase, CallPhase::Outgoing | CallPhase::Ringing)
+        }) {
             return;
         }
         if number_at(data, "status").unwrap_or(0) != 0 {
@@ -3766,10 +3777,10 @@ impl EngineCore {
             profile.as_ref().map_or((640, 360, 15, 500_000), |profile| {
                 (profile.width, profile.height, profile.fps, profile.bitrate)
             });
-        match CameraCapture::start(device.as_deref(), width, height, fps, bitrate) {
+        match CameraCapture::start_selected(device.as_deref(), width, height, fps, bitrate) {
             Ok(capture) => {
                 this.camera = Some(capture);
-                Self::log("native V4L2/OpenH264 camera capture started");
+                Self::log("native camera/OpenH264 capture started");
                 if let Some(media) = this.media.as_ref() {
                     media.note_debug_event("camera-capture started");
                 }
@@ -3842,7 +3853,9 @@ impl EngineCore {
         let Some(current_call_id) = self.group.as_ref().map(|group| group.call_id) else {
             return;
         };
-        if number_at(data, "callId").is_some_and(|id| id as u32 != current_call_id) {
+        if number_at(data, "callId")
+            .is_some_and(|id| u32::try_from(id).ok() != Some(current_call_id))
+        {
             Self::log("ignoring group screen-share response for another call");
             return;
         }

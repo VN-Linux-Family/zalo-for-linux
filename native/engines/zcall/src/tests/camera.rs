@@ -133,3 +133,223 @@ fn openh264_produces_annex_b_for_a_keyframe() {
         "local preview codec must be derived from the actual SPS"
     );
 }
+
+#[test]
+fn pipewire_bgra_conversion_respects_stride_and_packs_yuyv_pairs() {
+    let padded = [
+        0_u8, 0, 255, 255, // red
+        0, 255, 0, 255, // green
+        9, 9, 9, 9, // row padding
+        255, 0, 0, 255, // blue
+        255, 255, 255, 255, // white
+        9, 9, 9, 9, // row padding
+    ];
+    let converted = super::bgra_to_yuyv(&padded, 2, 2, 12).unwrap();
+    assert_eq!(converted.len(), 8);
+    assert_eq!(converted[0], 82); // red luma
+    assert_eq!(converted[2], 144); // green luma
+    assert_eq!(converted[4], 41); // blue luma
+    assert_eq!(converted[6], 235); // white luma
+    assert!(super::bgra_to_yuyv(&padded, 2, 2, 4).is_none());
+}
+
+#[test]
+fn pipewire_uyvy_conversion_reorders_chroma_and_luma_bytes() {
+    let input = [128_u8, 10, 140, 20, 130, 30, 150, 40];
+    assert_eq!(
+        super::uyvy_to_yuyv(&input, 2, 2, 4).unwrap(),
+        [10, 128, 20, 140, 30, 130, 40, 150]
+    );
+    assert!(super::uyvy_to_yuyv(&input, 3, 2, 6).is_none());
+}
+
+/// Opt-in hardware acceptance test for the native `PipeWire` camera path.
+/// Run explicitly with --ignored on a session exposing a camera-role node.
+#[test]
+#[ignore = "requires a live PipeWire session and camera-role node; run explicitly with --ignored"]
+fn real_pipewire_camera_captures_and_encodes_h264() {
+    let capture =
+        CameraCapture::start_pipewire_direct_selected(Some("/dev/video0"), 640, 360, 30, 500_000)
+            .unwrap_or_else(|error| panic!("open native PipeWire camera: {error}"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+
+    while std::time::Instant::now() < deadline {
+        if let Some(frame) = capture.try_recv() {
+            capture.stop();
+            assert!(
+                (160..=1920).contains(&frame.width)
+                    && (120..=1080).contains(&frame.height)
+                    && frame.width % 2 == 0
+                    && frame.height % 2 == 0,
+                "PipeWire camera negotiated invalid dimensions {}x{}",
+                frame.width,
+                frame.height
+            );
+            assert!(
+                !frame.data.is_empty(),
+                "PipeWire camera encoded an empty frame"
+            );
+            assert!(
+                frame.data.starts_with(&[0, 0, 0, 1]) || frame.data.starts_with(&[0, 0, 1]),
+                "PipeWire camera output must be H.264 Annex-B"
+            );
+            assert!(
+                crate::video::avc_codec_string(&frame.data)
+                    .is_some_and(|codec| codec.starts_with("avc1.")),
+                "PipeWire camera SPS must identify an H.264 codec"
+            );
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    capture.stop();
+    panic!("native PipeWire camera did not produce an encoded frame within 10 seconds");
+}
+
+/// Opt-in end-to-end test of camera permission, portal remote, and H.264.
+#[test]
+#[ignore = "requires an interactive XDG Camera portal and camera permission; run explicitly with --ignored"]
+fn real_camera_portal_captures_and_encodes_h264() {
+    let capture = CameraCapture::start_pipewire_portal(640, 360, 30, 500_000)
+        .unwrap_or_else(|error| panic!("open XDG Camera portal stream: {error}"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+
+    while std::time::Instant::now() < deadline {
+        if let Some(frame) = capture.try_recv() {
+            capture.stop();
+            assert!(frame.width >= 160 && frame.height >= 120);
+            assert!(
+                !frame.data.is_empty(),
+                "portal camera encoded an empty frame"
+            );
+            assert!(
+                frame.data.starts_with(&[0, 0, 0, 1]) || frame.data.starts_with(&[0, 0, 1]),
+                "portal camera output must be H.264 Annex-B"
+            );
+            assert!(
+                crate::video::avc_codec_string(&frame.data)
+                    .is_some_and(|codec| codec.starts_with("avc1.")),
+                "portal camera SPS must identify an H.264 codec"
+            );
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    capture.stop();
+    panic!("XDG Camera portal did not produce an encoded frame within 15 seconds");
+}
+
+#[test]
+fn explicit_camera_backends_do_not_fall_back_to_another_backend() {
+    use crate::devices::CameraBackend;
+    use std::cell::RefCell;
+    let calls = RefCell::new(Vec::new());
+
+    let selected = select_camera_backend(
+        CameraBackend::PipeWire,
+        || {
+            calls.borrow_mut().push("v4l2");
+            Ok("V4L2")
+        },
+        || {
+            calls.borrow_mut().push("pipewire");
+            Ok("PipeWire")
+        },
+        || {
+            calls.borrow_mut().push("portal");
+            Ok("Portal")
+        },
+    )
+    .unwrap();
+    assert_eq!(selected, "PipeWire");
+    assert_eq!(*calls.borrow(), ["pipewire"]);
+
+    calls.borrow_mut().clear();
+    let error = select_camera_backend::<()>(
+        CameraBackend::V4l2,
+        || {
+            calls.borrow_mut().push("v4l2");
+            Err("camera busy".into())
+        },
+        || {
+            calls.borrow_mut().push("pipewire");
+            Ok(())
+        },
+        || {
+            calls.borrow_mut().push("portal");
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error, "camera busy");
+    assert_eq!(*calls.borrow(), ["v4l2"]);
+}
+
+#[test]
+fn auto_camera_backend_uses_v4l2_then_pipewire_then_portal() {
+    use crate::devices::CameraBackend;
+    use std::cell::RefCell;
+    let calls = RefCell::new(Vec::new());
+
+    let selected = select_camera_backend(
+        CameraBackend::Auto,
+        || {
+            calls.borrow_mut().push("v4l2");
+            Err("V4L2 unavailable".into())
+        },
+        || {
+            calls.borrow_mut().push("pipewire");
+            Err("PipeWire unavailable".into())
+        },
+        || {
+            calls.borrow_mut().push("portal");
+            Ok("Portal")
+        },
+    )
+    .unwrap();
+    assert_eq!(selected, "Portal");
+    assert_eq!(*calls.borrow(), ["v4l2", "pipewire", "portal"]);
+}
+
+#[test]
+fn auto_camera_backend_stops_after_first_successful_backend() {
+    use crate::devices::CameraBackend;
+    use std::cell::RefCell;
+    let calls = RefCell::new(Vec::new());
+
+    let selected = select_camera_backend(
+        CameraBackend::Auto,
+        || {
+            calls.borrow_mut().push("v4l2");
+            Err("V4L2 unavailable".into())
+        },
+        || {
+            calls.borrow_mut().push("pipewire");
+            Ok("PipeWire")
+        },
+        || {
+            calls.borrow_mut().push("portal");
+            Ok("Portal")
+        },
+    )
+    .unwrap();
+    assert_eq!(selected, "PipeWire");
+    assert_eq!(*calls.borrow(), ["v4l2", "pipewire"]);
+}
+
+#[test]
+fn auto_camera_backend_reports_all_backend_failures() {
+    use crate::devices::CameraBackend;
+    let error = select_camera_backend::<()>(
+        CameraBackend::Auto,
+        || Err("V4L2 unavailable".into()),
+        || Err("PipeWire unavailable".into()),
+        || Err("portal denied".into()),
+    )
+    .unwrap_err();
+    assert!(error.contains("V4L2: V4L2 unavailable"));
+    assert!(error.contains("PipeWire: PipeWire unavailable"));
+    assert!(error.contains("portal: portal denied"));
+}

@@ -127,7 +127,11 @@ impl MicLeveler {
                 let speech_pct = 100 * self.speech_frames / LOG_EVERY;
                 crate::zcall_log!(
                     "[audio-io] mic level: noise {:.0} dBFS, speech {:.0} dBFS, gain +{:.1} dB, speech in {}% of frames (held {}% far end)",
-                    self.noise_db, median_speech, self.gain_db, speech_pct, held_pct
+                    self.noise_db,
+                    median_speech,
+                    self.gain_db,
+                    speech_pct,
+                    held_pct
                 );
             }
             self.speech_frames = 0;

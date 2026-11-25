@@ -21,7 +21,7 @@ aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 hex = "0.4"
 openh264 = "0.9.10"
-ashpd = { version = "0.14.1", default-features = false, features = ["tokio", "screencast"] }
+ashpd = { version = "0.14.1", default-features = false, features = ["tokio", "screencast", "camera"] }
 tokio = { version = "1", features = ["rt", "time"] }
 futures-util = { version = "0.3", features = ["io"] }
 pulseaudio = "0.3.2"

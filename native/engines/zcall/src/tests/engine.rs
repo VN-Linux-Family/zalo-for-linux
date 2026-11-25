@@ -190,6 +190,40 @@ fn sustained_early_audio_connects_a_ringing_caller_before_answer_signal() {
 }
 
 #[test]
+fn caller_accepts_init_answer_after_ring_notification() {
+    let mut engine = engine();
+    engine.on_zalo_frame(&json!({
+        "type":"update","command":"init","data":{"local":{"id":111}}
+    }));
+    engine.on_zalo_frame(&json!({
+        "type":"request","command":"makeCall",
+        "data":{"type":1,"partner":[{"id":"peer-123","name":"Peer"}]}
+    }));
+    let initial = engine.poll_outgoing_frames();
+    let call_id = command(&initial, "sendSignal", 401)["data"]["callId"]
+        .as_u64()
+        .unwrap();
+
+    // Ring notifications can precede the 401 relay/session response.
+    engine.on_zalo_frame(&json!({
+        "type":"control","data":{"act":"ring_ring","data":{"callId":call_id}}
+    }));
+    assert_eq!(engine.call.as_ref().unwrap().phase, CallPhase::Ringing);
+
+    engine.on_zalo_frame(&json!({
+        "type":"recvSignal","command":401,"data":{
+            "status":0,"sessId":"012345678901234567890123456789",
+            "fromId":111,"toId":222,
+            "servers":[{"rtpaddr":"127.0.0.1:9000","rtcpaddr":"127.0.0.1:9001"}]
+        }
+    }));
+    let negotiated = engine.poll_outgoing_frames();
+    assert!(negotiated
+        .iter()
+        .any(|frame| { frame["type"] == "sendSignal" && frame["command"] == 416 }));
+}
+
+#[test]
 fn outgoing_call_negotiates_relay_and_finishes_over_call_v2() {
     let mut engine = engine();
     engine.on_zalo_frame(&json!({
@@ -554,6 +588,20 @@ fn screen_share_keeps_peer_video_enabled_when_camera_was_off() {
         command(&reasserted, "sendSignal", 12006)["data"]["isOnCam"],
         1
     );
+}
+
+#[test]
+fn incoming_call_rejects_missing_negative_and_overflow_call_ids() {
+    for data in [
+        json!({"uidN":"peer","params":{}}),
+        json!({"callId":-1,"uidN":"peer","params":{}}),
+        json!({"callId":4_294_967_296_u64,"uidN":"peer","params":{}}),
+    ] {
+        let mut engine = engine();
+        engine.on_zalo_frame(&json!({"type":"control","data":{"act":"request","data":data}}));
+        assert!(engine.call.is_none());
+        assert_eq!(engine.phase, CallPhase::Idle);
+    }
 }
 
 #[test]
@@ -1619,4 +1667,24 @@ fn incoming_group_call_can_be_accepted_or_rejected_through_ui_actions() {
     let declined = rejected.poll_outgoing_frames();
     assert_eq!(command(&declined, "sendSignal", 12436)["data"]["status"], 3);
     assert!(rejected.group.is_none());
+}
+
+#[test]
+fn incoming_group_call_rejects_missing_negative_and_overflow_ids() {
+    for id in [None, Some(-1_i64), Some(4_294_967_296_i64)] {
+        let mut engine = group_engine();
+        let mut data = json!({
+            "type":"control",
+            "data":{"act":"group_request","data":{
+                "hostCall":222,"receiverId":111,"groupId":987,
+                "callSetting":{"session":"session","servers":[],"zrtcConfig":{}}
+            }}
+        });
+        if let Some(id) = id {
+            data["data"]["data"]["id"] = json!(id);
+        }
+        engine.on_zalo_frame(&data);
+        assert!(engine.group.is_none());
+        assert_eq!(engine.poll_outgoing_frames(), Vec::<Value>::new());
+    }
 }

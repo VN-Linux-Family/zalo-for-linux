@@ -20,8 +20,21 @@ use pipewire_native_spa::{
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoFormat {
+    Yuy2 = 4,
+    Uyvy = 5,
     Bgrx = 8,
     Bgra = 12,
+}
+
+impl VideoFormat {
+    /// Bytes in one packed pixel pair row unit for the supported SPA formats.
+    #[must_use]
+    pub const fn bytes_per_pixel(self) -> u32 {
+        match self {
+            Self::Yuy2 | Self::Uyvy => 2,
+            Self::Bgrx | Self::Bgra => 4,
+        }
+    }
 }
 
 impl From<VideoFormat> for u32 {
@@ -35,6 +48,8 @@ impl TryFrom<u32> for VideoFormat {
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
+            4 => Ok(Self::Yuy2),
+            5 => Ok(Self::Uyvy),
             8 => Ok(Self::Bgrx),
             12 => Ok(Self::Bgra),
             other => Err(other),
@@ -246,11 +261,11 @@ fn decode_rectangle(pod: &RawPod<'_>) -> Result<Rectangle, pipewire_native_spa::
     }
 }
 
-/// Encode SPA `ParamBuffers` for an interleaved 32-bit raw video plane.
+/// Encode SPA `ParamBuffers` for one supported packed raw-video plane.
 pub fn encode_video_buffers_param(format: NegotiatedVideoFormat) -> io::Result<Vec<u8>> {
     let stride = format
         .width
-        .checked_mul(4)
+        .checked_mul(format.pixel_format.bytes_per_pixel())
         .ok_or_else(|| invalid_input("Video stride overflow"))?;
     let size = stride
         .checked_mul(format.height)
@@ -277,7 +292,7 @@ pub fn encode_video_buffers_param(format: NegotiatedVideoFormat) -> io::Result<V
                     PropertyFlags::empty(),
                     Choice::Range {
                         default: size,
-                        min: size,
+                        min: 1_i32,
                         max: size,
                     },
                 )
@@ -303,8 +318,8 @@ pub fn encode_video_buffers_param(format: NegotiatedVideoFormat) -> io::Result<V
                     BuffersParam::MetaType,
                     PropertyFlags::empty(),
                     Choice::Flags {
-                        default: 128_i32,
-                        flags: 128_i32,
+                        default: 0_i32,
+                        flags: 0_i32,
                     },
                 )
         })

@@ -1,4 +1,5 @@
 use super::*;
+use crate::audio::pipewire::PipeWireRecorder;
 
 #[test]
 #[ignore = "requires a running PulseAudio/PipeWire session"]
@@ -15,6 +16,56 @@ fn live_pulseaudio_rs_streams_capture_and_playback() {
         .expect("queue one silent 20 ms frame");
     std::thread::sleep(Duration::from_millis(100));
     assert!(player.latency_ms().is_some(), "query playback timing");
+}
+
+#[test]
+#[ignore = "requires a running PipeWire session and sink monitor; run explicitly with --ignored"]
+fn live_pipewire_playback_is_audible_on_sink_monitor() {
+    let monitor = std::env::var("ZCALL_TEST_PLAYBACK_MONITOR")
+        .expect("set ZCALL_TEST_PLAYBACK_MONITOR to the target sink's .monitor source");
+    let mut recorder = PulseRecorder::new(Some(&monitor)).expect("open sink monitor capture");
+    let mut player = super::super::pipewire::PipeWirePlayer::new(None)
+        .expect("open native PipeWire playback stream");
+    let tone_samples: [i16; 16] = [
+        0, 2296, 4243, 5543, 6000, 5543, 4243, 2296, 0, -2296, -4243, -5543, -6000, -5543, -4243,
+        -2296,
+    ];
+    let tone = tone_samples
+        .iter()
+        .cycle()
+        .take(320)
+        .flat_map(|sample| sample.to_le_bytes())
+        .collect::<Vec<_>>();
+    for _ in 0..50 {
+        player
+            .write(&tone)
+            .expect("queue consecutive PipeWire PCM frames");
+    }
+    let mut active_frames = 0;
+    let mut peak = 0_u16;
+    let mut captured = [0_u8; 640];
+    for _ in 0..50 {
+        recorder
+            .read(&mut captured)
+            .expect("capture PipeWire sink monitor");
+        let frame_peak = captured
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|sample| i16::from_le_bytes(*sample).unsigned_abs())
+            .max()
+            .unwrap_or_default();
+        peak = peak.max(frame_peak);
+        active_frames += usize::from(frame_peak > 500);
+    }
+    assert!(
+        peak > 500,
+        "sink monitor captured no meaningful PipeWire playback (peak={peak})"
+    );
+    assert!(
+        active_frames >= 40,
+        "PipeWire output underrun: only {active_frames}/50 monitor frames contained audio"
+    );
 }
 
 #[test]
@@ -163,4 +214,68 @@ fn source_name_uses_default(source: Option<&str>) -> bool {
     source.is_none_or(|name| {
         name.is_empty() || name.as_bytes().contains(&0) || name == "@DEFAULT_SOURCE@"
     })
+}
+
+#[test]
+#[ignore = "requires a live PipeWire session; run explicitly with --ignored"]
+fn live_pipewire_native_stream_captures_one_pcm_frame() {
+    let mut recorder = PipeWireRecorder::new(None).expect("open native PipeWire capture stream");
+    let mut captured = [0_u8; 640];
+    recorder.read(&mut captured).unwrap_or_else(|error| {
+        panic!(
+            "{error}; streaming={}, format={:?}",
+            recorder.stream.is_streaming(),
+            recorder.stream.audio_format()
+        )
+    });
+    assert_eq!(captured.len(), 640);
+}
+
+/// Hardware acceptance test: emit a short audible tone and verify it returns
+/// through the selected sink's monitor source.
+#[test]
+#[ignore = "requires a live audio session and sink monitor; run explicitly with --ignored"]
+fn live_pulse_playback_is_audible_on_sink_monitor() {
+    let monitor = std::env::var("ZCALL_TEST_PLAYBACK_MONITOR")
+        .expect("set ZCALL_TEST_PLAYBACK_MONITOR to the target sink's .monitor source");
+    let mut recorder = PulseRecorder::new(Some(&monitor)).expect("open sink monitor capture");
+    let mut player = PulsePlayer::new(None).expect("open default speaker playback");
+
+    let tone_samples: [i16; 16] = [
+        0, 2296, 4243, 5543, 6000, 5543, 4243, 2296, 0, -2296, -4243, -5543, -6000, -5543, -4243,
+        -2296,
+    ];
+    let tone = tone_samples
+        .iter()
+        .cycle()
+        .take(320)
+        .flat_map(|sample| sample.to_le_bytes())
+        .collect::<Vec<_>>();
+    player.write(&tone).expect("play 20 ms audible test tone");
+
+    let mut peak = 0_u16;
+    let mut captured = [0_u8; 640];
+    // The first monitor fragment may predate the playback request. Keep
+    // draining 20 ms fragments until the queued tone reaches the sink.
+    for _ in 0..50 {
+        recorder
+            .read(&mut captured)
+            .expect("capture playback from the sink monitor");
+        peak = peak.max(
+            captured
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|sample| i16::from_le_bytes(*sample).unsigned_abs())
+                .max()
+                .unwrap_or_default(),
+        );
+        if peak > 500 {
+            break;
+        }
+    }
+    assert!(
+        peak > 500,
+        "sink monitor captured no meaningful playback (peak={peak})"
+    );
 }

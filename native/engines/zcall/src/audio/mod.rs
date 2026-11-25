@@ -8,9 +8,13 @@ pub mod group;
 pub mod jitter;
 pub mod level;
 pub mod leveler;
+pub mod meter;
+mod pipewire;
+mod pulse;
 
 pub use apm::Apm;
-pub use backend::{PulsePlayer, PulseRecorder};
+pub use backend::{AudioPlayer, PipeWireRecorder};
+pub use backend::{AudioRecorder, PulsePlayer, PulseRecorder};
 pub use codec::{OpusDecoder, OpusEncoder};
 pub use jitter::JitterBuffer;
 pub use level::compute_rfc6464_level;

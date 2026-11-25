@@ -58,6 +58,35 @@ function register({ app, ipcMain, BrowserWindow, dialog, devMode }) {
     assertSender(event);
     return { ...store.read(), ...devMode.getStatus(), locale: currentLocale };
   });
+  const devicePrefsPath = path.join(app.getPath('userData'), 'zcall-devices.json');
+  function readDeviceBackends() {
+    try {
+      const saved = JSON.parse(fs.readFileSync(devicePrefsPath, 'utf8'));
+      return {
+        cameraBackend: ['auto', 'v4l2', 'pipewire', 'portal'].includes(saved.cameraBackend) ? saved.cameraBackend : 'auto',
+        audioBackend: ['auto', 'pulse', 'pipewire'].includes(saved.audioBackend) ? saved.audioBackend : 'auto'
+      };
+    } catch (_) { return { cameraBackend: 'auto', audioBackend: 'auto' }; }
+  }
+  ipcMain.handle('linux-settings:get-device-backends', (event) => {
+    assertSender(event);
+    return readDeviceBackends();
+  });
+  ipcMain.handle('linux-settings:save-device-backends', (event, cameraBackend, audioBackend) => {
+    assertSender(event);
+    if (!['auto', 'v4l2', 'pipewire', 'portal'].includes(cameraBackend) ||
+        !['auto', 'pulse', 'pipewire'].includes(audioBackend)) {
+      throw createError(ERROR_CODES.INVALID_VALUE);
+    }
+    fs.mkdirSync(path.dirname(devicePrefsPath), { recursive: true });
+    let current = {};
+    try { current = JSON.parse(fs.readFileSync(devicePrefsPath, 'utf8')); } catch (_) {}
+    const next = { ...current, cameraBackend, audioBackend };
+    const temporary = devicePrefsPath + '.tmp';
+    fs.writeFileSync(temporary, JSON.stringify(next, null, 2), { mode: 0o600 });
+    fs.renameSync(temporary, devicePrefsPath);
+    return { cameraBackend, audioBackend };
+  });
   ipcMain.handle('linux-settings:save-sound', (event, kind, value) => {
     assertSender(event);
     return store.save(kind, value);

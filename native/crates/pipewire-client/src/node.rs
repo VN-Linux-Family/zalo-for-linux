@@ -275,6 +275,40 @@ impl PipeWireBuffer {
         })
     }
 
+    /// Write one SPA data plane and publish its chunk metadata for an output port.
+    pub fn write_plane(
+        &self,
+        client: &PipeWireClient,
+        plane_index: usize,
+        bytes: &[u8],
+        stride: i32,
+    ) -> io::Result<()> {
+        let resolved = self.resolve_plane(client, plane_index)?;
+        let length = u32::try_from(bytes.len())
+            .map_err(|_| invalid_data("PipeWire output plane length overflow"))?;
+        if length > resolved.max_size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "PCM frame exceeds PipeWire output buffer capacity",
+            ));
+        }
+        let memory = client
+            .memory(resolved.memory_id)
+            .ok_or_else(|| invalid_data("Output plane references unknown memory"))?;
+        memory.write_at(resolved.base_offset, bytes)?;
+
+        let metadata = client
+            .memory(self.memory_id)
+            .ok_or_else(|| invalid_data("Output buffer references unknown metadata memory"))?;
+        let chunk_offset = self.chunk_table_offset()?;
+        let mut chunk = [0_u8; 16];
+        chunk[0..4].copy_from_slice(&0_u32.to_ne_bytes());
+        chunk[4..8].copy_from_slice(&length.to_ne_bytes());
+        chunk[8..12].copy_from_slice(&stride.to_ne_bytes());
+        chunk[12..16].copy_from_slice(&0_u32.to_ne_bytes());
+        metadata.write_at(chunk_offset, &chunk)
+    }
+
     /// Borrow one SPA data plane directly from its shared-memory mapping.
     ///
     /// The returned view keeps the mapping read-locked for its lifetime and

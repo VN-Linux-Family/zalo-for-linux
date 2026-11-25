@@ -20,7 +20,7 @@ use crate::audio::{
     compute_rfc6464_level,
     group::GroupAudioMixer,
     leveler::MicLeveler,
-    Apm, JitterBuffer, OpusEncoder, PulsePlayer, PulseRecorder, FRAME_BYTES, FRAME_SAMPLES,
+    Apm, AudioPlayer, AudioRecorder, JitterBuffer, OpusEncoder, FRAME_BYTES, FRAME_SAMPLES,
     SAMPLE_RATE,
 };
 use crate::crypto::srtp::{
@@ -51,7 +51,7 @@ use crate::video::{packetize_frame, VideoAssembler, VideoFrame, VIDEO_PT_INTER, 
 const GROUP_SRTP_PROFILE_DISCOVERY_LIMIT: u8 = 4;
 
 struct PlayoutWriteContext<'a> {
-    player: &'a mut Option<PulsePlayer>,
+    player: &'a mut Option<AudioPlayer>,
     apm: Option<&'a Apm>,
     far_active: &'a AtomicBool,
     last_far_speech: &'a mut Instant,
@@ -110,7 +110,7 @@ impl PlayoutWriteContext<'_> {
                 true
             }
             Err(error) => {
-                crate::zcall_log!("[zcall-rust] Pulse playback write failed; reopening: {error}");
+                crate::zcall_log!("[zcall-rust] audio playback write failed; reopening: {error}");
                 if !*self.speaker_fault_reported {
                     if let Ok(mut events) = self.media_events.lock() {
                         events.push_back(GroupMediaEvent::AudioFault("speaker".into()));
@@ -128,7 +128,7 @@ impl PlayoutWriteContext<'_> {
 fn log_playout_diagnostics(
     last_diag: &mut Instant,
     jitter_buffer: Option<&Arc<Mutex<JitterBuffer>>>,
-    player: Option<&PulsePlayer>,
+    player: Option<&AudioPlayer>,
     mic_volume: u8,
     write_block_ms: &mut u64,
     write_count: &mut u32,
@@ -159,7 +159,7 @@ fn log_playout_diagnostics(
     } else {
         0
     };
-    let latency = player.and_then(PulsePlayer::latency_ms).unwrap_or_default();
+    let latency = player.and_then(AudioPlayer::latency_ms).unwrap_or_default();
     crate::zcall_log!(
         "[zcall-rust] playout: [{jitter_diag} write={}ms max={}ms pa_lat={}ms] mic={}% ",
         average_write,
@@ -177,11 +177,11 @@ fn open_playback_device(
     speaker_device: Option<&str>,
     media_events: &Mutex<VecDeque<GroupMediaEvent>>,
     speaker_fault_reported: &mut bool,
-) -> Option<PulsePlayer> {
-    match PulsePlayer::new(speaker_device) {
+) -> Option<AudioPlayer> {
+    match AudioPlayer::new(speaker_device) {
         Ok(player) => Some(player),
         Err(error) => {
-            crate::zcall_log!("[zcall-rust] Pulse playback open failed: {error}");
+            crate::zcall_log!("[zcall-rust] audio playback open failed: {error}");
             if !*speaker_fault_reported {
                 if let Ok(mut events) = media_events.lock() {
                     events.push_back(GroupMediaEvent::AudioFault("speaker".into()));
@@ -194,15 +194,15 @@ fn open_playback_device(
 }
 
 fn reopen_playback_if_needed(
-    player: &mut Option<PulsePlayer>,
+    player: &mut Option<AudioPlayer>,
     speaker_device: Option<&str>,
     last_reopen: &mut Instant,
     non_blocking_streak: &mut u32,
 ) {
     if player.is_none() && last_reopen.elapsed() >= Duration::from_millis(500) {
         *last_reopen = Instant::now();
-        if let Ok(reopened) = PulsePlayer::new(speaker_device) {
-            crate::zcall_log!("[zcall-rust] Pulse playback stream recovered");
+        if let Ok(reopened) = AudioPlayer::new(speaker_device) {
+            crate::zcall_log!("[zcall-rust] audio playback stream recovered");
             *player = Some(reopened);
             *non_blocking_streak = 0;
         }
@@ -240,7 +240,10 @@ fn playout_has_frame(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The playout worker receives its independent shared state explicitly at thread creation."
+)]
 fn spawn_playout_worker(
     running: Arc<AtomicBool>,
     audio_enabled: Arc<AtomicBool>,
@@ -259,7 +262,7 @@ fn spawn_playout_worker(
         .name("zcall-playout".into())
         .spawn(move || {
             let mut speaker_device: Option<String> = None;
-            let mut player: Option<PulsePlayer> = None;
+            let mut player: Option<AudioPlayer> = None;
             let mut speaker_fault_reported = false;
             let mut active_generation = u64::MAX;
             let mut last_reopen = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
@@ -1244,7 +1247,7 @@ struct AudioTransmitResources {
 
 struct AudioTransmitWorker {
     resources: AudioTransmitResources,
-    recorder: Option<PulseRecorder>,
+    recorder: Option<AudioRecorder>,
     mic_fault_reported: bool,
     clip_guard: ClipGuard,
     guard_device: Option<String>,
@@ -1378,7 +1381,7 @@ impl AudioTransmitWorker {
                 .map_or(None, |devices| devices.0.clone());
             let audio_enabled = self.resources.tx_audio_enabled.load(Ordering::Acquire);
             let switch_result = if audio_enabled {
-                PulseRecorder::new(microphone.as_deref()).map(Some)
+                AudioRecorder::new(microphone.as_deref()).map(Some)
             } else if pulse_get_source_info(microphone.as_deref()).is_some() {
                 Ok(None)
             } else {
@@ -1437,7 +1440,7 @@ impl AudioTransmitWorker {
                 .tx_devices
                 .lock()
                 .map_or(None, |devices| devices.0.clone());
-            match PulseRecorder::new(microphone.as_deref()) {
+            match AudioRecorder::new(microphone.as_deref()) {
                 Ok(reopened) => {
                     crate::zcall_log!("[zcall-rust] Pulse microphone stream recovered");
                     self.recorder = Some(reopened);
@@ -1455,7 +1458,7 @@ impl AudioTransmitWorker {
             }
         }
         if self.clip_guard.sync_os_volume() {
-            if let Ok(reopened) = PulseRecorder::new(None) {
+            if let Ok(reopened) = AudioRecorder::new(None) {
                 self.recorder = Some(reopened);
                 pulse_normalize_own_stream();
                 self.clip_guard.initialize_device();
@@ -2063,9 +2066,9 @@ impl ReceiveWorker {
             if network_changed {
                 if let Some(params) = params_now.as_ref() {
                     crate::zcall_log!(
-                                "[zcall-rust] local IPv4 changed ({}); stopping P2P and sending ChangeAddress",
-                                self.local_ip_sig
-                            );
+                        "[zcall-rust] local IPv4 changed ({}); stopping P2P and sending ChangeAddress",
+                        self.local_ip_sig
+                    );
                     stop_p2p_path(
                         &self.rx_socket,
                         selected_now,
@@ -2127,8 +2130,8 @@ impl ReceiveWorker {
             {
                 if let Some(params) = params_now.as_ref() {
                     crate::zcall_log!(
-                                "[zcall-rust] audio receive stalled; requesting relay fallback and ChangeAddress"
-                            );
+                        "[zcall-rust] audio receive stalled; requesting relay fallback and ChangeAddress"
+                    );
                     stop_p2p_path(
                         &self.rx_socket,
                         selected_now,
@@ -2189,23 +2192,23 @@ impl ReceiveWorker {
         if let Some(mode) = summary_mode {
             if self.group_rx_last_summary.elapsed() >= Duration::from_secs(5) {
                 media_debug(&format!(
-                            "summary mode={mode} rx_video={} decoded_video={} bad_video={} tx_video={} tx_audio={} rx_audio_delivered={} group_rx_audio={} group_decoded_audio={} group_bad_audio={} group_rx_video={} group_decoded_video={} group_bad_video={} other_host={} same_host_alt_port={} last_video_tx_ms={}",
-                            self.rx_video_packets,
-                            self.rx_video_decoded,
-                            self.rx_video_bad,
-                            self.rx_tx_video_packets.load(Ordering::Relaxed),
-                            self.rx_tx_audio_packets.load(Ordering::Relaxed),
-                            self.rx_audio_packets.load(Ordering::Relaxed),
-                            self.group_rx_audio_packets,
-                            self.group_rx_audio_decoded,
-                            self.group_rx_audio_bad,
-                            self.group_rx_video_packets,
-                            self.group_rx_video_decoded,
-                            self.group_rx_video_bad,
-                            self.group_rx_other_host,
-                            self.group_rx_alt_port,
-                            self.rx_last_video_sent_ms.load(Ordering::Relaxed)
-                        ));
+                    "summary mode={mode} rx_video={} decoded_video={} bad_video={} tx_video={} tx_audio={} rx_audio_delivered={} group_rx_audio={} group_decoded_audio={} group_bad_audio={} group_rx_video={} group_decoded_video={} group_bad_video={} other_host={} same_host_alt_port={} last_video_tx_ms={}",
+                    self.rx_video_packets,
+                    self.rx_video_decoded,
+                    self.rx_video_bad,
+                    self.rx_tx_video_packets.load(Ordering::Relaxed),
+                    self.rx_tx_audio_packets.load(Ordering::Relaxed),
+                    self.rx_audio_packets.load(Ordering::Relaxed),
+                    self.group_rx_audio_packets,
+                    self.group_rx_audio_decoded,
+                    self.group_rx_audio_bad,
+                    self.group_rx_video_packets,
+                    self.group_rx_video_decoded,
+                    self.group_rx_video_bad,
+                    self.group_rx_other_host,
+                    self.group_rx_alt_port,
+                    self.rx_last_video_sent_ms.load(Ordering::Relaxed)
+                ));
                 self.group_rx_last_summary = Instant::now();
             }
         }
@@ -2674,12 +2677,16 @@ impl ReceiveWorker {
             self.group_rx_audio_decoded = self.group_rx_audio_decoded.saturating_add(1);
             if !self.audio_auth.reported {
                 media_debug(&format!(
-                                                    "group-audio-auth=ok ssrc={clear_ssrc} seq={clear_seq} key_source={} mki_bytes={} tag_bytes={} opus_bytes={}",
-                                                    if fallback_key_used { "session" } else { "group" },
-                                                    auth_profile.0,
-                                                    auth_profile.1,
-                                                    opus.len()
-                                                ));
+                    "group-audio-auth=ok ssrc={clear_ssrc} seq={clear_seq} key_source={} mki_bytes={} tag_bytes={} opus_bytes={}",
+                    if fallback_key_used {
+                        "session"
+                    } else {
+                        "group"
+                    },
+                    auth_profile.0,
+                    auth_profile.1,
+                    opus.len()
+                ));
                 self.audio_auth.reported = true;
             }
         } else {
@@ -2699,11 +2706,11 @@ impl ReceiveWorker {
                     })
                     .unwrap_or_else(|| "no-keys".into());
                 media_debug(&format!(
-                                                    "group-audio-auth=failed ssrc={ssrc} seq={seq} srtp_keys={} fallback_probe={} rtp_bytes={}",
-                                                    self.rx_keys.lock().is_ok_and(|keys| keys.is_some()),
-                                                    fallback_probe,
-                                                    rtp_body.len()
-                                                ));
+                    "group-audio-auth=failed ssrc={ssrc} seq={seq} srtp_keys={} fallback_probe={} rtp_bytes={}",
+                    self.rx_keys.lock().is_ok_and(|keys| keys.is_some()),
+                    fallback_probe,
+                    rtp_body.len()
+                ));
                 self.audio_auth.failed_reported = true;
             }
         }
@@ -2985,7 +2992,11 @@ impl ReceiveWorker {
                         "group-video-auth=ok ssrc={} seq={} pt={pt} marker={marker} key_source={} mki_bytes={} tag_bytes={} payload_bytes={}",
                         packet.ssrc,
                         packet.sequence,
-                        if decode.fallback_key_used { "session" } else { "group" },
+                        if decode.fallback_key_used {
+                            "session"
+                        } else {
+                            "group"
+                        },
                         decode.auth_profile.0,
                         decode.auth_profile.1,
                         packet.payload.len()
@@ -3039,7 +3050,10 @@ impl ReceiveWorker {
             "group-video-auth=failed ssrc={ssrc} seq={} pt={pt} marker={marker} plain_h264_candidate={plain_h264_candidate} srtp_keys={} auth_fp={} auth_probe={} fallback_probe={} rtp_bytes={} rtp_header_bytes={header_len} rtp_header={header_hex}",
             u16::from_be_bytes([rtp_body[2], rtp_body[3]]),
             self.rx_keys.lock().is_ok_and(|keys| keys.is_some()),
-            auth_fp, auth_probe, fallback_probe, rtp_body.len()
+            auth_fp,
+            auth_probe,
+            fallback_probe,
+            rtp_body.len()
         ));
         self.video_auth.failed_reported = true;
     }

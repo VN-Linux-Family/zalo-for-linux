@@ -74,7 +74,10 @@ pub fn build_audio_rtp_header(
     h
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The RTP wire-header fields are intentionally passed explicitly to match the protocol layout."
+)]
 #[must_use]
 pub fn build_group_audio_rtp_header(
     seq: u16,
@@ -103,7 +106,10 @@ pub fn build_group_audio_rtp_header(
     h
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The RTP wire-header fields are intentionally passed explicitly to match the protocol layout."
+)]
 #[must_use]
 pub fn build_group_video_rtp_header(
     seq: u16,

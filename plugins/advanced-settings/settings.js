@@ -80,6 +80,30 @@
     window.linuxSettings.onLanguageUpdate(applyLocale);
   }
   applyLocale('vi');
+  const backendForm = document.getElementById('media-backends-form');
+  if (backendForm) {
+    const camera = backendForm.elements.cameraBackend;
+    const audio = backendForm.elements.audioBackend;
+    const status = document.getElementById('media-backends-status');
+    window.linuxSettings.getDeviceBackends().then((saved) => {
+      camera.value = saved.cameraBackend;
+      audio.value = saved.audioBackend;
+    }).catch((error) => { status.textContent = errorMessage(error); status.classList.add('error'); });
+    backendForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        const saved = await window.linuxSettings.saveDeviceBackends(camera.value, audio.value);
+        camera.value = saved.cameraBackend;
+        audio.value = saved.audioBackend;
+        status.textContent = tr('saved');
+        status.classList.remove('error');
+      } catch (error) {
+        status.textContent = errorMessage(error);
+        status.classList.add('error');
+      }
+    });
+  }
+
   const manager = document.getElementById('userscripts-view');
   const openButton = document.getElementById('open-userscripts');
   const backButton = document.getElementById('back-to-advanced');

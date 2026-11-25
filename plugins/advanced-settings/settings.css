@@ -10,6 +10,13 @@ body { display: block; }
 .settings-card h2 { margin: 0; font-size: 17px; }
 .section-description { margin: 8px 0 20px; font-size: 13px; }
 .sound-setting + .sound-setting { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.backend-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.backend-field { display: flex; min-width: 0; flex-direction: column; gap: 7px; }
+.backend-field label { color: var(--text); font-size: 13px; font-weight: 650; }
+.backend-field select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 9px 34px 9px 11px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.backend-field select:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.backend-setting .sound-actions { justify-content: flex-end; }
+.backend-setting .sound-actions button:last-child { margin-left: 0; }
 .sound-setting > label { font-weight: 650; }
 .sound-setting > label span { color: var(--muted); font-size: 12px; font-weight: 400; }
 .sound-setting > p { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
@@ -52,6 +59,9 @@ body.show-userscripts #userscripts-view { transform: translateX(0); opacity: 1; 
 @media (max-width: 800px) {
   .settings-content { padding: 24px; }
   .userscripts-card { flex-wrap: wrap; }
+}
+@media (max-width: 520px) {
+  .backend-controls { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 }
 .toggle-row { display: flex; align-items: flex-start; gap: 16px; }
 .toggle-row > div { flex: 1; }

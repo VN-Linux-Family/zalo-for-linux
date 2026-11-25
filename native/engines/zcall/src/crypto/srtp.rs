@@ -227,7 +227,6 @@ pub fn hmac_sha1(key: &[u8], chunks: &[&[u8]]) -> [u8; 20] {
 }
 
 #[must_use]
-#[allow(clippy::many_single_char_names)]
 pub fn sha1(chunks: &[&[u8]]) -> [u8; 20] {
     let mut h0: u32 = 0x6745_2301;
     let mut h1: u32 = 0xEFCD_AB89;
@@ -283,7 +282,10 @@ pub fn sha1(chunks: &[&[u8]]) -> [u8; 20] {
     out
 }
 
-#[allow(clippy::many_single_char_names)]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "SHA-1 state variables use the conventional names from the algorithm specification."
+)]
 fn process_sha1_block(
     block: &[u8; 64],
     h0: &mut u32,

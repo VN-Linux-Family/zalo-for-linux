@@ -811,7 +811,11 @@ fn capture_window_with_shm<'a>(
 
 // These owned values are intentionally moved into the worker's encoder thread.
 // Floating-point conversion is acceptable for approximate diagnostic FPS/timing only.
-#[allow(clippy::needless_pass_by_value, clippy::cast_precision_loss)]
+#[expect(
+    clippy::needless_pass_by_value,
+    clippy::cast_precision_loss,
+    reason = "Worker-owned values move into the encoder thread; float conversion is only approximate diagnostic timing."
+)]
 pub(super) fn capture_worker(
     stop: Arc<AtomicBool>,
     tx: SyncSender<super::EncodedScreenFrame>,

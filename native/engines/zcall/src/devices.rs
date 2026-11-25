@@ -7,8 +7,27 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "linux")]
-use v4l::{format::FourCC, video::Capture};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CameraBackend {
+    #[default]
+    Auto,
+    V4l2,
+    #[serde(rename = "pipewire")]
+    PipeWire,
+    Portal,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AudioBackend {
+    #[default]
+    Auto,
+    Pulse,
+    #[serde(rename = "pipewire")]
+    PipeWire,
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -16,6 +35,10 @@ pub struct DevicePrefs {
     pub mic: String,
     pub speaker: String,
     pub camera: Option<CameraPref>,
+    #[serde(rename = "cameraBackend")]
+    pub camera_backend: CameraBackend,
+    #[serde(rename = "audioBackend")]
+    pub audio_backend: AudioBackend,
     #[serde(rename = "noMicBlock")]
     pub no_mic_block: bool,
     #[serde(rename = "noSpeakerBlock")]
@@ -37,8 +60,12 @@ fn prefs_path() -> Option<PathBuf> {
 
 #[must_use]
 pub fn load_prefs() -> DevicePrefs {
-    prefs_path()
-        .and_then(|path| fs::read(path).ok())
+    prefs_path().map_or_else(DevicePrefs::default, |path| load_prefs_from(&path))
+}
+
+fn load_prefs_from(path: &Path) -> DevicePrefs {
+    fs::read(path)
+        .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
@@ -47,6 +74,10 @@ pub fn save_prefs(prefs: &DevicePrefs) -> Result<(), String> {
     let Some(path) = prefs_path() else {
         return Err("ZALO_USER_DATA_DIR is not configured".into());
     };
+    save_prefs_to(&path, prefs)
+}
+
+fn save_prefs_to(path: &Path, prefs: &DevicePrefs) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "device preference path has no parent".to_string())?;
@@ -54,7 +85,7 @@ pub fn save_prefs(prefs: &DevicePrefs) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(prefs).map_err(|error| error.to_string())?;
     let temp = path.with_extension("json.tmp");
     fs::write(&temp, bytes).map_err(|error| error.to_string())?;
-    fs::rename(&temp, &path).map_err(|error| error.to_string())
+    fs::rename(&temp, path).map_err(|error| error.to_string())
 }
 
 fn audio_devices(devices: &[PulseAudioDevice]) -> Vec<Value> {
@@ -70,60 +101,8 @@ fn audio_devices(devices: &[PulseAudioDevice]) -> Vec<Value> {
         .collect()
 }
 
-#[cfg(target_os = "linux")]
-fn is_capture_node(flags: v4l::capability::Flags) -> bool {
-    use v4l::capability::Flags;
-    flags.intersects(Flags::VIDEO_CAPTURE | Flags::VIDEO_CAPTURE_MPLANE)
-}
-
 pub(crate) fn camera_device_paths() -> Vec<(String, String)> {
-    let mut devices = Vec::new();
-    let directory = Path::new("/sys/class/video4linux");
-    let Ok(entries) = fs::read_dir(directory) else {
-        return devices;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.starts_with("video") {
-            continue;
-        }
-        let id = format!("/dev/{name}");
-        if !Path::new(&id).exists() {
-            continue;
-        }
-        // UVC devices often expose a second metadata-only node with the same
-        // product name. Only advertise nodes that can actually capture frames.
-        let Ok(device) = v4l::Device::with_path(&id) else {
-            continue;
-        };
-        let Ok(capabilities) = device.query_caps() else {
-            continue;
-        };
-        if !is_capture_node(capabilities.capabilities)
-            || !capabilities
-                .capabilities
-                .contains(v4l::capability::Flags::STREAMING)
-        {
-            continue;
-        }
-        let Ok(formats) = device.enum_formats() else {
-            continue;
-        };
-        if !formats
-            .iter()
-            .any(|format| format.fourcc == FourCC::new(b"YUYV"))
-        {
-            continue;
-        }
-        let label = fs::read_to_string(entry.path().join("name"))
-            .map(|value| value.trim().to_string())
-            .ok()
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| name.clone());
-        devices.push((id, label));
-    }
-    devices.sort_by(|a, b| a.0.cmp(&b.0));
-    devices
+    crate::camera::v4l2::camera_device_paths()
 }
 
 fn camera_devices() -> Vec<Value> {
@@ -222,7 +201,19 @@ pub fn zalo_device_list() -> Value {
 }
 
 pub fn update_from_zalo(data: &Value) -> Result<(), String> {
-    let mut prefs = load_prefs();
+    let Some(path) = prefs_path() else {
+        return Err("ZALO_USER_DATA_DIR is not configured".into());
+    };
+    update_from_zalo_at(&path, data)
+}
+
+fn update_from_zalo_at(path: &Path, data: &Value) -> Result<(), String> {
+    let mut prefs = load_prefs_from(path);
+    apply_zalo_device_config(&mut prefs, data);
+    save_prefs_to(path, &prefs)
+}
+
+fn apply_zalo_device_config(prefs: &mut DevicePrefs, data: &Value) {
     if let Some(auto) = data.get("autoAudioInput").and_then(Value::as_bool) {
         prefs.mic = if auto {
             String::new()
@@ -262,24 +253,54 @@ pub fn update_from_zalo(data: &Value) -> Result<(), String> {
             });
         }
     }
-    save_prefs(&prefs)
 }
 
 pub fn update_advanced_options(data: &Value) -> Result<(), String> {
-    let mut prefs = load_prefs();
+    let Some(path) = prefs_path() else {
+        return Err("ZALO_USER_DATA_DIR is not configured".into());
+    };
+    update_advanced_options_at(&path, data)
+}
+
+fn update_advanced_options_at(path: &Path, data: &Value) -> Result<(), String> {
+    let mut prefs = load_prefs_from(path);
+    apply_advanced_options(&mut prefs, data)?;
+    save_prefs_to(path, &prefs)
+}
+
+fn apply_advanced_options(prefs: &mut DevicePrefs, data: &Value) -> Result<(), String> {
+    let mut updated = prefs.clone();
+    if let Some(value) = data.get("cameraBackend").and_then(Value::as_str) {
+        updated.camera_backend = match value {
+            "auto" => CameraBackend::Auto,
+            "v4l2" => CameraBackend::V4l2,
+            "pipewire" => CameraBackend::PipeWire,
+            "portal" => CameraBackend::Portal,
+            _ => return Err(format!("unknown camera backend: {value}")),
+        };
+    }
+    if let Some(value) = data.get("audioBackend").and_then(Value::as_str) {
+        updated.audio_backend = match value {
+            "auto" => AudioBackend::Auto,
+            "pulse" => AudioBackend::Pulse,
+            "pipewire" => AudioBackend::PipeWire,
+            _ => return Err(format!("unknown audio backend: {value}")),
+        };
+    }
     if let Some(value) = data
         .get("receiveCallWhileNoMicrophoneDetected")
         .and_then(Value::as_bool)
     {
-        prefs.no_mic_block = !value;
+        updated.no_mic_block = !value;
     }
     if let Some(value) = data
         .get("receiveCallWhileNoSpeakerDetected")
         .and_then(Value::as_bool)
     {
-        prefs.no_speaker_block = !value;
+        updated.no_speaker_block = !value;
     }
-    save_prefs(&prefs)
+    *prefs = updated;
+    Ok(())
 }
 
 pub fn set_device(kind: &str, id: &str) -> Result<(), String> {

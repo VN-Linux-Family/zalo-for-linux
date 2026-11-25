@@ -12,8 +12,16 @@ use mmap_io::{MemoryMappedFile, MmapMode};
 use std::os::unix::fs::FileExt;
 use std::sync::atomic::Ordering;
 
-use pipewire_native_spa::pod::builder::Builder;
+use pipewire_native_spa::{
+    param::{props::Prop, ParamType},
+    pod::{
+        builder::Builder,
+        types::{Id as SpaId, ObjectType, PropertyFlags},
+        RawPod,
+    },
+};
 
+use crate::audio::{decode_audio_controls, AudioControls};
 use crate::remote::PipeWireRemote;
 use crate::transport::{MessageHeader, NativeMessage, NativeTransport};
 
@@ -40,6 +48,7 @@ const ASYNC_SEQ_BIT: u32 = 1 << 30;
 const ASYNC_SEQ_MASK: u32 = ASYNC_SEQ_BIT - 1;
 const MAX_GLOBAL_PROPERTIES: i32 = 4096;
 const SPA_DATA_MEM_FD: u32 = 2;
+const SPA_DATA_DMA_BUF: u32 = 3;
 const SPA_DATA_FLAG_MAPPABLE: u32 = 1 << 3;
 
 /// A global object advertised by the `PipeWire` remote.
@@ -64,8 +73,8 @@ impl PipeWireGlobal {
     /// Return the stable target selector used by `PipeWire` stream properties.
     #[must_use]
     pub fn target_object(&self) -> Option<&str> {
-        self.property("object.serial")
-            .or_else(|| self.property("node.name"))
+        self.property("node.name")
+            .or_else(|| self.property("object.serial"))
     }
 }
 
@@ -75,6 +84,17 @@ pub struct PipeWireObject {
     pub id: u32,
     pub interface: String,
     pub version: u32,
+}
+
+/// One parameter returned by a native Node/Device `EnumParams` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PipeWireParam {
+    pub seq: u32,
+    pub id: u32,
+    pub index: u32,
+    pub next: u32,
+    /// Complete serialized SPA POD, including its header.
+    pub pod: Vec<u8>,
 }
 
 /// A memory object supplied by the `PipeWire` core through Core.AddMem.
@@ -88,17 +108,22 @@ pub struct PipeWireMemory {
 impl PipeWireMemory {
     fn new(file: OwnedFd, memory_type: u32, flags: u32) -> io::Result<Self> {
         let file = File::from(file);
-        let mapping = if (memory_type == SPA_DATA_MEM_FD || flags & SPA_DATA_FLAG_MAPPABLE != 0)
-            && file.metadata()?.len() > 0
-        {
-            Some(
-                MemoryMappedFile::from_file(
-                    file.try_clone()?,
-                    MmapMode::ReadWrite,
-                    "PipeWire shared memory",
-                )
-                .map_err(io::Error::other)?,
-            )
+        let metadata = file.metadata()?;
+        let mapping = if metadata.len() > 0 {
+            let mode = if memory_type == SPA_DATA_DMA_BUF {
+                MmapMode::ReadOnly
+            } else {
+                MmapMode::ReadWrite
+            };
+            match MemoryMappedFile::from_file(file.try_clone()?, mode, "PipeWire shared memory") {
+                Ok(mapping) => Some(mapping),
+                Err(error)
+                    if memory_type == SPA_DATA_MEM_FD || flags & SPA_DATA_FLAG_MAPPABLE != 0 =>
+                {
+                    return Err(io::Error::other(error));
+                }
+                Err(_) => None,
+            }
         } else {
             None
         };
@@ -242,7 +267,16 @@ impl PipeWireMemory {
         while read < bytes.len() {
             let count = self
                 .file
-                .read_at(&mut bytes[read..], offset + read as u64)?;
+                .read_at(&mut bytes[read..], offset + read as u64)
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!(
+                            "PipeWire memory type {} positional read failed: {error}",
+                            self.memory_type
+                        ),
+                    )
+                })?;
             if count == 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
@@ -344,6 +378,15 @@ impl PipeWireClient {
         Ok(self.sorted_globals())
     }
 
+    /// Refresh the registry snapshot after creating or removing remote objects.
+    pub fn refresh_globals(&mut self) -> io::Result<Vec<PipeWireGlobal>> {
+        self.request_registry()?;
+        for message in self.sync()? {
+            self.handle_registry_event(&message)?;
+        }
+        Ok(self.sorted_globals())
+    }
+
     /// Enumerate globals with a deadline and cancellation predicate.
     pub fn list_globals_with_cancellation<F>(
         &mut self,
@@ -381,6 +424,33 @@ impl PipeWireClient {
         globals
     }
 
+    /// Wait for a registry global matching one property while dispatching events.
+    pub fn wait_for_global_property(
+        &mut self,
+        interface: &str,
+        key: &str,
+        value: &str,
+        timeout: Duration,
+    ) -> io::Result<Option<PipeWireGlobal>> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Some(global) = self
+                .globals
+                .values()
+                .find(|global| global.interface == interface && global.property(key) == Some(value))
+            {
+                return Ok(Some(global.clone()));
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+            if let Some(message) = self.receive_timeout(remaining.min(Duration::from_millis(50)))? {
+                self.handle_registry_event(&message)?;
+            }
+        }
+    }
+
     /// Wait for a registry global while continuing to dispatch native events.
     pub fn wait_for_global(
         &mut self,
@@ -400,6 +470,11 @@ impl PipeWireClient {
                 self.handle_registry_event(&message)?;
             }
         }
+    }
+
+    /// Dispatch one registry event received by a stream's shared protocol socket.
+    pub fn handle_registry_message(&mut self, message: &NativeMessage) -> io::Result<()> {
+        self.handle_registry_event(message)
     }
 
     fn handle_registry_event(&mut self, message: &NativeMessage) -> io::Result<()> {
@@ -546,6 +621,164 @@ impl PipeWireClient {
             CORE_DESTROY_OPCODE,
             encode_ints(&[object.id.cast_signed()])?,
         )
+    }
+
+    /// Set supported audio controls on a bound native-protocol Node or Device.
+    ///
+    /// Volume is a linear SPA gain (1.0 means unity, 0.0 means silence);
+    /// `mute` is optional so callers can update either property independently.
+    /// This sends SPA `Props` using the native `Node::SetParam` /
+    /// `Device::SetParam` method, without requiring `pipewire-pulse`.
+    pub fn set_audio_controls(
+        &mut self,
+        object: &PipeWireObject,
+        volume: Option<f32>,
+        mute: Option<bool>,
+    ) -> io::Result<()> {
+        if !matches!(
+            object.interface.as_str(),
+            "PipeWire:Interface:Node" | "PipeWire:Interface:Device"
+        ) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Audio controls require a PipeWire Node or Device proxy",
+            ));
+        }
+        if volume.is_some_and(|value| !value.is_finite() || value < 0.0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "PipeWire audio volume must be finite and non-negative",
+            ));
+        }
+        if volume.is_none() && mute.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "At least one audio control must be specified",
+            ));
+        }
+        let param = encode_audio_props(volume, mute)?;
+        let payload = encode_set_param(2, 0, &param)?;
+        self.send_message(object.id, 3, payload)?;
+        // SetParam has no direct reply. A Core.Sync barrier guarantees the
+        // server applied the update before callers read the new Props state.
+        self.sync().map(|_| ())
+    }
+
+    /// Read the current volume and mute values exposed by a Node or Device's SPA Props.
+    /// Missing properties remain `None`; no `PulseAudio` compatibility layer is required.
+    pub fn get_audio_controls(
+        &mut self,
+        object: &PipeWireObject,
+    ) -> io::Result<Option<AudioControls>> {
+        let params = self.enum_params(object, 2, 0, 16)?;
+        for param in params {
+            let pod = RawPod::wrap(&param.pod).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Decode PipeWire Props POD: {error:?}"),
+                )
+            })?;
+            if pod.type_() == pipewire_native_spa::pod::types::Type::Object {
+                return decode_audio_controls(&pod).map(Some);
+            }
+        }
+        Ok(None)
+    }
+
+    /// Enumerate a bounded page of native Node/Device parameters.
+    ///
+    /// This performs the protocol `EnumParams` round trip and returns each raw
+    /// SPA POD. `start` and `num` follow `PipeWire`'s zero-based paging contract.
+    pub fn enum_params(
+        &mut self,
+        object: &PipeWireObject,
+        param_id: u32,
+        start: u32,
+        num: u32,
+    ) -> io::Result<Vec<PipeWireParam>> {
+        if !matches!(
+            object.interface.as_str(),
+            "PipeWire:Interface:Node" | "PipeWire:Interface:Device"
+        ) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "EnumParams requires a PipeWire Node or Device proxy",
+            ));
+        }
+        if num == 0 {
+            return Ok(Vec::new());
+        }
+        let seq = self.next_seq;
+        let mut payload = [0_u8; 128];
+        let encoded = Builder::new(&mut payload)
+            .push_struct(|fields| {
+                fields
+                    .push_int(seq.cast_signed())
+                    .push_id(SpaId(param_id))
+                    .push_int(start.cast_signed())
+                    .push_int(num.cast_signed())
+                    .push_none()
+            })
+            .build()
+            .map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Encode PipeWire EnumParams: {error:?}"),
+                )
+            })?;
+        self.send_message(object.id, 2, encoded.to_vec())?;
+        // EnumParams emits Node.Param events asynchronously. A Core.Sync barrier
+        // targeted at this proxy marks the end of the event batch; the request's
+        // own `seq` is echoed only in Node.Param, not in Core.Done.
+        let done_seq = ASYNC_SEQ_BIT | (self.next_seq & ASYNC_SEQ_MASK);
+        self.send_message(
+            CORE_OBJECT_ID,
+            CORE_SYNC_OPCODE,
+            encode_ints(&[object.id.cast_signed(), done_seq.cast_signed()])?,
+        )?;
+        let mut params = Vec::new();
+        loop {
+            let message = self.receive()?;
+            if message.header.id == object.id && message.header.opcode == 1 {
+                let mut parser = pipewire_native_spa::pod::parser::Parser::new(&message.payload);
+                let item = parser
+                    .pop_struct(|fields| {
+                        let seq = fields.pop_int()? as u32;
+                        let id = fields.pop_id::<u32>()?.0;
+                        let index = fields.pop_int()? as u32;
+                        let next = fields.pop_int()? as u32;
+                        let pod = fields.pop_raw_pod()?.data().to_vec();
+                        Ok(PipeWireParam {
+                            seq,
+                            id,
+                            index,
+                            next,
+                            pod,
+                        })
+                    })
+                    .map(|value| value.0)
+                    .map_err(|error| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Decode PipeWire Param event: {error:?}"),
+                        )
+                    })?;
+                if item.seq == seq {
+                    params.push(item);
+                }
+                continue;
+            }
+            if message.header.id == CORE_OBJECT_ID && message.header.opcode == CORE_DONE_OPCODE {
+                let (id, received_seq) = decode_done(&message.payload)?;
+                if id == object.id && received_seq == done_seq {
+                    break;
+                }
+            }
+            if message.header.id == CORE_OBJECT_ID && message.header.opcode == CORE_ERROR_OPCODE {
+                return Err(decode_core_error(&message.payload)?);
+            }
+        }
+        Ok(params)
     }
 
     /// Access a memory block announced through Core.AddMem.
@@ -767,6 +1000,39 @@ impl PipeWireClient {
     pub(crate) fn send_message(&mut self, id: u32, opcode: u8, payload: Vec<u8>) -> io::Result<()> {
         self.send_protocol_message(id, opcode, payload)
     }
+}
+
+fn encode_audio_props(volume: Option<f32>, mute: Option<bool>) -> io::Result<Vec<u8>> {
+    let mut buffer = [0_u8; 256];
+    let encoded = Builder::new(&mut buffer)
+        .push_object(ObjectType::Props, ParamType::Props, |mut object| {
+            if let Some(volume) = volume {
+                object = object.push_property(Prop::Volume, PropertyFlags::empty(), volume);
+            }
+            if let Some(mute) = mute {
+                object = object.push_property(Prop::Mute, PropertyFlags::empty(), mute);
+            }
+            object
+        })
+        .build()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}")))?;
+    Ok(encoded.to_vec())
+}
+
+fn encode_set_param(param_id: u32, flags: u32, param: &[u8]) -> io::Result<Vec<u8>> {
+    let pod = RawPod::wrap(param)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}")))?;
+    let mut buffer = vec![0_u8; param.len() + 64];
+    let encoded = Builder::new(&mut buffer)
+        .push_struct(|fields| {
+            fields
+                .push_id(SpaId(param_id))
+                .push_int(flags.cast_signed())
+                .push_pod(&pod)
+        })
+        .build()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}")))?;
+    Ok(encoded.to_vec())
 }
 
 fn encode_ints(values: &[i32]) -> io::Result<Vec<u8>> {
@@ -1088,7 +1354,7 @@ mod tests {
                 ("node.name".to_owned(), "capture.node".to_owned()),
             ],
         };
-        assert_eq!(global.target_object(), Some("1234"));
+        assert_eq!(global.target_object(), Some("capture.node"));
         let object = client.bind_global_version(&global, 3).unwrap();
         assert_eq!(object.version, 3);
 
@@ -1326,6 +1592,100 @@ mod tests {
         let signal_time = u64::from_ne_bytes(memory.read_at(32, 8).unwrap().try_into().unwrap());
         assert!(signal_time > 0);
         assert_eq!(crate::transport::read_eventfd(signal.as_fd()).unwrap(), 1);
+    }
+
+    #[test]
+    fn audio_controls_encode_native_spa_props_for_node_set_param() {
+        let props = encode_audio_props(Some(0.5), Some(true)).unwrap();
+        let pod = RawPod::wrap(&props).unwrap();
+        assert_eq!(pod.type_(), pipewire_native_spa::pod::types::Type::Object);
+        assert_eq!(
+            u32::from_ne_bytes(props[8..12].try_into().unwrap()),
+            ObjectType::Props as u32
+        );
+        assert_eq!(
+            u32::from_ne_bytes(props[12..16].try_into().unwrap()),
+            ParamType::Props as u32
+        );
+        assert_eq!(
+            u32::from_ne_bytes(props[16..20].try_into().unwrap()),
+            Prop::Volume as u32
+        );
+        assert_eq!(f32::from_ne_bytes(props[32..36].try_into().unwrap()), 0.5);
+        assert_eq!(
+            u32::from_ne_bytes(props[40..44].try_into().unwrap()),
+            Prop::Mute as u32
+        );
+        assert_eq!(u32::from_ne_bytes(props[56..60].try_into().unwrap()), 1);
+
+        let payload = encode_set_param(2, 0, &props).unwrap();
+        let mut parser = Parser::new(&payload);
+        let (param_id, flags, value) = parser
+            .pop_struct(|fields| {
+                Ok((
+                    fields.pop_id::<u32>()?.0,
+                    fields.pop_int()?,
+                    fields.pop_raw_pod()?.data().to_vec(),
+                ))
+            })
+            .unwrap()
+            .0;
+        assert_eq!(param_id, 2);
+        assert_eq!(flags, 0);
+        assert_eq!(value, props);
+    }
+
+    #[test]
+    #[ignore = "requires a running PipeWire session; exercises native EnumParams against the live server"]
+    fn live_enum_params_roundtrips_against_pipewire() {
+        let remote = PipeWireRemote::connect_default(crate::remote::PIPEWIRE_ID_ANY).unwrap();
+        let mut client = PipeWireClient::connect(remote).unwrap();
+        let globals = client.list_globals().unwrap();
+        let global = globals
+            .iter()
+            .find(|global| {
+                matches!(
+                    global.interface.as_str(),
+                    "PipeWire:Interface:Node" | "PipeWire:Interface:Device"
+                ) && matches!(
+                    global.property("media.class"),
+                    Some("Audio/Source" | "Audio/Sink")
+                )
+            })
+            .expect("live PipeWire must expose an audio Node or Device");
+        eprintln!(
+            "live target global: id={} interface={} version={} props={:?}",
+            global.id, global.interface, global.version, global.properties
+        );
+        let object = client.bind_global(global).unwrap();
+        eprintln!("live bound object: {object:?}");
+        client.sync().unwrap();
+        let params = client.enum_params(&object, 2, 0, 16).unwrap();
+        assert!(params.iter().all(|param| param.id == 2));
+        assert!(params.iter().all(|param| !param.pod.is_empty()));
+
+        let controls = client
+            .get_audio_controls(&object)
+            .unwrap()
+            .expect("live audio Node must expose SPA Props");
+        assert!(controls.volume.is_some_and(f32::is_finite));
+        assert!(controls.mute.is_some());
+
+        // Write the exact values just read so the live test exercises Node.SetParam
+        // without changing the user's current output level or mute state.
+        client
+            .set_audio_controls(&object, controls.volume, controls.mute)
+            .unwrap();
+        let events = client.sync().unwrap();
+        assert!(!events.iter().any(|event| {
+            event.header.id == CORE_OBJECT_ID && event.header.opcode == CORE_ERROR_OPCODE
+        }));
+        let updated = client
+            .get_audio_controls(&object)
+            .unwrap()
+            .expect("live audio Node must keep exposing SPA Props");
+        assert_eq!(updated.volume, controls.volume);
+        assert_eq!(updated.mute, controls.mute);
     }
 
     #[test]
