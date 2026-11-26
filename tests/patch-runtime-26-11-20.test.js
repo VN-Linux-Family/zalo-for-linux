@@ -86,4 +86,14 @@ describe('Zalo 26.11.20 patches', () => {
       assert.equal(patched, source.replace(/=!1/g, '=!0'));
     }
   });
+
+  it('keeps patch-offline-startup out of the parallel wave', () => {
+    // It rewrites the lazy login bundle, which the pc-dist-lazy-login group
+    // (callgate, language bridge) also rewrites in wave 1. In parallel one of
+    // the two writes was lost and calls stayed disabled on 26.11.20.
+    const applyPatches = require('../scripts/apply-patches');
+    const wave1 = applyPatches.DISJOINT_GROUPS.flatMap(g => [g.name, ...(g.patches || [])]);
+    assert.ok(!wave1.includes('patch-offline-startup'));
+    assert.ok(applyPatches.CROSS_CUTTING_PATCHES.includes('patch-offline-startup'));
+  });
 });

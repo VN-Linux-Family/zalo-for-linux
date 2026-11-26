@@ -66,7 +66,6 @@ const DISJOINT_GROUPS = [
       'patch-quit-no-show',
       'patch-notification-badge',
       'patch-shell-open-linux',
-      'patch-offline-startup',
       'patch-auto-theme',
       'patch-zadark-keep',
       'patch-linux-guards',
@@ -134,6 +133,9 @@ const DISJOINT_GROUPS = [
 
 // Patches that mutate multiple bundles or touch compact-app.js run sequentially after Wave 1.
 const CROSS_CUTTING_PATCHES = [
+  // Writes the lazy login bundle, which pc-dist-lazy-login patches in parallel
+  // during wave 1; running it there loses one side's edits.
+  'patch-offline-startup',
   'patch-call-signal-fix',
   'patch-xdg-user-dirs',
   'patch-network-and-sync-fix',
