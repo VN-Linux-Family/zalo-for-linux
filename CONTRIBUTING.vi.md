@@ -23,7 +23,7 @@ Bản thân Zalo là phần mềm độc quyền. Không bao giờ commit binary
 
 - **Báo lỗi** — xem [Báo cáo lỗi](#báo-cáo-lỗi).
 - **Đề xuất tính năng** — xem [Đề xuất tính năng](#đề-xuất-tính-năng).
-- **Code** — patch JavaScript trong `scripts/patches/`, addon Rust trong `native/addons/` và `native/engines/zocr/`, Node.js và Python trong `native/engines/zcall/`.
+- **Code** — patch JavaScript trong `scripts/patches/`, addon Rust trong `native/addons/` và `native/engines/zocr/`, engine gọi điện Rust trong `native/engines/zcall/`.
 - **Tài liệu** — hỗ trợ song ngữ (tiếng Anh và tiếng Việt) cho toàn bộ tài liệu (xem [Tài liệu](#tài-liệu)).
 - **Kiểm thử** — nhất là trên aarch64
 - **Đóng gói** — AppImage là bản build chính thức; repo cũng có Nix flake (xem mục NixOS trong [README.vi.md](./docs/user/README.vi.md)).
@@ -37,7 +37,8 @@ Yêu cầu:
 - `7z` để giải nén ứng dụng macOS
 - C++ build tools cho các native addon
 - Rust toolchain (stable)
-- Để gọi điện: `python3`, libopus và các công cụ PulseAudio
+- Để gọi điện: máy chủ PulseAudio/PipeWire-Pulse
+- Python 3 cho helper chụp màn hình XDG Desktop Portal và các bài test screenshot
 
 ```bash
 git clone https://github.com/VN-Linux-Family/zalo-for-linux.git

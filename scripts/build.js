@@ -65,8 +65,8 @@ async function main() {
       logger.warn("package.json.bak not found, version will be unknown");
     }
 
-    // Calls run on the native engine (zcall-native/, shipped by extraFiles) in
-    // both variants: no Wine runtime, no Full variants.
+    // Native engines are built and installed during app preparation; this
+    // script only packages the prepared AppDir.
 
     // Phase 1: Build original Zalo. Stage 2 keeps dist/squashfs-root behind so
     // Phase 2 can derive the ZaDark variant from it.
@@ -93,38 +93,6 @@ async function main() {
     logger.error("Main workflow failed:", error.message);
     process.exit(1);
   }
-}
-
-function jsFiles(dir) {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    const p = path.join(dir, e.name);
-    return e.isDirectory() ? jsFiles(p) : p.endsWith(".js") ? [p] : [];
-  });
-}
-
-// electron-builder's extraFiles filter decides what zcall-native/ ships. The
-// engine dies at startup if a file it requires was filtered out, so check the
-// packaged copy: every relative require resolves, and audio-io.py's opus_play.
-function checkEnginePackaged(dir) {
-  const missing = [];
-  if (!fs.existsSync(dir))
-    throw new Error("call engine missing from the package: " + dir);
-  for (const file of jsFiles(dir)) {
-    const src = fs.readFileSync(file, "utf8");
-    for (const m of src.matchAll(/require\((['"])(\.{1,2}\/[^'"]+)\1\)/g)) {
-      try {
-        require.resolve(path.resolve(path.dirname(file), m[2]));
-      } catch (_) {
-        missing.push(`${path.relative(dir, file)} requires ${m[2]}`);
-      }
-    }
-  }
-  if (!fs.existsSync(path.join(dir, "tools", "opus_play.py")))
-    missing.push("audio-io.py imports tools/opus_play.py");
-  if (missing.length)
-    throw new Error(
-      "call engine incomplete in the package: " + missing.join("; "),
-    );
 }
 
 // `zaloRoot` is the directory that contains Zalo's `app/` tree: the extracted
@@ -237,15 +205,12 @@ async function build(buildName = "", outputSuffix = "", options = {}) {
       }
       logger.dim(`Reusing AppDir: ${reuseAppDir} (no electron-builder run)`);
       writeBuildInfo(appDirToPack, buildInfo);
-      checkEnginePackaged(path.join(reuseAppDir, "zcall-native"));
-      logger.success("call engine files are all in the package");
     } else {
       writeBuildInfo(appDirToPack, buildInfo);
 
       logger.dim(`Command: ${buildCommand}`);
 
-      // Capture build output to get file information. Between the two stages,
-      // check that the unpacked app carries the whole call engine.
+      // Capture build output to get file information.
       execSync(buildCommand, {
         stdio: "pipe",
         cwd: path.join(BASE_DIR),
@@ -259,9 +224,6 @@ async function build(buildName = "", outputSuffix = "", options = {}) {
         throw new Error(
           "electron-builder output (linux-unpacked) not found in dist/",
         );
-      for (const d of unpacked)
-        checkEnginePackaged(path.join(DIST_DIR, d, "zcall-native"));
-      logger.success("call engine files are all in the package");
     }
 
     logger.dim(`Command (Stage 2): ${St2script} ${stage2Args.join(" ")}`);

@@ -176,11 +176,6 @@ async function main() {
   const wave2Tasks = CROSS_CUTTING_PATCHES.map(name => ({ type: 'patch', name, label: name }));
   await runBoundedPool(wave2Tasks, { maxWorkers: 1, verbose });
 
-  // Without it Zalo would look for ZaloCall.exe / ZaloHelper.app: no calls at all.
-  const mainJs = path.join(APP_MAIN_DIST, 'main.js');
-  if (!fs.existsSync(mainJs) || !fs.readFileSync(mainJs, 'utf8').includes('ZCALL_ENGINE_JS')) {
-    throw new Error('native call patch missing from app/main-dist/main.js');
-  }
 
   logger.success('All platform patches applied successfully');
 }

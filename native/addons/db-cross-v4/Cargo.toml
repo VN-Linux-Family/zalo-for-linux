@@ -2,7 +2,7 @@
 name = "db-cross-v4-native"
 version = "1.0.0"
 edition = "2021"
-license = "BSD-3-Clause"
+license.workspace = true
 authors = ["ngxccc <https://github.com/ngxccc>", "Việt Nam Linux Family"]
 [lib]
 name = "db_cross_v4_native"

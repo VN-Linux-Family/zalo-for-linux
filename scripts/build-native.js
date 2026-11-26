@@ -3,7 +3,7 @@
  *
  * Standalone build orchestrator for all native modules:
  * - 10 N-API addons in native/addons/ (Pure Rust NAPI-RS)
- * - Standalone engines in native/engines/ (zcall-audio, zocr)
+ * - Standalone engines in native/engines/ (zcall, zocr)
  *
  * Usage:
  *   node scripts/build-native.js           # Build all native modules
@@ -49,13 +49,13 @@ function getAvailableTargets() {
    });
   }
 
-  // zcall audio engine
-  const zcallAudioDir = path.join(NATIVE_ENGINES_DIR, 'zcall-audio');
-  if (fs.existsSync(path.join(zcallAudioDir, 'Cargo.toml'))) {
+  // zcall engine
+  const zcallDir = path.join(NATIVE_ENGINES_DIR, 'zcall');
+  if (fs.existsSync(path.join(zcallDir, 'Cargo.toml'))) {
    targets.push({
-    name: 'zcall-audio',
+    name: 'zcall',
     category: 'engine',
-    dir: zcallAudioDir,
+    dir: zcallDir,
    });
   }
  }

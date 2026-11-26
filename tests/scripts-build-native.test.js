@@ -34,7 +34,8 @@ describe('Native Build Orchestrator & Downloads', () => {
     }
 
     assert.ok(names.includes('zocr'), 'Expected engine zocr to be discovered');
-    assert.ok(names.includes('zcall-audio'), 'Expected engine zcall-audio to be discovered');
+    assert.ok(names.includes('zcall'), 'Expected standalone Rust zcall engine to be discovered');
+    assert.ok(!names.includes('zcall-audio'), 'Audio IO is linked into zcall; no separate zcall-audio process is packaged');
   });
 
   it('generates the NuGet package URL for ONNX Runtime', () => {

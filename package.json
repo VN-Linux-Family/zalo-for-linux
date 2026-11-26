@@ -73,22 +73,6 @@
           "!node_modules",
           "!package-lock.json"
         ]
-      },
-      {
-        "from": "native/engines/zcall",
-        "to": "zcall-native",
-        "filter": [
-          "**/*",
-          "!**/__pycache__/**",
-          "!**/*.pyc",
-          "!audio/**",
-          "!**/*.rs",
-          "!**/Cargo.toml",
-          "!**/Cargo.lock",
-          "!**/build.rs",
-          "!**/rust-toolchain.toml",
-          "!**/.cargo/**"
-        ]
       }
     ],
     "asarUnpack": [

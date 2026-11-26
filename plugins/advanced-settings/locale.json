@@ -245,6 +245,26 @@
     "advanced-settings.errorDevModeValue": {
       "vi": "Giá trị dev mode không hợp lệ.",
       "en": "Invalid Developer Mode value."
+    },
+    "advanced-settings.mediaBackendsTitle": {
+      "vi": "Backend camera và âm thanh",
+      "en": "Camera and audio backends"
+    },
+    "advanced-settings.mediaBackendsDescription": {
+      "vi": "Chọn backend ưu tiên. Auto dùng thứ tự dự phòng mặc định; thay đổi được lưu trong cấu hình thiết bị.",
+      "en": "Choose preferred backends. Auto uses the default fallback order; changes are saved in device settings."
+    },
+    "advanced-settings.cameraBackend": {
+      "vi": "Backend camera",
+      "en": "Camera backend"
+    },
+    "advanced-settings.audioBackend": {
+      "vi": "Backend âm thanh",
+      "en": "Audio backend"
+    },
+    "advanced-settings.backendAuto": {
+      "vi": "Tự động (Auto)",
+      "en": "Automatic (Auto)"
     }
   }
 }

@@ -23,7 +23,7 @@ Zalo itself is proprietary. Please never commit Zalo binaries, extracted `app.as
 
 - **Bug reports** — see [Reporting bugs](#reporting-bugs).
 - **Feature requests** — see [Feature requests](#feature-requests).
-- **Code** — JavaScript patches in `scripts/patches/`, Rust and gyp addons in `native/addons/` and `native/engines/zocr/`, Node.js and Python in `native/engines/zcall/`.
+- **Code** — JavaScript patches in `scripts/patches/`, Rust and gyp addons in `native/addons/` and `native/engines/zocr/`, the native Rust call engine in `native/engines/zcall/`.
 - **Documentation** — keep documentation accurate and clear (see [Documentation](#documentation)).
 - **Testing** — especially on aarch64
 - **Packaging** — the AppImage is the official artifact; the repository also has a Nix flake (see the NixOS section in [README.md](./README.md)).
@@ -37,7 +37,8 @@ Requirements:
 - `7z` for extracting the macOS app
 - C++ build tools for the native addons
 - Rust toolchain (stable)
-- For calls: `python3`, libopus and the PulseAudio tools
+- For calls: a PulseAudio/PipeWire-Pulse server
+- Python 3 for the XDG Desktop Portal screenshot helper and screenshot tests
 
 ```bash
 git clone https://github.com/VN-Linux-Family/zalo-for-linux.git

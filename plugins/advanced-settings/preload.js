@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('linuxSettings', {
   localeMessages,
   translate: (key, locale) => { const entry = localeMessages['advanced-settings.' + key]; return entry ? entry[(locale === 'en' ? 'en' : 'vi')] : key; },
   get: () => ipcRenderer.invoke('linux-settings:get'),
+  getDeviceBackends: () => ipcRenderer.invoke('linux-settings:get-device-backends'),
+  saveDeviceBackends: (cameraBackend, audioBackend) => ipcRenderer.invoke('linux-settings:save-device-backends', cameraBackend, audioBackend),
   onLanguageUpdate: (callback) => {
     if (typeof callback !== 'function') return;
     ipcRenderer.on('linux-settings:language-update', (_event, locale) => callback(locale));

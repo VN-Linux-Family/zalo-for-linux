@@ -16,6 +16,33 @@
         <h1 id="advanced-title" tabindex="-1" data-i18n="title"></h1>
         <p data-i18n="tagline"></p>
       </header>
+      <section class="settings-card" aria-labelledby="media-backends-title">
+        <h2 id="media-backends-title" data-i18n="mediaBackendsTitle"></h2>
+        <p class="section-description" data-i18n="mediaBackendsDescription"></p>
+        <form id="media-backends-form" class="backend-setting">
+          <div class="backend-controls">
+            <div class="backend-field">
+              <label for="camera-backend" data-i18n="cameraBackend"></label>
+              <select id="camera-backend" name="cameraBackend">
+                <option value="auto" data-i18n="backendAuto"></option>
+                <option value="v4l2">V4L2</option>
+                <option value="pipewire">PipeWire</option>
+                <option value="portal">Portal</option>
+              </select>
+            </div>
+            <div class="backend-field">
+              <label for="audio-backend" data-i18n="audioBackend"></label>
+              <select id="audio-backend" name="audioBackend">
+                <option value="auto" data-i18n="backendAuto"></option>
+                <option value="pulse">PulseAudio</option>
+                <option value="pipewire">PipeWire</option>
+              </select>
+            </div>
+          </div>
+          <div class="sound-actions"><button type="submit" class="button primary" data-i18n="save"></button></div>
+          <span id="media-backends-status" class="sound-status" role="status" aria-live="polite"></span>
+        </form>
+      </section>
       <section class="settings-card" aria-labelledby="sound-title">
         <h2 id="sound-title" data-i18n="soundTitle"></h2>
         <p class="section-description" data-i18n="soundDescription"></p>
