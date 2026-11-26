@@ -47,6 +47,15 @@ const PATCHED = 'let ae=()=>{{const e=$znode.os.release();if(e){if("linux"!==$zn
 const DEFAULTS_ORIGINAL = 'enableCall:!1,enableTag:!0,enableVideoCall:!1';
 const DEFAULTS_PATCHED = 'enableCall:!0,enableTag:!0,enableVideoCall:!0';
 
+// ZCall start-gate fixes: group calls were hard-disabled via feature defaults and
+// the server-settings override reset local feature defaults when flags were absent.
+const GROUP_FIXES = [
+ { from: 'enable_group_call_for_user:0', to: 'enable_group_call_for_user:1' },
+ { from: 'enable_group_call_entry_for_group:0', to: 'enable_group_call_entry_for_group:100000' },
+];
+
+// Server-settings overrides are handled in patchStartGateViaAst via regex on the try/catch assignment.
+
 async function main() {
  const missing = [];
  let patchedCount = 0;
@@ -132,11 +141,17 @@ async function main() {
      missing.push(file + ': kernel gate');
      continue;
     }
+   }
     if (content.includes(DEFAULTS_ORIGINAL)) {
      content = content.split(DEFAULTS_ORIGINAL).join(DEFAULTS_PATCHED);
      changed = true;
     }
-   }
+  }
+  const startGatePatched = patchStartGateViaAstOrLegacy(content);
+  if (startGatePatched && startGatePatched !== content) {
+   content = startGatePatched;
+   changed = true;
+   logger.dim('Patched zcall start gate (AST + legacy fallback).');
   }
   if (changed) {
    fs.writeFileSync(filePath, content, 'utf8');
@@ -145,6 +160,7 @@ async function main() {
    logger.dim('callgate already patched: ' + file);
   }
   patchedCount++;
+
  }
 
  if (missing.length || patchedCount === 0) {
@@ -194,6 +210,59 @@ function patchCallgateViaSnippetAst(content) {
  }
 
  return { content: updated, editCount };
+}
+
+/**
+ * Primary strategy: AST-based edit via @ast-grep/napi.
+ * Falls back to the legacy content-string replace when the AST path yields nothing.
+ */
+function patchStartGateViaAst(content) {
+ const root = parseAst(content);
+ const edits = [];
+
+ // 1. Group-call feature defaults -> enable group calls.
+ const groupForUser = root.findAll({ rule: { kind: 'pair', has: { field: 'key', regex: '^enable_group_call_for_user$' } } })
+  .find(p => p.field('value')?.text() === '0');
+ if (groupForUser) edits.push(groupForUser.replace('enable_group_call_for_user:1'));
+
+ const groupEntry = root.findAll({ rule: { kind: 'pair', has: { field: 'key', regex: '^enable_group_call_entry_for_group$' } } })
+  .find(p => p.field('value')?.text() === '0');
+ if (groupEntry) edits.push(groupEntry.replace('enable_group_call_entry_for_group:100000'));
+
+ let updated = content;
+ if (edits.length > 0) updated = applyEdits(root, edits);
+
+ // 2. Server-settings overrides -> only apply when the flag is present.
+ //    The try/catch assignment shape is stable; only the minified identifiers vary per bundle.
+ const OVERRIDE_RE = /try\{let (\w+)=1==([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.settings\.chat\.(enable_call|enable_video_call);([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)=(\w+)\}catch\((\w+)\)\{\}/g;
+ const patchedContent = updated.replace(OVERRIDE_RE, (match, local, obj, flag, target, val, catchParam) => {
+  const src = `1==${obj}.settings.chat.${flag}`;
+  return `try{if(${obj}.settings.chat.hasOwnProperty("${flag}")){let ${local}=${src};${target}=${val}}catch(${catchParam}){}}`;
+ });
+ if (patchedContent !== updated) updated = patchedContent;
+
+ return updated === content ? null : updated;
+}
+
+function patchStartGateViaLegacy(content) {
+ let updated = content;
+ for (const fix of GROUP_FIXES) {
+  if (updated.includes(fix.from)) {
+   updated = updated.split(fix.from).join(fix.to);
+  }
+ }
+ return updated;
+}
+
+function patchStartGateViaAstOrLegacy(content) {
+ let patched = null;
+ try {
+  patched = patchStartGateViaAst(content);
+ } catch (err) {
+  logger.warn('AST start-gate patch failed, falling back to legacy content replace:', err.message);
+ }
+ if (patched) return patched;
+ return patchStartGateViaLegacy(content);
 }
 
 function collectCallgateEdits(content, root) {

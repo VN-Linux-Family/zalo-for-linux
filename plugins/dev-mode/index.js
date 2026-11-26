@@ -57,10 +57,11 @@ function register({ app, BrowserWindow, onTrayMenuChanged } = {}) {
 
   function getStatus() {
     const forced = isForced();
-    return {
+    const status = {
       devModeEnabled: forced || readSettings().devMode === 1,
       devModeForced: forced
     };
+    return status;
   }
 
   function closeAllDevTools() {
@@ -85,12 +86,20 @@ function register({ app, BrowserWindow, onTrayMenuChanged } = {}) {
   }
 
   function toggleDevTools() {
-    if (!getStatus().devModeEnabled) return false;
+    const status = getStatus();
+    if (!status.devModeEnabled) {
+      return false;
+    }
     try {
       const win = getTargetWindow();
-      if (!win || win.isDestroyed() || !win.webContents) return false;
-      if (win.webContents.isDevToolsOpened()) win.webContents.closeDevTools();
-      else win.webContents.openDevTools({ mode: 'detach' });
+      if (!win || win.isDestroyed() || !win.webContents) {
+        return false;
+      }
+      if (win.webContents.isDevToolsOpened()) {
+        win.webContents.closeDevTools();
+      } else {
+        win.webContents.openDevTools({ mode: 'detach' });
+      }
       return true;
     } catch (error) {
       console.error('[dev-mode] Toggle DevTools failed:', error);
@@ -136,7 +145,9 @@ function register({ app, BrowserWindow, onTrayMenuChanged } = {}) {
       if (!getStatus().devModeEnabled) return [];
       return [{
         label: translate('toggleDevTools'),
-        click: toggleDevTools
+        click: () => {
+          toggleDevTools();
+        }
       }];
     },
     setEnabled(enabled) {

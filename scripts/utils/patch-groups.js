@@ -16,6 +16,7 @@ const patchLanguageBridge = require('../patches/patch-zalo-language-bridge');
 const patchDiskSpace = require('../patches/patch-disk-space');
 const patchZocrPcDist = require('../patches/patch-zocr-pc-dist');
 const { patchXdgUserDirs } = require('../patches/patch-xdg-user-dirs');
+const patchDevtoolsGuard = require('../patches/patch-devtools-guard');
 
 const PC_DIST_TARGETS = {
   'compact-app-pc': {
@@ -174,6 +175,7 @@ async function runMainDistGroup() {
         },
       ],
     });
+    patchDevtoolsGuard.patchFile(mainJsPath);
     patchAutoLaunch.patchFile(mainJsPath);
   }
 
@@ -202,6 +204,7 @@ function runCompactAppGroup() {
   patchAutoLaunch.patchFile(compactAppPath);
   patchQuitNoShow.patchFile(compactAppPath);
   patchShellOpenLinux.patchFile(compactAppPath);
+  patchDevtoolsGuard.patchFile(compactAppPath);
 }
 
 module.exports = {

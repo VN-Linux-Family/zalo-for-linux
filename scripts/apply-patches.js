@@ -42,6 +42,7 @@ const PATCHES = [
   'patch-zwalker',
   'patch-linux-guards',
   'patch-zlang',
+  'patch-devtools-guard',
 ];
 
 // Disjoint target-file groups: patches sharing a mutable bundle (e.g. main-dist/main.js
@@ -69,6 +70,7 @@ const DISJOINT_GROUPS = [
       'patch-auto-theme',
       'patch-zadark-keep',
       'patch-linux-guards',
+      'patch-devtools-guard',
     ],
   },
   {
