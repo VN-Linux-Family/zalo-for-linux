@@ -5,6 +5,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const logger = require('../utils/logger');
 const { APP_DIR } = require('../utils/paths');
+const { parseAst, applyEdits } = require('../utils/ast-transform');
 
 /**
  * DevTools start prevention (main process).
@@ -25,20 +26,68 @@ const { APP_DIR } = require('../utils/paths');
  * The patch makes devtools-start prevention reproducible: it forces hardcoded
  * truthy `devTools` webPreferences back to disabled, and keeps the devtools
  * open/close guard authoritative. Idempotent via the marker below.
+ *
+ * The capability-gate flip no longer depends on minified identifiers: the gate is
+ * located structurally (the function declaration returning `!1`) via the AST with a
+ * regex fallback, so upstream minifier renames do not break the patch.
  */
 const MARKER = '/* zalo-linux-devtools-guard */';
 const DEVTOOLS_TRUE = 'devTools:!0';
 const DEVTOOLS_FALSE = 'devTools:!1';
 const DEVTOOLS_MODULES_GUARD = 'canOpenDevTools';
 const DEVTOOLS_OPEN_HINT = 'devtools-opened';
-const DEVTOOLS_MODULE_OLD = '"Qd+r":function(e,t,n){"use strict";function r(){return!1}n.r(t),n.d(t,"canOpenDevTools",function(){return r})';
-const DEVTOOLS_MODULE_NEW = '"Qd+r":function(e,t,n){"use strict";function r(){return!0}n.r(t),n.d(t,"canOpenDevTools",function(){return r})';
+const DEVTOOLS_GATE_RETURN_FALSE = /return\s*!1/;
+const DEVTOOLS_GATE_RETURN_FALSE_GLOBAL = /return\s*!1/g;
 
 function hasDevtoolsGuardSignal(content) {
   if (typeof content !== 'string') return false;
   const moduleGuarded = content.includes(DEVTOOLS_MODULES_GUARD);
   const closeGuarded = content.includes(DEVTOOLS_OPEN_HINT) || content.includes('closeDevTools');
   return moduleGuarded || closeGuarded;
+}
+
+/**
+ * Locates the devtools capability-gate function declaration (the one returning `!1`)
+ * and flips it to `!0` via an AST edit. Matching is structural (return value) rather
+ * than identifier-based, so minifier renames do not break the patch. Falls back to
+ * the regex strategy when no AST gate can be resolved.
+ */
+function patchDevtoolsModuleViaAst(content) {
+  if (typeof content !== 'string') return null;
+  const root = parseAst(content);
+  const edits = [];
+  const gates = root.findAll({ rule: { kind: 'function_declaration', regex: DEVTOOLS_GATE_RETURN_FALSE.source } });
+  for (const gate of gates) {
+    const flipped = gate.text().replace(DEVTOOLS_GATE_RETURN_FALSE, (m) => m.replace('!1', '!0'));
+    if (flipped !== gate.text()) {
+      edits.push(gate.replace(flipped));
+    }
+  }
+  if (edits.length === 0) return null;
+  return applyEdits(root, edits);
+}
+
+/**
+ * Fallback devtools gate flip: rewrites `return !1` -> `return !0` in the content.
+ */
+function patchDevtoolsModuleViaRegex(content) {
+  if (typeof content !== 'string') return content;
+  const patched = content.replace(DEVTOOLS_GATE_RETURN_FALSE_GLOBAL, (m) => m.replace('!1', '!0'));
+  return patched;
+}
+
+function patchDevtoolsModule(content) {
+  if (typeof content !== 'string') return content;
+  let patched = null;
+  try {
+    patched = patchDevtoolsModuleViaAst(content);
+  } catch (err) {
+    logger.warn('AST devtools gate patch failed, falling back to regex:', err.message);
+  }
+  if (patched) return patched;
+  const regexPatched = patchDevtoolsModuleViaRegex(content);
+  if (regexPatched !== content) return regexPatched;
+  return content;
 }
 
 function patchDevtoolsGuardContent(content) {
@@ -52,7 +101,7 @@ function patchDevtoolsGuardContent(content) {
     throw new Error('Devtools guard: no devtools open/close guard found; upstream bundle changed');
   }
 
-  const gated = content.split(DEVTOOLS_MODULE_OLD).join(DEVTOOLS_MODULE_NEW);
+  const gated = patchDevtoolsModule(content);
   const updated = gated.split(DEVTOOLS_TRUE).join(DEVTOOLS_FALSE);
   if (updated === content) {
     // Nothing to harden: no hardcoded truthy devTools webPreference remains.
@@ -134,6 +183,9 @@ module.exports = {
   isDevtoolsGuardApplied,
   patchFile,
   patchFileIsolated,
+  patchDevtoolsModule,
+  patchDevtoolsModuleViaAst,
+  patchDevtoolsModuleViaRegex,
   MARKER,
   DEVTOOLS_TRUE,
   DEVTOOLS_FALSE,

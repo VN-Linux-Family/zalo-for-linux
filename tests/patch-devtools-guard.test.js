@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { patchDevtoolsGuardContent, isDevtoolsGuardApplied, patchFile } = require(path.join(__dirname, '..', 'scripts', 'patches', 'patch-devtools-guard'));
+const { patchDevtoolsGuardContent, isDevtoolsGuardApplied, patchFile, patchDevtoolsModule, patchDevtoolsModuleViaAst, patchDevtoolsModuleViaRegex } = require(path.join(__dirname, '..', 'scripts', 'patches', 'patch-devtools-guard'));
 
 const MARKER = '/* zalo-linux-devtools-guard */';
 const OPEN = 'canOpenDevTools';
@@ -17,6 +17,9 @@ describe('patch-devtools-guard', () => {
     assert.strictEqual(typeof patchDevtoolsGuardContent, 'function');
     assert.strictEqual(typeof isDevtoolsGuardApplied, 'function');
     assert.strictEqual(typeof patchFile, 'function');
+    assert.strictEqual(typeof patchDevtoolsModule, 'function');
+    assert.strictEqual(typeof patchDevtoolsModuleViaAst, 'function');
+    assert.strictEqual(typeof patchDevtoolsModuleViaRegex, 'function');
   });
 
   it('forces hardcoded truthy devTools webPreferences back to disabled', () => {
@@ -49,6 +52,20 @@ describe('patch-devtools-guard', () => {
     const patched = patchDevtoolsGuardContent(moduleDef);
     assert.ok(patched.includes('function r(){return!0}'), 'devtools module gate must allow devtools');
     assert.ok(!patched.includes('function r(){return!1}'), 'devtools module gate must not block devtools');
+  });
+
+  it('flips the devtools module gate via AST without depending on minified names', () => {
+    const moduleDef = '"Ab9z":function(x,y,z){"use strict";function w(){return!1}z.r(x),z.d(x,"canOpenDevTools",function(){return w})}';
+    const patched = patchDevtoolsGuardContent(moduleDef);
+    assert.ok(patched.includes('function w(){return!0}'), 'devtools module gate must allow devtools');
+    assert.ok(!patched.includes('return!1'), 'devtools module gate must not block devtools');
+  });
+
+  it('falls back to regex when the AST gate flip finds nothing', () => {
+    const moduleDef = '"Qd+r":function(e,t,n){"use strict";function r(){return!1}n.r(t),n.d(t,"canOpenDevTools",function(){return r})';
+    const viaRegex = patchDevtoolsModuleViaRegex(moduleDef);
+    assert.ok(viaRegex.includes('function r(){return!0}'), 'regex fallback must allow devtools');
+    assert.ok(!viaRegex.includes('return!1'), 'regex fallback must not block devtools');
   });
 
   it('fails closed when no devtools open/close guard is present', () => {
