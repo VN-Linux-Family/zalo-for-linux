@@ -87,3 +87,19 @@ Developer Mode controls whether Chrome DevTools can be opened for Zalo windows. 
 - **How to enable**: Open **Settings → Advanced Settings... → Developer Mode** and turn on the switch.
 - **Open DevTools**: Press `Ctrl+Shift+I` in a Zalo window, or right-click the system tray icon and select **Toggle DevTools**.
 - **Environment override**: Set `ZALO_DEV_MODE=1` to force Developer Mode on without changing the saved setting.
+
+---
+
+## Update Notifications
+
+The AppImage checks the GitHub releases of the repository it was built from, 30 seconds after start and then every 6 hours. When a newer build of the same variant (Original or ZaDark) and architecture is out, it asks once per release, in a dialog on the Zalo window, what to do (if Zalo is hidden in the tray, a desktop notification appears instead and clicking it opens the dialog). An **Update available** item in the tray menu brings the dialog back later:
+
+- **Update**: downloads the new AppImage next to the current one (a small window shows the progress and has a Cancel button), checks its SHA-256 against the release, then replaces the current file. The previous AppImage is kept as `<name>.AppImage.old`, so you can go back by renaming it. Zalo then offers to restart; if you choose later, the tray item offers the restart again.
+- **Open release page**: download it yourself.
+- **Later**: nothing changes.
+
+If the download fails or does not match, the current AppImage is left untouched. If the folder holding the AppImage is not writable, the release page opens instead.
+
+- Only the AppImage checks. Flatpak, Nix and source runs are updated through their own channels.
+- **Disable**: set `ZALO_UPDATE_CHECK=0`.
+- For delta updates, tools such as AppImageUpdate or Gear Lever can use the `.zsync` files published with every release.

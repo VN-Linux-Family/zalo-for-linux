@@ -227,6 +227,8 @@ async function build(buildName = "", outputSuffix = "", options = {}) {
       zadarkVersion: outputSuffix === "-ZaDark" ? zadarkVersion : null,
       commit: commitHash,
       buildDate: new Date().toISOString(),
+      // The update-check plugin looks for newer releases here.
+      releaseRepo: RELEASE_REPO,
     };
 
     if (reuseAppDir) {

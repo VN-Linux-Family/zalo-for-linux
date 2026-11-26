@@ -15,10 +15,12 @@ const waylandTitlebarPlugin = require('./wayland-titlebar');
 const offlinePlugin = require('./offline');
 const zadarkPlugin = require('./zadark');
 const recalledMessagesPlugin = require('./recalled-messages');
+const updateCheckPlugin = require('./update-check');
 
 let activeAdvancedSettings = null;
 let activeScreenshot = null;
 let activeDevMode = null;
+let activeUpdateCheck = null;
 let currentLanguageLocale = null;
 let languageRequestSequence = 0;
 
@@ -163,7 +165,16 @@ function register(context = {}) {
   }
  });
 
- // 5. ZaDark Theme Synchronization Plugin (if active in build)
+ // 5. Update check against the release repository of this build (asks before updating).
+ activeUpdateCheck = safeRegister('updateCheck', () => {
+  if (updateCheckPlugin && typeof updateCheckPlugin.register === 'function') {
+   return updateCheckPlugin.register({ app, appDir, dialog, onTrayMenuChanged: context.onTrayMenuChanged });
+  }
+  return null;
+ });
+ if (currentLanguageLocale && activeUpdateCheck) activeUpdateCheck.setLocale(currentLanguageLocale);
+
+ // 6. ZaDark Theme Synchronization Plugin (if active in build)
  safeRegister('zadark', () => {
   if (zadarkPlugin && typeof zadarkPlugin.register === 'function') {
    zadarkPlugin.register({ app, ipcMain, appDir });
@@ -188,7 +199,7 @@ function updateLanguage(locale) {
   source: 'zalo',
   timestamp: Date.now()
  });
- for (const [name, target] of [['advanced-settings', activeAdvancedSettings], ['screenshot', activeScreenshot], ['dev-mode', activeDevMode]]) {
+ for (const [name, target] of [['advanced-settings', activeAdvancedSettings], ['screenshot', activeScreenshot], ['dev-mode', activeDevMode], ['update-check', activeUpdateCheck]]) {
   try {
    if (target && typeof target.onLanguageUpdateRequest === 'function') target.onLanguageUpdateRequest(request);
   } catch (error) {
@@ -196,6 +207,18 @@ function updateLanguage(locale) {
   }
  }
  return true;
+}
+
+/**
+ * Tray items owned by the update check (empty unless an update is available).
+ */
+function getUpdateTrayItems() {
+ try {
+  return activeUpdateCheck ? activeUpdateCheck.getTrayMenuItems() : [];
+ } catch (error) {
+  console.error('[plugins] Update tray items failed:', error);
+  return [];
+ }
 }
 
 /**
@@ -217,6 +240,7 @@ module.exports = {
  initEarly,
  register,
  updateLanguage,
+ getUpdateTrayItems,
  onMainWindowCreated,
  _plugins: {
   screenshotPlugin,
@@ -228,6 +252,7 @@ module.exports = {
   devModePlugin,
   waylandTitlebarPlugin,
   offlinePlugin,
-  recalledMessagesPlugin
+  recalledMessagesPlugin,
+  updateCheckPlugin
  }
 };

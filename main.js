@@ -152,6 +152,7 @@ function updateTrayVisibilityMenu() {
     locale: trayLocale,
     visible,
     // Dev Mode owns these items. Pass them through without inspection or mutation.
+    updateItems: plugins.getUpdateTrayItems(),
     devModeItems: devMode ? devMode.getTrayMenuItems() : [],
     onToggleVisibility: () => {
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {

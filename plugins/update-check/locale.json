@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "plugin": "update-check",
+  "messages": {
+    "update-check.title": {
+      "vi": "Đã có bản Zalo for Linux mới",
+      "en": "A new Zalo for Linux build is available"
+    },
+    "update-check.body": {
+      "vi": "Bản {version} ({commit}) đã phát hành. Nhấn để cập nhật.",
+      "en": "Version {version} ({commit}) has been released. Click to update."
+    },
+    "update-check.trayItem": {
+      "vi": "Có bản mới: {version} ({commit})",
+      "en": "Update available: {version} ({commit})"
+    },
+    "update-check.trayDownloading": {
+      "vi": "Đang tải bản mới… {percent}%",
+      "en": "Downloading update… {percent}%"
+    },
+    "update-check.trayReady": {
+      "vi": "Khởi động lại để hoàn tất cập nhật",
+      "en": "Restart to finish updating"
+    },
+    "update-check.confirm": {
+      "vi": "Có bản {version} ({commit}). Tải về và cập nhật?",
+      "en": "Version {version} ({commit}) is available. Download and update?"
+    },
+    "update-check.confirmDetail": {
+      "vi": "File AppImage hiện tại sẽ được giữ lại với đuôi .old.",
+      "en": "The current AppImage will be kept with a .old suffix."
+    },
+    "update-check.update": {
+      "vi": "Cập nhật",
+      "en": "Update"
+    },
+    "update-check.openPage": {
+      "vi": "Mở trang release",
+      "en": "Open release page"
+    },
+    "update-check.later": {
+      "vi": "Để sau",
+      "en": "Later"
+    },
+    "update-check.readyMessage": {
+      "vi": "Đã cập nhật lên bản {version} ({commit}). Khởi động lại Zalo ngay?",
+      "en": "Updated to {version} ({commit}). Restart Zalo now?"
+    },
+    "update-check.restartNow": {
+      "vi": "Khởi động lại",
+      "en": "Restart now"
+    },
+    "update-check.cannotReplace": {
+      "vi": "Không thể tự cập nhật vì không ghi được vào thư mục chứa AppImage ({path}). Trang release sẽ được mở để bạn tải về thủ công.",
+      "en": "Cannot update automatically because the AppImage folder is not writable ({path}). The release page will open so you can download it manually."
+    },
+    "update-check.failed": {
+      "vi": "Cập nhật thất bại: {error}. File AppImage hiện tại không bị thay đổi.",
+      "en": "Update failed: {error}. The current AppImage was not changed."
+    },
+    "update-check.progressDownloading": {
+      "vi": "Đang tải bản {version} ({commit})…",
+      "en": "Downloading {version} ({commit})…"
+    },
+    "update-check.progressDetail": {
+      "vi": "{percent}% · {received} / {total} MB",
+      "en": "{percent}% · {received} / {total} MB"
+    },
+    "update-check.progressVerifying": {
+      "vi": "Đang kiểm tra file tải về…",
+      "en": "Verifying the download…"
+    },
+    "update-check.cancel": {
+      "vi": "Hủy",
+      "en": "Cancel"
+    },
+    "update-check.restartManually": {
+      "vi": "Đã cập nhật nhưng không tự khởi động lại được. Hãy thoát rồi mở lại Zalo.",
+      "en": "The update is installed but Zalo could not restart itself. Quit and open Zalo again."
+    }
+  }
+}

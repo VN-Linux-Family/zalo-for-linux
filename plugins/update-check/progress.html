@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
+  :root { --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --track: #e6e9ed; --bar: #0068ff; --btn: #f2f4f6; --btn-border: #d0d7de; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1e2022; --fg: #e6e8ea; --muted: #a2a9b1; --track: #3a3e42; --bar: #3d8bff; --btn: #2b2e31; --btn-border: #454a4f; }
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; user-select: none; }
+  body { box-sizing: border-box; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+  #message { font-weight: 600; }
+  .track { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+  #bar { height: 100%; width: 0; background: var(--bar); border-radius: 4px; transition: width .2s linear; }
+  .track.indeterminate #bar { width: 30%; animation: slide 1.2s ease-in-out infinite; }
+  @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  #detail { color: var(--muted); font-variant-numeric: tabular-nums; }
+  button { font: inherit; padding: 4px 14px; border-radius: 6px; border: 1px solid var(--btn-border); background: var(--btn); color: var(--fg); cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+</style>
+</head>
+<body>
+  <div id="message"></div>
+  <div class="track" id="track"><div id="bar"></div></div>
+  <div class="row">
+    <span id="detail"></span>
+    <button id="cancel" type="button"></button>
+  </div>
+<script>
+  // Driven by the main process through executeJavaScript; the cancel button
+  // reports back by changing the document title (no preload or IPC needed).
+  const $ = (id) => document.getElementById(id);
+  window.updateProgress = (state) => {
+    if (state.message !== undefined) $('message').textContent = state.message;
+    if (state.detail !== undefined) $('detail').textContent = state.detail;
+    if (state.cancelLabel !== undefined) $('cancel').textContent = state.cancelLabel;
+    if (state.cancellable !== undefined) $('cancel').disabled = !state.cancellable;
+    if (state.percent === null) {
+      $('track').classList.add('indeterminate');
+      $('bar').style.width = '';
+    } else if (state.percent !== undefined) {
+      $('track').classList.remove('indeterminate');
+      $('bar').style.width = Math.max(0, Math.min(100, state.percent)) + '%';
+    }
+  };
+  $('cancel').addEventListener('click', () => {
+    $('cancel').disabled = true;
+    document.title = 'cancel';
+  });
+</script>
+</body>
+</html>

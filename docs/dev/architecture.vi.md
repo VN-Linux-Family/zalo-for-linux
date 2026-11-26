@@ -57,6 +57,7 @@ zalo-for-linux/
 │   ├── language-core     # Locale bridge dùng chung và API plugin renderer
 │   ├── recalled-messages # Giao diện và lưu trữ tin nhắn đã thu hồi
 │   ├── tray-menu         # Menu khay hệ thống có bản địa hóa
+│   ├── update-check      # Thông báo và cài bản AppImage mới
 │   ├── window-state      # Theo dõi trạng thái cửa sổ để tránh mất cửa sổ
 │   ├── zadark        # Tiện ích giao diện tối và quyền riêng tư
 │   └── zcall         # Cửa sổ gọi điện và thông báo cuộc gọi đến

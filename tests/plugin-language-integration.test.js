@@ -154,7 +154,7 @@ describe('Language Core integration for plugin-owned dictionaries', () => {
     assert.match(renderer, /const baseCanvas = document\.getElementById\('base-canvas'\)/);
   });
 
-  it('keeps eight independent, schema-compatible locale JSON dictionaries', () => {
+  it('keeps nine independent, schema-compatible locale JSON dictionaries', () => {
     for (const [file, plugin] of [
       ['plugins/tray-menu/locale.json', 'tray-menu'],
       ['plugins/dev-mode/locale.json', 'dev-mode'],
@@ -163,7 +163,8 @@ describe('Language Core integration for plugin-owned dictionaries', () => {
       ['plugins/zcall/ui/locale.json', 'zcall'],
       ['plugins/screenshot/ui/locale.json', 'screenshot'],
       ['plugins/recalled-messages/locale.json', 'recalled-messages'],
-      ['plugins/offline/locale.json', 'offline']
+      ['plugins/offline/locale.json', 'offline'],
+      ['plugins/update-check/locale.json', 'update-check']
     ]) {
       const dictionary = JSON.parse(read(file));
       assert.equal(dictionary.schemaVersion, 1);
