@@ -184,6 +184,8 @@ async function runMainDistGroup() {
   const remaining = [
     'patch-wayland-titlebar',
     'patch-pasting-img',
+    'patch-get-path-for-file',
+    'patch-jxl-feature',
     'patch-db-cross-v4',
     'patch-os-sys-info',
     'patch-zcall-native',
