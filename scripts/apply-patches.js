@@ -33,6 +33,7 @@ const PATCHES = [
   'patch-shell-open-linux',
   'patch-call-signal-fix',
   'patch-network-and-sync-fix',
+  'patch-devtools',
   'patch-offline-startup',
   'patch-auto-theme',
   'patch-zadark-keep',
@@ -137,6 +138,8 @@ const CROSS_CUTTING_PATCHES = [
   'patch-xdg-user-dirs',
   'patch-network-and-sync-fix',
   'patch-flatpak-file-transfer',
+  // canOpenDevTools lives in both main.js and compact-app.js.
+  'patch-devtools',
 ];
 
 function runPatch(name, args = [], task = false) {
