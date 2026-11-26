@@ -242,6 +242,39 @@ fn real_camera_portal_captures_and_encodes_h264() {
 }
 
 #[test]
+#[ignore = "requires an interactive XDG Camera portal and camera permission; run explicitly with --ignored"]
+fn real_camera_portal_can_restart_repeatedly_in_one_process() {
+    for cycle in 1..=3 {
+        let capture = CameraCapture::start_pipewire_portal(640, 360, 30, 500_000)
+            .unwrap_or_else(|error| panic!("portal camera cycle {cycle}: {error}"));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let frame = loop {
+            if let Some(frame) = capture.try_recv() {
+                break frame;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "portal camera cycle {cycle} did not produce a frame within 15 seconds"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(frame.width >= 160 && frame.height >= 120);
+        assert!(
+            !frame.data.is_empty(),
+            "portal cycle {cycle} encoded an empty frame"
+        );
+        assert!(
+            crate::video::avc_codec_string(&frame.data)
+                .is_some_and(|codec| codec.starts_with("avc1.")),
+            "portal cycle {cycle} did not produce an H.264 SPS"
+        );
+        capture.stop();
+        drop(capture);
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+#[test]
 fn explicit_camera_backends_do_not_fall_back_to_another_backend() {
     use crate::devices::CameraBackend;
     use std::cell::RefCell;

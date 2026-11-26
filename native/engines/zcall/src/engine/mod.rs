@@ -9,6 +9,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::camera::CameraCapture;
@@ -189,6 +193,10 @@ pub struct EngineCore {
     group: Option<GroupCall>,
     media: Option<ZrtcMediaBackend>,
     camera: Option<CameraCapture>,
+    camera_start_rx: Option<Receiver<(u64, Result<CameraCapture, String>)>>,
+    camera_start_generation: Arc<AtomicU64>,
+    observed_camera_backend: Option<crate::devices::CameraBackend>,
+    observed_audio_backend: Option<crate::devices::AudioBackend>,
     screen: Option<ScreenCapture>,
     screen_lifecycle: ScreenLifecycle,
     screen_restart_source: Option<String>,
@@ -490,6 +498,10 @@ impl EngineCore {
             group: None,
             media,
             camera: None,
+            camera_start_rx: None,
+            camera_start_generation: Arc::new(AtomicU64::new(0)),
+            observed_camera_backend: None,
+            observed_audio_backend: None,
             screen: None,
             screen_lifecycle: ScreenLifecycle::default(),
             screen_restart_source: None,
@@ -546,6 +558,7 @@ impl EngineCore {
         self.tick_screen_completion();
         self.tick_media_controls();
         self.tick_screen_frames();
+        self.tick_camera_start();
         self.tick_camera_frames();
         self.tick_remote_video_frames();
         self.tick_deadlines();
@@ -828,6 +841,71 @@ impl EngineCore {
                 let codec = crate::video::avc_codec_string(&frame.data)
                     .unwrap_or_else(|| fallback.to_owned());
                 ui.send_local_video_frame(frame.key, &codec, &frame.data);
+            }
+        }
+    }
+
+    fn tick_camera_start(&mut self) {
+        let result = self
+            .camera_start_rx
+            .as_ref()
+            .and_then(|receiver| match receiver.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Disconnected) => Some((
+                    self.camera_start_generation.load(Ordering::Acquire),
+                    Err("Camera startup worker exited without a result".to_owned()),
+                )),
+                Err(TryRecvError::Empty) => None,
+            });
+        let Some((generation, result)) = result else {
+            return;
+        };
+        self.camera_start_rx = None;
+        if generation != self.camera_start_generation.load(Ordering::Acquire) {
+            if let Ok(capture) = result {
+                thread::spawn(move || drop(capture));
+            }
+            let camera_requested = self
+                .call
+                .as_ref()
+                .is_some_and(|call| call.camera.on && !call.camera.sharing_screen)
+                || self.group.as_ref().is_some_and(|group| group.camera.on);
+            if camera_requested {
+                Self::start_camera_capture(self);
+            }
+            return;
+        }
+        match result {
+            Ok(capture) => {
+                self.camera = Some(capture);
+                Self::log("native camera/OpenH264 capture started asynchronously");
+                if let Some(media) = self.media.as_ref() {
+                    media.note_debug_event("camera-capture started");
+                }
+                if let Some(camera) = self.camera.as_ref() {
+                    camera.request_keyframe();
+                }
+            }
+            Err(error) => {
+                Self::log(&format!("camera capture unavailable: {error}"));
+                if let Some(media) = self.media.as_ref() {
+                    media.note_debug_event("camera-capture failed");
+                }
+                if let Some(call) = self.call.as_mut() {
+                    call.camera.on = false;
+                }
+                if let Some(group) = self.group.as_mut() {
+                    group.camera.on = false;
+                }
+                if let Some(media) = self.media.as_ref() {
+                    let _ = media.set_group_camera(false);
+                }
+                self.ui_message(&json!({"type":"cameraError","message":error}));
+                self.camera_state(false);
+                self.sync_ui_state();
+                if self.group.is_some() {
+                    self.group_update_status();
+                }
             }
         }
     }
@@ -3699,6 +3777,65 @@ impl EngineCore {
         }
     }
 
+    fn on_ui_advanced_options_action(&mut self, action: &UiAction) {
+        if let Some(data) = action.data.as_ref() {
+            if let Err(error) = crate::devices::update_advanced_options(data) {
+                Self::log(&format!("could not persist call options: {error}"));
+            } else {
+                let current = crate::devices::load_prefs();
+                let camera_backend_changed =
+                    self.observed_camera_backend != Some(current.camera_backend);
+                let audio_backend_changed =
+                    self.observed_audio_backend != Some(current.audio_backend);
+                self.observed_camera_backend = Some(current.camera_backend);
+                self.observed_audio_backend = Some(current.audio_backend);
+                let call_active = self.call.is_some() || self.group.is_some();
+
+                if camera_backend_changed {
+                    if call_active {
+                        Self::log("camera backend preference changed; active call keeps its current backend until the next call");
+                    } else {
+                        self.stop_camera_capture();
+                        if Self::start_camera_capture(self) {
+                            Self::log("camera backend preference changed; probing the selected backend now");
+                        }
+                    }
+                }
+
+                if audio_backend_changed {
+                    if call_active {
+                        Self::log("audio backend preference changed; active call keeps its current backend until the next call");
+                    } else {
+                        let microphone = current.mic.clone();
+                        let speaker = current.speaker.clone();
+                        let spawn = thread::Builder::new()
+                                    .name("zcall-audio-backend-probe".into())
+                                    .spawn(move || {
+                                        use crate::audio::backend::{AudioPlayer, AudioRecorder};
+                                        let capture = AudioRecorder::new((!microphone.is_empty()).then_some(microphone.as_str()));
+                                        let playback = AudioPlayer::new((!speaker.is_empty()).then_some(speaker.as_str()));
+                                        match (capture, playback) {
+                                            (Ok(capture), Ok(playback)) => {
+                                                drop((capture, playback));
+                                                crate::zcall_log!("[zcall-rust] selected audio backend initialized successfully");
+                                            }
+                                            (capture, playback) => {
+                                                let error = capture.err().or_else(|| playback.err()).unwrap_or_else(|| "audio backend probe failed".into());
+                                                crate::zcall_log!("[zcall-rust] selected audio backend initialization failed: {error}");
+                                            }
+                                        }
+                                    });
+                        if let Err(error) = spawn {
+                            Self::log(&format!("could not start audio backend probe: {error}"));
+                        } else {
+                            Self::log("audio backend preference changed; probing the selected backend now");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn on_ui_misc_action(&mut self, action: &UiAction) -> bool {
         if !matches!(
             action.action.as_str(),
@@ -3707,13 +3844,7 @@ impl EngineCore {
             return false;
         }
         match action.action.as_str() {
-            "advancedOptions" => {
-                if let Some(data) = action.data.as_ref() {
-                    if let Err(error) = crate::devices::update_advanced_options(data) {
-                        Self::log(&format!("could not persist call options: {error}"));
-                    }
-                }
-            }
+            "advancedOptions" => self.on_ui_advanced_options_action(action),
             "tile" => {
                 if let (Some(src), Some(width)) = (action.src, action.width) {
                     if let Some(media) = self.media.as_ref() {
@@ -3762,7 +3893,7 @@ impl EngineCore {
 
     #[cfg(not(test))]
     fn start_camera_capture(this: &mut Self) -> bool {
-        if this.camera.is_some() {
+        if this.camera.is_some() || this.camera_start_rx.is_some() {
             return true;
         }
         let device = crate::devices::load_prefs()
@@ -3777,30 +3908,30 @@ impl EngineCore {
             profile.as_ref().map_or((640, 360, 15, 500_000), |profile| {
                 (profile.width, profile.height, profile.fps, profile.bitrate)
             });
-        match CameraCapture::start_selected(device.as_deref(), width, height, fps, bitrate) {
-            Ok(capture) => {
-                this.camera = Some(capture);
-                Self::log("native camera/OpenH264 capture started");
-                if let Some(media) = this.media.as_ref() {
-                    media.note_debug_event("camera-capture started");
+        let generation = this.camera_start_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        let current_generation = Arc::clone(&this.camera_start_generation);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawn = thread::Builder::new()
+            .name("zcall-camera-start".into())
+            .spawn(move || {
+                let result =
+                    CameraCapture::start_selected(device.as_deref(), width, height, fps, bitrate);
+                if current_generation.load(Ordering::Acquire) != generation {
+                    drop(result);
+                    let _ = tx.send((generation, Err("Camera startup cancelled".to_owned())));
+                    return;
                 }
+                let _ = tx.send((generation, result));
+            });
+        match spawn {
+            Ok(_) => {
+                this.camera_start_rx = Some(rx);
+                Self::log("camera capture startup dispatched to worker");
                 true
             }
             Err(error) => {
-                Self::log(&format!("camera capture unavailable: {error}"));
-                if let Some(media) = this.media.as_ref() {
-                    media.note_debug_event("camera-capture failed");
-                }
-                if let Some(call) = this.call.as_mut() {
-                    call.camera.on = false;
-                }
-                if let Some(group) = this.group.as_mut() {
-                    group.camera.on = false;
-                }
-                if let Some(media) = this.media.as_ref() {
-                    let _ = media.set_group_camera(false);
-                }
-                this.ui_message(&json!({"type":"cameraError","message":error}));
+                Self::log(&format!("camera startup worker could not start: {error}"));
+                this.ui_message(&json!({"type":"cameraError","message":error.to_string()}));
                 false
             }
         }
@@ -3843,6 +3974,8 @@ impl EngineCore {
     }
 
     fn stop_camera_capture(&mut self) {
+        self.camera_start_generation.fetch_add(1, Ordering::AcqRel);
+        self.camera_start_rx = None;
         if let Some(capture) = self.camera.take() {
             capture.stop();
             Self::log("native camera capture stopped");

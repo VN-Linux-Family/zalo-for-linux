@@ -163,7 +163,11 @@ impl CameraCapture {
         self.stop.store(true, Ordering::Release);
         if let Ok(mut worker) = self.worker.lock() {
             if let Some(worker) = worker.take() {
-                let _ = worker.join();
+                let _ = std::thread::Builder::new()
+                    .name("zcall-camera-reaper".into())
+                    .spawn(move || {
+                        let _ = worker.join();
+                    });
             }
         }
     }
