@@ -188,7 +188,6 @@ async function runMainDistGroup() {
     'patch-os-sys-info',
     'patch-zcall-native',
     'patch-notification-badge',
-    'patch-offline-startup',
     'patch-zadark-keep',
   ];
   for (const name of remaining) {
