@@ -14,7 +14,7 @@ try {
  };
 }
 
-const { APP_DIR, APP_PC_DIST, APP_MAIN_DIST } = require('../utils/paths');
+const { APP_DIR, APP_PC_DIST, APP_MAIN_DIST, resolveLazyLoginBundles } = require('../utils/paths');
 
 /**
  * Patch Zalo network state detection (gwig) and sync controller routing:
@@ -118,7 +118,7 @@ async function main() {
  }
 
  // 2. default-login bundle in lazy/
- const defaultLoginFiles = findFiles(lazyDir, /^default-login-main-startup-shared-worker-znotification\..*\.js$/);
+ const defaultLoginFiles = resolveLazyLoginBundles(pcDistDir);
  for (const f of defaultLoginFiles) {
   patchFile(f, [
    // Direct transfer_msg control events to SyncMessageController (Sync V1)

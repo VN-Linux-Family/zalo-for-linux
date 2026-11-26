@@ -8,8 +8,8 @@ const BUNDLE_DIRS = [
   APP_PC_DIST
 ];
 
-const PATH_MODULE_EXPORT_ANCHOR =
-  'n.d(t,"gethomeDirSyncAlt",(function(){return ';
+const PATH_MODULE_EXPORT_PATTERN =
+  /n\.d\(t,"gethomeDirSyncAlt",(?:\()?function\(\)\{return [A-Za-z_$][\w$]*\}\)?,/;
 const LOCALIZED_EXPORTS =
   'n.d(t,"getdocumentsDir",(function(){return zflGetDocumentsDir})),' +
   'n.d(t,"getdocumentsDirSync",(function(){return zflGetDocumentsDirSync})),' +
@@ -20,19 +20,15 @@ const LOCALIZED_EXPORTS =
 function addLocalizedPathExports(content) {
   if (content.includes('"getdownloadsDir"')) return content;
 
-  const anchorIndex = content.indexOf(PATH_MODULE_EXPORT_ANCHOR);
-  if (anchorIndex === -1) {
+  const match = content.match(PATH_MODULE_EXPORT_PATTERN);
+  if (!match) {
     throw new Error('App path module export anchor not found.');
   }
 
-  const exportEnd = content.indexOf(')),', anchorIndex);
-  if (exportEnd === -1) {
-    throw new Error('App path module export terminator not found.');
-  }
-
-  return content.slice(0, exportEnd + 3) +
+  const insertAt = match.index + match[0].length;
+  return content.slice(0, insertAt) +
     LOCALIZED_EXPORTS +
-    content.slice(exportEnd + 3);
+    content.slice(insertAt);
 }
 
 function addLocalizedPathHelpers(content) {

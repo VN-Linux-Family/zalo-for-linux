@@ -55,8 +55,8 @@ async function main() {
   if (!c.includes("process.platform === 'linux'")) {
     const before = c;
     c = c.replace(
-      /\}\s*else\s*\{\s*return\s*\{\s*\n?\s*stat:/,
-      "}else if(process.platform === 'linux'){\n        addon = require('./linux/zfile-linux.js');\n    }else{\n        return {\n            stat:"
+      /\}\s*else\s*\{\s*return\s*\{\s*\n?\s*(stat|diskInfo):/,
+      "}else if(process.platform === 'linux'){\n        addon = require('./linux/zfile-linux.js');\n    }else{\n        return {\n            $1:"
     );
     if (c === before) {
       throw new Error("patch-zfile: could not insert linux branch — zfile/index.js format changed, update the regex");

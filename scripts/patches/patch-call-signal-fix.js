@@ -14,7 +14,7 @@ try {
  };
 }
 
-const { APP_DIR, APP_PC_DIST } = require('../utils/paths');
+const { APP_DIR, APP_PC_DIST, resolveLazyLoginBundles } = require('../utils/paths');
 
 /**
  * Patch Zalo Call Signal Queue Deadlock:
@@ -84,7 +84,7 @@ async function main() {
  }
 
  // 2. default-login bundle in lazy/
- const defaultLoginFiles = findFiles(lazyDir, /^default-login-main-startup-shared-worker-znotification\..*\.js$/);
+ const defaultLoginFiles = resolveLazyLoginBundles(pcDistDir);
  for (const f of defaultLoginFiles) {
   patchFile(f, [
    ['using_queue:1', 'using_queue:0'],
