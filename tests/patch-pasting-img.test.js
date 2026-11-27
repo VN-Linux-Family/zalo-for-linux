@@ -32,6 +32,25 @@ describe('patch-pasting-img (Electron 43 clipboard API)', () => {
     const second = patchPastingImg.patchContent(first.content);
     assert.equal(second.status, 'already');
     assert.equal(second.content, first.content);
+
+    // Flexible bundle marker spacing/quotes
+    const spaced = `__ZaBUNDLENAME__ = 'preload-render';console.log("ok");`;
+    const spacedRes = patchPastingImg.patchContent(spaced);
+    assert.equal(spacedRes.status, 'patched');
+    assert.doesNotThrow(() => new vm.Script(spacedRes.content));
+  });
+
+  it('matches startGetClipboard and startRewriteClipboard across JS syntax variants', () => {
+    const variants = [
+      'const o={startGetClipboard:e=>{return Promise.resolve({a:"{}"})},startRewriteClipboard:(t)=>Promise.resolve(t)};',
+      'const o={startGetClipboard:async function(req){return {req}},async startRewriteClipboard(id){return id}};',
+      'const o={startGetClipboard(x){return x},startRewriteClipboard:async t=>{return t}};',
+    ];
+    for (const src of variants) {
+      const res = patchPastingImg.patchMainContent(src);
+      assert.equal(res.status, 'patched');
+      assert.doesNotThrow(() => new vm.Script(res.content));
+    }
   });
 
   it('upgrades an older Electron 22 patch in place', () => {

@@ -7,6 +7,7 @@ const { APP_MAIN_DIST } = require('../utils/paths');
 const PATCH_START = '// CLIPBOARD IMAGE PASTE FIX';
 const PATCH_END = '// END CLIPBOARD IMAGE PASTE FIX';
 const BUNDLE_MARKER = '__ZaBUNDLENAME__="preload-render"';
+const BUNDLE_PATTERN = /__ZaBUNDLENAME__\s*=\s*["']preload-render["']/;
 const MAIN_PATCH_MARKER = '/*zalo-linux-clipboard*/';
 
 // Paste handler prepended to preload-render.js (before `__ZaBUNDLENAME__="preload-render"`).
@@ -170,18 +171,23 @@ ${PATCH_END}
 `;
 }
 
-// Replace a `key:function(arg){...}` method body using balanced brace scanning
-// so nested objects and minifier-renamed identifiers never break matching.
-function replaceMethodBody(content, methodPrefix, replacement) {
-  const start = content.indexOf(methodPrefix);
-  if (start === -1) return null;
-  const openBrace = content.indexOf('{', start + methodPrefix.length);
-  if (openBrace === -1) return null;
+// Replace an object method (`name:function(a){}`, `name:a=>{}`, `name:(a)=>{}`,
+// `name:a=>expr`, `async name(a){}`, etc.) using regex + balanced delimiter
+// scanning so minifier renames, arrow functions, and whitespace never break it.
+function replaceMethodBody(content, methodName, replacement) {
+  const re = new RegExp(
+    `(?:async\\s+)?${methodName}\\s*(?::\\s*(?:async\\s*)?(?:function\\s*\\([^)]*\\)|\\([^)]*\\)\\s*=>|[A-Za-z_$][\\w$]*\\s*=>)|\\([^)]*\\))\\s*\\{?`
+  );
+  const match = re.exec(content);
+  if (!match) return null;
+  const start = match.index;
+  const isBlock = match[0].endsWith('{');
+  const scanStart = isBlock ? start + match[0].length - 1 : start + match[0].length;
 
   let depth = 0;
   let inStr = null;
   let escaped = false;
-  for (let i = openBrace; i < content.length; i++) {
+  for (let i = scanStart; i < content.length; i++) {
     const ch = content[i];
     if (inStr) {
       if (escaped) {
@@ -195,16 +201,54 @@ function replaceMethodBody(content, methodPrefix, replacement) {
     }
     if (ch === '"' || ch === "'" || ch === '`') {
       inStr = ch;
-    } else if (ch === '{') {
+    } else if (ch === '{' || ch === '(' || ch === '[') {
       depth++;
-    } else if (ch === '}') {
+    } else if (ch === '}' || ch === ')' || ch === ']') {
+      if (!isBlock && depth === 0 && ch === '}') {
+        return content.slice(0, start) + replacement + content.slice(i);
+      }
       depth--;
-      if (depth === 0) {
+      if (isBlock && depth === 0 && ch === '}') {
         return content.slice(0, start) + replacement + content.slice(i + 1);
       }
+    } else if (!isBlock && depth === 0 && (ch === ',' || ch === ';')) {
+      return content.slice(0, start) + replacement + content.slice(i);
     }
   }
   return null;
+}
+
+function linuxStartGetClipboard(requestId) {
+  /*zalo-linux-clipboard*/
+  try {
+    const { clipboard } = require('electron');
+    const fs = require('fs');
+    const { fileURLToPath } = require('url');
+    let raw = '';
+    const uriBuf = clipboard.readBuffer('text/uri-list');
+    if (uriBuf && uriBuf.length > 0) {
+      raw = uriBuf.toString('utf8');
+    } else if (clipboard.has && clipboard.has('x-special/gnome-copied-files')) {
+      const gnomeBuf = clipboard.readBuffer('x-special/gnome-copied-files');
+      if (gnomeBuf && gnomeBuf.length > 0) {
+        raw = gnomeBuf.toString('utf8').split(/\r?\n/).slice(1).join('\n');
+      }
+    }
+    const paths = [];
+    if (raw) {
+      for (const line of raw.split(/\r?\n/)) {
+        const s = line.trim();
+        if (!s || s.startsWith('#') || !s.startsWith('file://')) continue;
+        try {
+          const p = fileURLToPath(s);
+          if (fs.statSync(p).isFile()) paths.push(p);
+        } catch (_) {}
+      }
+    }
+    return Promise.resolve({ requestId, content: paths.length > 0 ? paths.join('|') : null });
+  } catch (_) {
+    return Promise.resolve({ requestId, content: null });
+  }
 }
 
 // Zalo's renderer paste handler (_e -> Ee) always calls $zscreencap.getClipboard(userId)
@@ -217,17 +261,17 @@ function patchMainContent(content) {
   }
 
   const getClipReplacement =
-    `startGetClipboard:function(e){${MAIN_PATCH_MARKER}try{const{clipboard:c}=require("electron"),f=require("fs"),{fileURLToPath:u}=require("url");let r="";const b=c.readBuffer("text/uri-list");if(b&&b.length>0)r=b.toString("utf8");else if(c.has&&c.has("x-special/gnome-copied-files")){const g=c.readBuffer("x-special/gnome-copied-files");g&&g.length>0&&(r=g.toString("utf8").split(/\\r?\\n/).slice(1).join("\\n"))}const p=[];if(r)for(const l of r.split(/\\r?\\n/)){const s=l.trim();if(s&&!s.startsWith("#")&&s.startsWith("file://"))try{const d=u(s);f.statSync(d).isFile()&&p.push(d)}catch(_){}}return Promise.resolve({requestId:e,content:p.length>0?p.join("|"):null})}catch(_){return Promise.resolve({requestId:e,content:null})}}`;
+    'startGetClipboard:' + linuxStartGetClipboard.toString().replace(/^function\s+\w+/, 'function');
 
   const rewriteClipReplacement =
     `startRewriteClipboard:function(e){${MAIN_PATCH_MARKER}return Promise.resolve({requestId:e})}`;
 
-  let updated = replaceMethodBody(content, 'startGetClipboard:function(', getClipReplacement);
+  let updated = replaceMethodBody(content, 'startGetClipboard', getClipReplacement);
   if (updated === null) {
     throw new Error('Clipboard image paste patch not applied, Zalo changed: main.js: startGetClipboard');
   }
 
-  const updatedRewrite = replaceMethodBody(updated, 'startRewriteClipboard:function(', rewriteClipReplacement);
+  const updatedRewrite = replaceMethodBody(updated, 'startRewriteClipboard', rewriteClipReplacement);
   if (updatedRewrite === null) {
     throw new Error('Clipboard image paste patch not applied, Zalo changed: main.js: startRewriteClipboard');
   }
@@ -238,23 +282,28 @@ function patchMainContent(content) {
 function patchContent(content) {
   const pasteHandler = buildPasteHandler();
   const handlerStart = content.indexOf(PATCH_START);
-  const bundleStart = content.indexOf(BUNDLE_MARKER);
+  const bundleMatch = BUNDLE_PATTERN.exec(content);
 
-  if (bundleStart === -1) {
+  if (!bundleMatch) {
     throw new Error('Clipboard image paste patch not applied, Zalo changed: preload-render.js: bundle marker');
   }
 
-  if (handlerStart !== -1 && bundleStart > handlerStart) {
-    const updated = content.slice(0, handlerStart) + pasteHandler + content.slice(bundleStart);
-    return { content: updated, status: updated === content ? 'already' : 'updated' };
+  if (handlerStart !== -1) {
+    const endMarkerIdx = content.indexOf(PATCH_END, handlerStart);
+    const afterEnd = endMarkerIdx !== -1
+      ? (content[endMarkerIdx + PATCH_END.length] === '\n'
+        ? endMarkerIdx + PATCH_END.length + 1
+        : endMarkerIdx + PATCH_END.length)
+      : bundleMatch.index;
+
+    if (afterEnd >= handlerStart) {
+      const updated = content.slice(0, handlerStart) + pasteHandler + content.slice(afterEnd);
+      return { content: updated, status: updated === content ? 'already' : 'updated' };
+    }
   }
 
-  if (handlerStart === -1) {
-    const updated = content.slice(0, bundleStart) + pasteHandler + content.slice(bundleStart);
-    return { content: updated, status: 'patched' };
-  }
-
-  throw new Error('Clipboard image paste patch not applied, Zalo changed: preload-render.js: bundle marker');
+  const updated = content.slice(0, bundleMatch.index) + pasteHandler + content.slice(bundleMatch.index);
+  return { content: updated, status: 'patched' };
 }
 
 async function main(mainDistDir = APP_MAIN_DIST) {
