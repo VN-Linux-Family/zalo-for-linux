@@ -260,10 +260,14 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const helpers = minify(helpersSource);
 
+  // Pasting images from the clipboard needs both pieces in preload-render.js;
+  // a Zalo update that moves them must fail the build, not ship it broken.
+  const failures = [];
   for (const file of preloadFiles) {
     const filePath = path.join(APP_MAIN_DIST, file);
     if (!fs.existsSync(filePath)) {
-      logger.warn(`Skipping ${file} (not found)`);
+      if (file === 'preload-render.js') failures.push(`${file}: not found`);
+      else logger.warn(`Skipping ${file} (not found)`);
       continue;
     }
 
@@ -274,7 +278,8 @@ window.addEventListener('DOMContentLoaded', () => {
         content = content.replace(original, original + helpers);
         logger.dim(`Patched clipboard helpers in ${file}`);
       } else {
-        logger.warn(`Pattern not found in ${file}, skipping helpers`);
+        failures.push(`${file}: clipboard helper anchor`);
+        continue;
       }
     }
 
@@ -292,11 +297,15 @@ window.addEventListener('DOMContentLoaded', () => {
         content = pasteHandler + content;
         logger.dim(`Patched tryPasteImage listener in ${file}`);
       } else {
-        logger.warn(`Bundle marker not found in ${file}, skipping paste handler update`);
+        failures.push(`${file}: bundle marker`);
+        continue;
       }
     }
 
     fs.writeFileSync(filePath, content, 'utf8');
+  }
+  if (failures.length) {
+    throw new Error('Clipboard image paste patch not applied, Zalo changed: ' + failures.join('; '));
   }
 }
 
