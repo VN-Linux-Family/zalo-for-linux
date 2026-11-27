@@ -826,14 +826,16 @@ class ZrtcMediaBackend extends EventEmitter {
     this._send(wrapMediaPacket({ msgType: MSG_TYPES.AUDIO_RTP, token: this.serverToken, payload: rtp }), this.activeServer, 'audio');
     // Same packet over P2P once the peer reached us: it drops duplicates by seq.
     if (this.p2pPath) this._send(wrapP2pAudio({ role: this.params.role, callId: this.params.callId, rtp }), this.p2pPath, 'P2P audio');
-    if (this.sendRate) this.sendRate.onSent(this.twSeq);
+    // Group audio carries no transport-cc (buildGroupAudioRtpHeader): only video
+    // takes numbers from the shared sequence.
+    if (this.sendRate && !this.group) this.sendRate.onSent(this.twSeq);
     this.counters.tx++;
     this.audioOctets += opus.length;
     this._noteAudioTx();
     this.seq = (this.seq + 1) & 0xffff;
     if (this.seq === 0) this.roc++;
     this.ts = (this.ts + FRAME_SAMPLES) >>> 0;
-    this.twSeq = (this.twSeq + 1) & 0xffff;
+    if (!this.group) this.twSeq = (this.twSeq + 1) & 0xffff;
   }
 
   // 1-1: tell the window the ladder rung. Group: the same, and tell the SFU
