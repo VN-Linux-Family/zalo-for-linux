@@ -24,10 +24,9 @@
     const containers = document.querySelectorAll('#setting .setting-menu');
     if (!containers.length) return;
     const container = containers[containers.length - 1];
-    const reference = container.querySelector('.setting-menu__item');
     const item = document.createElement('div');
     item.id = 'zalo-advanced-setting-item';
-    item.className = reference ? reference.className : 'setting-menu__item';
+    item.className = 'setting-menu__item flx middle-flex clickable';
     item.setAttribute('role', 'button');
     item.setAttribute('tabindex', '0');
     item.title = translate('menu.title');

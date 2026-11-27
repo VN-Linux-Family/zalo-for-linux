@@ -27,7 +27,11 @@ describe('Language Core integration for plugin-owned dictionaries', () => {
     const menu = read('plugins/advanced-settings/inject-menu.js');
     const dictionary = JSON.parse(read('plugins/advanced-settings/locale.json'));
     assert.equal(dictionary.plugin, 'advanced-settings');
-    assert.equal(dictionary.messages['advanced-settings.menu.open'].en, 'Advanced Settings...');
+    assert.equal(dictionary.messages['advanced-settings.title'].vi, 'Cài đặt nâng cao');
+    assert.equal(dictionary.messages['advanced-settings.menu.open'].vi, 'Cài đặt nâng cao');
+    assert.equal(dictionary.messages['advanced-settings.menu.open'].en, 'Advanced Settings');
+    assert.match(menu, /item\.className = 'setting-menu__item flx middle-flex clickable'/);
+    assert.doesNotMatch(menu, /reference\.className/);
     assert.equal(dictionary.messages['advanced-settings.devModeTitle'].en, 'Developer Mode');
     assert.equal(dictionary.messages['advanced-settings.devModeForced'].vi, 'Được bật bắt buộc bởi biến môi trường ZALO_DEV_MODE.');
     assert.match(renderer, /renderDevModeStatus\(\)/);
