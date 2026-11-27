@@ -26,24 +26,11 @@ describe('patch-titlebar-linux-css', () => {
     assert.equal(result.changed, true);
   });
 
-  it('rejects the previous relative/margin-compensation layout instead of migrating it', () => {
-    const old = '#main-tab{position:relative!important;top:32px!important;height:calc(100vh - 32px)!important;margin-top:-32px!important;padding-top:0!important;align-self:flex-start!important}';
-    const oldBanner = 'body:has(.system-banner__container.--main-window:not(.--web)) #main-tab:not(.WEB){margin-top:-64px!important}';
-    const source = '#main-tab{width:70px;position:relative;margin-top:-32px}' + old + oldBanner;
-    assert.throws(() => patchLayoutContent(source), /found obsolete titlebar compensation/);
-  });
-
   it('removes the macOS-reserved top gap from both nav header variants', () => {
     const source = '.nav__tabs__header{display:flex;flex-direction:column;gap:6px;margin-top:32px}.nav__tabs.WEB .nav__tabs__header{margin-top:4px}';
     const result = patchLayoutContent(source);
     assert.equal(result.content, '.nav__tabs__header{display:flex;flex-direction:column;gap:6px}');
     assert.equal(result.changed, true);
-  });
-
-
-  it('rejects already-patched CSS instead of repairing or accepting it', () => {
-    const once = patchContent(ORIGINAL_RULE).content;
-    assert.throws(() => patchContent(once), /expected original Zalo stylesheet, found patched CSS/);
   });
 
   it('fails closed if the original Zalo CSS rule changes', () => {

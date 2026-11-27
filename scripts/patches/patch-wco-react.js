@@ -10,7 +10,7 @@ const IPC_CHANNEL = 'zalo-wco-theme';
 const MAIN_MARKER = '__zaloWcoIpcMain';
 const REACT_MARKER = '__zaloWcoThemeBridge';
 function buildReactBridge(themeModuleId) {
-  return `/*wco-theme-zalo-hook-v6*/
+  return `
 const __zaloWcoUseTheme=n(${JSON.stringify(themeModuleId)}).a;
 const ${REACT_MARKER}=()=>{
   const {isDark}=__zaloWcoUseTheme();
@@ -51,14 +51,14 @@ function findThemeHookModuleId(content, root = parseAst(content)) {
 const MAIN_LISTENER = `\n;(() => {\n  const { ipcMain: ${MAIN_MARKER}, BrowserWindow: __zaloWcoBrowserWindow } = require('electron');\n  ${MAIN_MARKER}.on('${IPC_CHANNEL}', (_event, symbolColor) => {\n    if (typeof symbolColor !== 'string' || !/^(#[0-9a-f]{3,8}|rgba?\\([^)]*\\)|hsla?\\([^)]*\\))$/i.test(symbolColor)) return;\n    for (const win of __zaloWcoBrowserWindow.getAllWindows()) {\n      try {\n        if (!win || win.isDestroyed() || win.__zaloPhotoViewer === true || typeof win.setTitleBarOverlay !== 'function') continue;\n        win.setTitleBarOverlay({ color: 'rgba(0,0,0,0)', symbolColor });\n      } catch (_) {}\n    }\n  });\n})();\n`;
 
 function patchMainContent(content) {
-  if (content.includes(IPC_CHANNEL) && content.includes('setTitleBarOverlay({ color:')) return { content, status: 'already' };
+  if (content.includes(MAIN_MARKER)) return { content, status: 'already' };
   const updated = content + MAIN_LISTENER;
   parseAst(updated);
   return { content: updated, status: 'patched' };
 }
 
 function patchPreloadContent(content) {
-  if (content.includes('setWcoTheme:{apiKey:"' + IPC_CHANNEL + '"')) return { content, status: 'already' };
+  if (content.includes('setWcoTheme:{apiKey:"zalo-wco-theme"')) return { content, status: 'already' };
   const root = parseAst(content);
   const objects = root.findAll({ rule: { kind: 'object' } }).filter(object =>
     object.children().some(node => node.kind() === 'pair' && node.field('key')?.text().replace(/["']/g, '') === 'getAppVisibilityStatus')
@@ -90,12 +90,8 @@ function findModuleFunction(method) {
 }
 
 function patchReactContent(content) {
-  let root = parseAst(content);
-  if (content.includes(REACT_MARKER)) {
-    if (content.includes('wco-theme-zalo-hook-v6')) return { content, status: 'already' };
-    throw new Error('WCO React patch: legacy or unknown bridge found; expected pristine Zalo bundle');
-  }
-
+  if (content.includes(REACT_MARKER)) return { content, status: 'already' };
+  const root = parseAst(content);
   const renderFunctions = [
     ...root.findAll({ rule: { kind: 'method_definition' } }),
     ...root.findAll({ rule: { kind: 'arrow_function' } }),
@@ -156,7 +152,7 @@ function patchFile(filePath, transform) {
   if (!fs.existsSync(filePath)) throw new Error(`WCO React patch: file not found: ${filePath}`);
   const original = fs.readFileSync(filePath, 'utf8');
   const result = transform(original);
-  if (result.status !== 'already') fs.writeFileSync(filePath, result.content, 'utf8');
+  fs.writeFileSync(filePath, result.content, 'utf8');
   return result.status;
 }
 

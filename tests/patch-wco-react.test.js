@@ -44,6 +44,7 @@ describe('patch-wco-react', () => {
     assert.ok(result.content.indexOf(`const ${REACT_MARKER}`) < result.content.indexOf('const Titlebar='));
     assert.ok(result.content.includes('ReactAlias.a.Fragment'));
     assert.doesNotThrow(() => new Function(result.content));
+    assert.equal(patchReactContent(result.content).status, 'already');
   });
 
   it('injects a React-owned theme observer into titlebar render using discovered React alias', () => {
@@ -59,8 +60,8 @@ describe('patch-wco-react', () => {
     assert.ok(result.content.includes('ReactAlias.a.useEffect'));
     assert.ok(result.content.indexOf('"use strict";') < result.content.indexOf('const __zaloWcoUseTheme'));
     assert.ok(result.content.includes('ReactAlias.a.Fragment'));
-    assert.equal(patchReactContent(result.content).status, 'already');
     assert.doesNotThrow(() => new Function(result.content));
+    assert.equal(patchReactContent(result.content).status, 'already');
   });
   it('discovers compact-app-pc bundles by filename pattern rather than a build hash', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wco-targets-'));
@@ -90,11 +91,6 @@ describe('patch-wco-react', () => {
   it('discovers the theme hook by behavior instead of a fixed webpack module ID', () => {
     assert.equal(findThemeHookModuleId(THEME_HOOK_MODULE), 'theme-module-v2');
     assert.equal(findThemeHookModuleId(`${THEME_HOOK_MODULE}${THEME_HOOK_MODULE.replace('theme-module-v2', 'another-theme-module')}`), 'theme-module-v2');
-  });
-
-  it('refuses legacy bridge input instead of migrating it', () => {
-    const legacy = `${THEME_HOOK_MODULE}/*wco-theme-zalo-hook-v4*/const __zaloWcoThemeBridge=()=>null;`;
-    assert.throws(() => patchReactContent(legacy), /legacy or unknown bridge found; expected pristine Zalo bundle/);
   });
 
 });

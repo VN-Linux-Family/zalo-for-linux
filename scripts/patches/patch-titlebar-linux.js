@@ -37,11 +37,6 @@ function collectEdits(content, root = parseAst(content)) {
     const pairs = object.children().filter(node => node.kind() === 'pair');
     const frame = pairs.find(pair => pair.field('key')?.text() === 'frame');
     const titleBarStyle = pairs.find(pair => pair.field('key')?.text() === 'titleBarStyle');
-    const titleBarOverlay = pairs.find(pair => pair.field('key')?.text() === 'titleBarOverlay');
-    if (titleBarOverlay) {
-      throw new Error('Linux client-titlebar patch: expected original Zalo window options without titleBarOverlay');
-    }
-
     const isPhotoViewer = /title:\s*['\"]Zalo Photo['\"]/.test(object.text());
     const desiredOverlay = isPhotoViewer ? PHOTO_OVERLAY_VALUE : OVERLAY_VALUE;
     const minHeight = pairs.find(pair => pair.field('key')?.text() === 'minHeight');
@@ -93,19 +88,11 @@ function patchInitialWindowTheme(content, root = parseAst(content)) {
     throw new Error(`Linux client-titlebar patch: expected one initial main-window theme options object, found ${matches.length}`);
   }
   const { overlay, configName } = matches[0];
-  const value = overlay.field('value');
-  if (value?.text().includes('__zaloInitialWcoTheme')) {
-    throw new Error('Linux client-titlebar patch: initial WCO theme already patched');
-  }
   const replacement = `titleBarOverlay:"linux"===process.platform?{color:"rgba(0,0,0,0)",symbolColor:${configName}&&${configName}.theme==="dark"?"#ffffff":"#000000"}:false`;
   return applyEdits(root, [overlay.replace(replacement)]);
 }
 
 function patchTitlebarContent(content) {
-  if (content.includes('__zaloPhotoViewer')) {
-    throw new Error('Linux client-titlebar patch: expected original Zalo main bundle without WCO markers');
-  }
-
   const photoTitleIndex = content.indexOf('title:"Zalo Photo"');
   if (photoTitleIndex < 0) throw new Error('Linux photo viewer patch: original constructor not found');
   const maximizeIndex = content.indexOf('o.maximize&&', photoTitleIndex);
@@ -121,13 +108,13 @@ function patchTitlebarContent(content) {
   if (!output.includes(themeUpdateAnchor) || !output.includes(themeBackgroundAnchor)) {
     throw new Error('Linux client-titlebar patch: original Zalo app-theme background update not found');
   }
-  if (output.includes('setTitleBarOverlay(')) {
-    throw new Error('Linux client-titlebar patch: unexpected titlebar overlay mutation in original Zalo theme path');
-  }
   return patchInitialWindowTheme(output);
 }
 
 function patchContent(content) {
+  if (content.includes('__zaloPhotoViewer=!0') && content.includes('titleBarOverlay:"linux"===process.platform')) {
+    return { content, status: 'already' };
+  }
   const root = parseAst(content);
   const result = collectEdits(content, root);
   const output = patchTitlebarContent(result.edits.length ? applyEdits(root, result.edits) : content);

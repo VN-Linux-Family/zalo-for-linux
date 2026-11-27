@@ -8,17 +8,14 @@ const { APP_PC_DIST } = require('../utils/paths');
 const ORIGINAL_RULE = '.titlebar{-webkit-user-select:none;height:32px;min-height:32px;background:var(--title-bar);font-size:.8125rem;font-weight:500;line-height:1.5;z-index:2;width:calc(100% - 86px);left:70px;padding-left:16px;color:var(--text-primary)}';
 const TITLEBAR_RULES = '.titlebar{left:0!important;width:100%!important;box-sizing:border-box!important;padding-left:0!important}.titlebar .title-name.macos,.titlebar.locked .title-name.macos{left:0!important;width:100%!important;padding-left:8px!important;box-sizing:border-box!important}.login-title-bar__setting-button:has(> div[icon="icon-outline-menu"].z--btn--v2.btn-tertiary-neutral.large.--rounded.icon-only){left:0!important;right:auto!important}';
 const NAV_RULE = '#sidebarNav:before{content:"";display:block;flex:0 0 70px;width:70px;min-width:70px}#main-tab:not(.WEB){position:fixed!important;left:0!important;top:32px!important;bottom:0!important;width:70px!important;height:auto!important;margin:0!important;align-self:auto!important;z-index:11!important}';
-const BANNER_RULE = '';
 const MACOS_NAV_GAP_RULES = [
   ['.nav__tabs__header{display:flex;flex-direction:column;gap:6px;margin-top:32px}', '.nav__tabs__header{display:flex;flex-direction:column;gap:6px}'],
   ['.nav__tabs.WEB .nav__tabs__header{margin-top:4px}', ''],
 ];
-const RULE = TITLEBAR_RULES + NAV_RULE + BANNER_RULE;
+const RULE = TITLEBAR_RULES + NAV_RULE;
 
 function patchContent(content) {
-  if (content.includes(RULE)) {
-    throw new Error('Linux titlebar CSS patch: expected original Zalo stylesheet, found patched CSS');
-  }
+  if (content.includes(RULE)) return { content, status: 'already' };
   if (!content.includes(ORIGINAL_RULE)) {
     throw new Error('Linux titlebar CSS patch: expected original Zalo titlebar rule not found');
   }
@@ -33,17 +30,6 @@ function collectFiles(directory, extension) {
 }
 
 function patchLayoutContent(content) {
-  const obsoleteNavRules = [
-    '#main-tab{position:relative!important;top:32px!important;height:calc(100vh - 32px)!important;margin-top:-32px!important;padding-top:0!important;align-self:flex-start!important}',
-    'body:has(.system-banner__container.--main-window:not(.--web)) #main-tab:not(.WEB){margin-top:-64px!important}',
-  ];
-  if (content.includes(NAV_RULE) || content.includes(TITLEBAR_RULES)) {
-    throw new Error('Linux titlebar CSS patch: expected pristine Zalo layout, found patched CSS');
-  }
-  if (obsoleteNavRules.some(rule => content.includes(rule))) {
-    throw new Error('Linux titlebar CSS patch: expected pristine Zalo layout, found obsolete titlebar compensation');
-  }
-
   let output = content;
   let changed = false;
   for (const [reserved, replacement] of MACOS_NAV_GAP_RULES) {
@@ -56,7 +42,7 @@ function patchLayoutContent(content) {
     output = output.replace(ORIGINAL_RULE, ORIGINAL_RULE + TITLEBAR_RULES);
     changed = true;
   }
-  if (output.includes('#main-tab{width:70px')) {
+  if (output.includes('#main-tab{width:70px') && !output.includes(NAV_RULE)) {
     output += NAV_RULE;
     changed = true;
   }
@@ -84,4 +70,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = { main, patchContent, patchLayoutContent, collectFiles, ORIGINAL_RULE, TITLEBAR_RULES, NAV_RULE, BANNER_RULE, MACOS_NAV_GAP_RULES, RULE };
+module.exports = { main, patchContent, patchLayoutContent, collectFiles, ORIGINAL_RULE, TITLEBAR_RULES, NAV_RULE, MACOS_NAV_GAP_RULES, RULE };

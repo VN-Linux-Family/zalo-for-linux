@@ -50,11 +50,6 @@ describe('patch-titlebar-linux', () => {
     assert.ok(content.includes('setPhotoViewerWindow:function(e){y=e,e&&(e.__zaloPhotoViewer=!0);'));
   });
 
-  it('rejects patched input instead of repairing or accepting it', () => {
-    const once = patchContent(original(LOGIN)).content;
-    assert.throws(() => patchContent(once), /expected original Zalo window options without titleBarOverlay/);
-  });
-
   it('fails closed when the original login window options are absent', () => {
     assert.throws(() => patchContent(POPUP + PHOTO), /original login window options not found/);
   });
