@@ -115,7 +115,6 @@ const DISJOINT_GROUPS = [
     args: ['sync-v2-sub-worker'],
     patches: [],
   },
-  { type: 'patch', name: 'patch-zalo-language-transport', label: 'patch-zalo-language-transport' },
   { type: 'patch', name: 'patch-sqlite3', label: 'patch-sqlite3' },
   { type: 'patch', name: 'patch-file-utilities', label: 'patch-file-utilities' },
   { type: 'patch', name: 'patch-file-utils', label: 'patch-file-utils' },
@@ -136,6 +135,10 @@ const CROSS_CUTTING_PATCHES = [
   // Writes the lazy login bundle, which pc-dist-lazy-login patches in parallel
   // during wave 1; running it there loses one side's edits.
   'patch-offline-startup',
+  // Rewrites preload-render.js and compact-app-preload.js, which group-main-dist
+  // patches in wave 1 (pasting-img, auto theme, Wayland titlebar). In parallel a
+  // patch could read a half-written file or lose the other side's edits.
+  'patch-zalo-language-transport',
   'patch-call-signal-fix',
   'patch-xdg-user-dirs',
   'patch-network-and-sync-fix',
