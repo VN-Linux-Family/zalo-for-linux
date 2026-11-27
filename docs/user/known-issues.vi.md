@@ -8,7 +8,6 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
 | :--- | :--- | :--- |
 | **Văng ngay khi mở (Ubuntu 23.10+)** | AppArmor chặn unprivileged user namespace | Thêm cờ `--no-sandbox` vào lệnh chạy hoặc file `.desktop`, hoặc làm theo [hướng dẫn xử lý của AM](https://github.com/ivan-hc/AM/blob/main/docs/troubleshooting.md#ubuntu-mess) để tắt triệt để giới hạn. |
 | **Không gọi được (Mất tiếng/Mic/Cam)** | Thiếu thư viện âm thanh Opus hoặc PulseAudio / PipeWire | **Với engine native Rust mặc định**: Chỉ cần `libopus` và `libpulse` (thường có sẵn trên hầu hết desktop Linux):<br>• **Debian / Ubuntu**: `sudo apt install libopus0 libpulse0`<br>• **Arch Linux**: `sudo pacman -S opus libpulse`<br>• **Fedora / RHEL**: `sudo dnf install opus pulseaudio-libs`<br><br>*Chế độ dự phòng Python (`ZCALL_USE_PYTHON=1`)* cần thêm `python3` và `pulseaudio-utils`. |
-| **Không dán được ảnh (`Ctrl+V`)** | Thiếu công cụ clipboard cho Wayland / X11 | Cài đặt `wl-clipboard` (nếu dùng Wayland) hoặc `xclip` (nếu dùng X11). |
 | **Giao diện không tự đổi Dark/Light** | Ứng dụng mặc định giữ theme tĩnh | Đã hỗ trợ tự động nhận diện theo thời gian thực qua GNOME D-Bus và XDG Desktop Portal trong các bản build mới. |
 | **Không có icon trên menu ứng dụng** | Chạy AppImage trực tiếp chưa tích hợp | Nếu cài qua AM, chỉ cần chạy `am reinstall zalo`. Nếu chạy AppImage thủ công, dùng [Gear Lever](https://flathub.org/en/apps/it.mijorus.gearlever) để đưa vào Menu, hoặc tạo file `~/.local/share/applications/zalo.desktop`. |
 
@@ -42,8 +41,8 @@ Bảng tra cứu nhanh các lỗi phổ biến khi cài đặt và sử dụng Z
   - **Đóng góp:** [@realdtn2](https://github.com/realdtn2), [@DMKha241](https://github.com/DMKha241). Xem [PR #24](https://github.com/VN-Linux-Family/zalo-for-linux/pull/24), [Issue #15](https://github.com/VN-Linux-Family/zalo-for-linux/issues/15).
 
 - **Dán và gửi ảnh từ clipboard:**
-  - **Lỗi:** Nhấn `Ctrl+V` không dán được ảnh, gửi ảnh bị biến thành file đính kèm thô thay vì ảnh xem trước.
-  - **Khắc phục:** Tích hợp bộ dán ảnh qua `wl-clipboard` (Wayland) và `xclip` (X11).
+  - **Lỗi:** Nhấn `Ctrl+V` không dán được ảnh trên Linux do luồng dán của Zalo chờ phản hồi từ helper `ZaloCap` của Windows/macOS (`get-clipboard` IPC), và ảnh copy từ trình quản lý file (`text/uri-list`) không được Chromium chuyển thành `File`.
+  - **Khắc phục:** Xử lý `get-clipboard` / `rewrite-clipboard` và sự kiện dán ảnh trực tiếp bằng API `clipboard` gốc của Electron (`readBuffer`, `readImage`, `availableFormats`) cùng `ClipboardEvent('paste')`.
   - **Đóng góp:** [@realdtn2](https://github.com/realdtn2), [@DMKha241](https://github.com/DMKha241) ([PR #25](https://github.com/VN-Linux-Family/zalo-for-linux/pull/25)), [@brucenguyen1102](https://github.com/brucenguyen1102) ([PR #34](https://github.com/VN-Linux-Family/zalo-for-linux/pull/34)).
 
 - **Khởi động Zalo cùng hệ thống trên Linux:**

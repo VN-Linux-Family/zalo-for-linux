@@ -2,315 +2,303 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { APP_DIR, APP_MAIN_DIST } = require('../utils/paths');
+const { APP_MAIN_DIST } = require('../utils/paths');
 
-// Minify JS to match Zalo's bundler output style (no newlines, single
-// spaces, no block comments). Preserves string literals.
-function minify(js) {
-  return js
-    .replace(/\/\*[\s\S]*?\*\//g, '')                              // block comments
-    .replace(/(^|[^:"'])\/\/[^\n]*/g, '$1')                        // line comments (avoid ://, // in strings)
-    .replace(/\s*\n\s*/g, '')                                      // strip newlines + indent
-    .replace(/\s+/g, ' ')                                          // collapse runs of whitespace
-    .replace(/\s*([{}()=,:;<>+\-*/!?&|])\s*/g, '$1')               // drop space around operators/punct
-    .trim();
-}
+const PATCH_START = '// CLIPBOARD IMAGE PASTE FIX';
+const PATCH_END = '// END CLIPBOARD IMAGE PASTE FIX';
+const BUNDLE_MARKER = '__ZaBUNDLENAME__="preload-render"';
+const MAIN_PATCH_MARKER = '/*zalo-linux-clipboard*/';
 
-async function main() {
-  const preloadFiles = [
-    'preload-render.js',
-    'preload-noti.js',
-    'preload-shared-worker.js',
-    'preload-sqlite.js',
-    'compact-app-preload.js'
-  ];
-
-  // Match pattern (must stay minified to match the minified Zalo source)
-  const original = 'getClipboardImage:()=>{const e=r.clipboard.readImage();return{isEmpty:()=>e.isEmpty(),toJPEG:t=>e.toJPEG(t),toPNG:t=>e.toPNG(t)}},';
-
-  // 4 new clipboard helpers. Source is kept readable; `minify()` runs at
-  // patch time so it blends into the surrounding minified Zalo code.
-  const helpersSource = `
-    // Read the clipboard as a base64-encoded PNG. Tries Electron's
-    // readImage() first; if it returns an empty NativeImage, falls back
-    // to readBuffer('image/png') + createFromBuffer().
-    getClipboardImagePNG: () => {
-        let e = r.clipboard.readImage();
-        if (e.isEmpty()) {
-            try {
-                const buf = r.clipboard.readBuffer("image/png");
-                if (buf && buf.length > 0) {
-                    e = r.nativeImage.createFromBuffer(buf);
-                }
-            } catch (_) {}
-        }
-        if (e.isEmpty()) return null;
-        return e.toPNG().toString("base64");
-    },
-
-    // Return the local filesystem path of a file that the user copied
-    // (e.g. an image file copied from a file manager). Wayland exposes
-    // such copies as 'text/uri-list', so we shell out to wl-paste /
-    // xclip asynchronously without blocking the UI thread.
-    getClipboardFilePath: async () => {
-        const _rc = (t) => new Promise((resolve) => {
-            const { execFile } = require("child_process");
-            const isWayland = Boolean(process.env.WAYLAND_DISPLAY);
-            const isX11 = Boolean(process.env.DISPLAY);
-            const _o = { timeout: 500, encoding: "buffer", maxBuffer: 10 * 1024 * 1024 };
-
-            const runCmd = (cmd, args, next) => {
-                execFile(cmd, args, _o, (err, stdout) => {
-                    if (!err && stdout && stdout.length > 0) {
-                        return resolve(stdout);
-                    }
-                    if (err && err.code === "ENOENT" && !globalThis.__zaloClipWarned) {
-                        globalThis.__zaloClipWarned = true;
-                        console.warn("[Zalo-Linux] Missing clipboard utility (" + cmd + "). Install wl-clipboard (Wayland) or xclip (X11) to paste files/images.");
-                    }
-                    if (next) next();
-                    else resolve(null);
-                });
-            };
-
-            if (isWayland) {
-                runCmd("wl-paste", ["--type", t], isX11 ? () => runCmd("xclip", ["-selection", "clipboard", "-t", t, "-o"]) : null);
-            } else if (isX11) {
-                runCmd("xclip", ["-selection", "clipboard", "-t", t, "-o"], null);
-            } else {
-                resolve(null);
-            }
-        });
-
-        try {
-            const _b = await _rc("text/uri-list");
-            if (!_b) return null;
-            const text = _b.toString("utf8").trim();
-            if (!text) return null;
-            const uri = text.split("\\n")[0].trim();
-            if (!uri.startsWith("file://")) return null;
-            return decodeURIComponent(uri.replace("file://", ""));
-        } catch (_) { return null; }
-    },
-
-    // Delete a file at the given path. Swallow errors.
-    deleteFile: (p) => {
-        try { require("fs").unlinkSync(p); } catch (_) {}
-    },
-
-    // Save the clipboard image to a temp .png file and return its path.
-    // Preferred for large images (avoids base64 33% bloat). Tries the
-    // Electron API first; if that yields nothing, falls back to the
-    // external clipboard tools asynchronously without blocking the UI.
-    saveClipboardImageToTemp: async () => {
-        const _rc = (t) => new Promise((resolve) => {
-            const { execFile } = require("child_process");
-            const isWayland = Boolean(process.env.WAYLAND_DISPLAY);
-            const isX11 = Boolean(process.env.DISPLAY);
-            const _o = { timeout: 500, encoding: "buffer", maxBuffer: 20 * 1024 * 1024 };
-
-            const runCmd = (cmd, args, next) => {
-                execFile(cmd, args, _o, (err, stdout) => {
-                    if (!err && stdout && stdout.length > 0) {
-                        return resolve(stdout);
-                    }
-                    if (err && err.code === "ENOENT" && !globalThis.__zaloClipWarned) {
-                        globalThis.__zaloClipWarned = true;
-                        console.warn("[Zalo-Linux] Missing clipboard utility (" + cmd + "). Install wl-clipboard (Wayland) or xclip (X11) to paste files/images.");
-                    }
-                    if (next) next();
-                    else resolve(null);
-                });
-            };
-
-            if (isWayland) {
-                runCmd("wl-paste", ["--type", t], isX11 ? () => runCmd("xclip", ["-selection", "clipboard", "-t", t, "-o"]) : null);
-            } else if (isX11) {
-                runCmd("xclip", ["-selection", "clipboard", "-t", t, "-o"], null);
-            } else {
-                resolve(null);
-            }
-        });
-
-        try {
-            const _fs = require("fs"), _os = require("os"), _path = require("path");
-            let e = r.clipboard.readImage();
-            if (e.isEmpty()) {
-                try {
-                    const buf = r.clipboard.readBuffer("image/png");
-                    if (buf && buf.length > 0) e = r.nativeImage.createFromBuffer(buf);
-                } catch (_) {}
-            }
-            if (e.isEmpty()) {
-                const _b = await _rc("image/png");
-                if (_b && _b.length > 0) {
-                    const tmpPath = _path.join(_os.tmpdir(), "zalo_clip_" + Date.now() + ".png");
-                    _fs.writeFileSync(tmpPath, _b);
-                    return tmpPath;
-                }
-                return null;
-            }
-            const tmpPath = _path.join(_os.tmpdir(), "zalo_clip_" + Date.now() + ".png");
-            _fs.writeFileSync(tmpPath, e.toPNG());
-            return tmpPath;
-        } catch (err) { return String(err); }
-    },
-`;
-
-  // Paste handler. Prepended to preload-render.js, sits BEFORE the
-  // minified `__ZaBUNDLENAME__` line, so it can stay readable.
-  const pasteHandler = `// CLIPBOARD IMAGE PASTE FIX
-// IMPORTANT: text paste must remain entirely synchronous and native. Reading an
-// image from Electron's clipboard here can be expensive enough to make Chromium
-// lose a large text paste, especially when the clipboard offers rich formats.
-// Cleanup old temp files on startup
-try {
-    const _fs = require('fs'), _os = require('os'), _path = require('path');
-    _fs.readdirSync(_os.tmpdir()).filter(f => f.startsWith('zalo_clip_')).forEach(f => {
-        try { _fs.unlinkSync(_path.join(_os.tmpdir(), f)); } catch(_) {}
-    });
-} catch(_) {}
+// Paste handler prepended to preload-render.js (before `__ZaBUNDLENAME__="preload-render"`).
+// Uses Electron 43's native clipboard APIs (readImage, readBuffer, availableFormats)
+// and dispatches a synthetic ClipboardEvent('paste') directly to Zalo's own paste listener
+function buildPasteHandler() {
+  return `${PATCH_START}
 window.addEventListener('DOMContentLoaded', () => {
-    function clipboardContainsText(e) {
-        try {
-            const data = e.clipboardData;
-            if (!data) return false;
-            const types = Array.from(data.types || []);
-            const hasImage = types.some(type => type.startsWith('image/'));
-            if (hasImage) return false;
-            return Boolean(data.getData('text/plain'));
-        } catch (_) { return false; }
+    const { clipboard, ipcRenderer } = require('electron');
+    const fs = require('fs');
+    const path = require('path');
+    const { fileURLToPath } = require('url');
+
+    const IMAGE_MIME = {
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        bmp: 'image/bmp',
+        tiff: 'image/tiff',
+        tif: 'image/tiff',
+        avif: 'image/avif',
+        jxl: 'image/jxl',
+    };
+    const DIRECT_IMAGE_MIMES = [
+        ['image/png', 'png'],
+        ['image/jpeg', 'jpg'],
+        ['image/webp', 'webp'],
+        ['image/gif', 'gif'],
+    ];
+    const syntheticEvents = new WeakSet();
+
+    function hasNativeClipboardFile(data) {
+        if (!data || !data.items) return false;
+        for (let i = 0; i < data.items.length; i++) {
+            const item = data.items[i];
+            if (item.kind === 'file' && item.getAsFile()) {
+                return true;
+            }
+        }
+        return false;
     }
-    async function tryPasteImage() {
-        if (!window.$zelectronNative) return false;
-        try {
-            let file = null;
-            const b64 = window.$zelectronNative.getClipboardImagePNG && window.$zelectronNative.getClipboardImagePNG();
-            if (b64) {
-                const binary = atob(b64);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                file = new File([bytes], 'image.png', { type: 'image/png' });
-            } else if (window.$zelectronNative.saveClipboardImageToTemp) {
-                const tmp = await window.$zelectronNative.saveClipboardImageToTemp();
-                if (tmp && !tmp.startsWith('Error')) {
-                    try {
-                        const res = await fetch('file://' + tmp);
-                        const blob = await res.blob();
-                        file = new File([blob], 'screenshot.png', { type: 'image/png' });
-                    } finally {
-                        window.$zelectronNative.deleteFile && window.$zelectronNative.deleteFile(tmp);
-                    }
-                }
-            }
-            if (!file) {
-                const filePath = window.$zelectronNative.getClipboardFilePath && (await window.$zelectronNative.getClipboardFilePath());
-                if (filePath) {
-                    const ext = filePath.split('.').pop().toLowerCase();
-                    const imageExts = ['png','jpg','jpeg','gif','webp','bmp','tiff','tif','avif','jxl'];
-                    if (imageExts.includes(ext)) {
-                        const res = await fetch('file://' + filePath);
-                        const blob = await res.blob();
-                        file = new File([blob], filePath.split('/').pop(), { type: blob.type || 'image/png' });
-                    }
-                }
-            }
-            if (!file) return false;
-            const dt = new DataTransfer();
-            dt.items.add(file);
-            const target = document.getElementById('dragOverlayInputbox');
-            if (!target) return false;
-            target.style.display = 'block';
-            target.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }));
-            target.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true }));
-            target.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-            return true;
-        } catch(err) {
+
+    function clipboardContainsOnlyText(data) {
+        if (!data) return false;
+        const types = Array.from(data.types || []);
+        if (types.some(t => t.startsWith('image/') || t === 'text/uri-list')) {
             return false;
         }
+        if (clipboard.has && (clipboard.has('text/uri-list') || clipboard.has('x-special/gnome-copied-files'))) {
+            return false;
+        }
+        return Boolean(data.getData('text/plain'));
     }
+
+    function filesFromUriLines(lines) {
+        const files = [];
+        for (const raw of lines) {
+            const line = raw.trim();
+            if (!line || line.startsWith('#') || !line.startsWith('file://')) continue;
+            try {
+                const filePath = fileURLToPath(line);
+                const ext = path.extname(filePath).slice(1).toLowerCase();
+                const mime = IMAGE_MIME[ext];
+                if (!mime) continue;
+                if (!fs.statSync(filePath).isFile()) continue;
+                const buf = fs.readFileSync(filePath);
+                files.push(new File([buf], path.basename(filePath), { type: mime }));
+            } catch (_) {}
+        }
+        return files;
+    }
+
+    function readClipboardFiles() {
+        try {
+            const uriBuf = clipboard.readBuffer('text/uri-list');
+            if (uriBuf && uriBuf.length > 0) {
+                const files = filesFromUriLines(uriBuf.toString('utf8').split(/\\r?\\n/));
+                if (files.length > 0) return files;
+            }
+
+            if (clipboard.has && clipboard.has('x-special/gnome-copied-files')) {
+                const gnomeBuf = clipboard.readBuffer('x-special/gnome-copied-files');
+                if (gnomeBuf && gnomeBuf.length > 0) {
+                    const lines = gnomeBuf.toString('utf8').split(/\\r?\\n/).slice(1);
+                    const files = filesFromUriLines(lines);
+                    if (files.length > 0) return files;
+                }
+            }
+
+            const formats = clipboard.availableFormats ? clipboard.availableFormats() : [];
+            for (const [mime, ext] of DIRECT_IMAGE_MIMES) {
+                if (formats.includes(mime)) {
+                    const buf = clipboard.readBuffer(mime);
+                    if (buf && buf.length > 0) {
+                        return [new File([buf], 'clipboard.' + ext, { type: mime })];
+                    }
+                }
+            }
+
+            const img = clipboard.readImage();
+            if (img && !img.isEmpty()) {
+                const png = img.toPNG();
+                if (png && png.length > 0) {
+                    return [new File([png], 'clipboard.png', { type: 'image/png' })];
+                }
+            }
+        } catch (_) {}
+        return [];
+    }
+
+    function dispatchPasteFiles(files) {
+        if (!files || files.length === 0) return false;
+        const dt = new DataTransfer();
+        for (const file of files) {
+            dt.items.add(file);
+        }
+        const pasteEvent = new ClipboardEvent('paste', {
+            clipboardData: dt,
+            bubbles: true,
+            cancelable: true,
+        });
+        syntheticEvents.add(pasteEvent);
+        const target = document.activeElement || document.body || document;
+        target.dispatchEvent(pasteEvent);
+        return true;
+    }
+
     let _lastPaste = 0;
-    document.addEventListener('paste', async (e) => {
-        // Do not call any Electron clipboard/image API for a normal text paste.
-        // The application's own editor must receive and handle this event directly.
-        if (clipboardContainsText(e)) return;
+    document.addEventListener('paste', (e) => {
+        if (syntheticEvents.has(e)) return;
+        const data = e.clipboardData;
+        if (hasNativeClipboardFile(data)) return;
+        if (clipboardContainsOnlyText(data)) return;
+
         const now = Date.now();
         if (now - _lastPaste < 200) return;
-        _lastPaste = now;
-        await tryPasteImage();
+
+        const files = readClipboardFiles();
+        if (files.length > 0) {
+            _lastPaste = now;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            dispatchPasteFiles(files);
+        }
     }, true);
 
     // Auto-paste captured screenshot from screenshot plugin
     try {
-        const { ipcRenderer } = require('electron');
-        ipcRenderer.on('zalo-linux-auto-paste-screenshot', async () => {
-            for (let i = 0; i < 3; i++) {
-                const pasted = await tryPasteImage();
-                if (pasted) {
-                    _lastPaste = Date.now();
-                    break;
-                }
-                await new Promise(r => setTimeout(r, 200));
+        ipcRenderer.on('zalo-linux-auto-paste-screenshot', () => {
+            const files = readClipboardFiles();
+            if (files.length > 0) {
+                _lastPaste = Date.now();
+                dispatchPasteFiles(files);
             }
         });
     } catch (_) {}
 });
-// END CLIPBOARD IMAGE PASTE FIX
+${PATCH_END}
 `;
+}
 
-  const helpers = minify(helpersSource);
+// Replace a `key:function(arg){...}` method body using balanced brace scanning
+// so nested objects and minifier-renamed identifiers never break matching.
+function replaceMethodBody(content, methodPrefix, replacement) {
+  const start = content.indexOf(methodPrefix);
+  if (start === -1) return null;
+  const openBrace = content.indexOf('{', start + methodPrefix.length);
+  if (openBrace === -1) return null;
 
-  // Pasting images from the clipboard needs both pieces in preload-render.js;
-  // a Zalo update that moves them must fail the build, not ship it broken.
-  const failures = [];
-  for (const file of preloadFiles) {
-    const filePath = path.join(APP_MAIN_DIST, file);
-    if (!fs.existsSync(filePath)) {
-      if (file === 'preload-render.js') failures.push(`${file}: not found`);
-      else logger.warn(`Skipping ${file} (not found)`);
+  let depth = 0;
+  let inStr = null;
+  let escaped = false;
+  for (let i = openBrace; i < content.length; i++) {
+    const ch = content[i];
+    if (inStr) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === inStr) {
+        inStr = null;
+      }
       continue;
     }
-
-    let content = fs.readFileSync(filePath, 'utf8');
-
-    if (!content.includes('getClipboardImagePNG:()=>{let e=r.clipboard.readImage()')) {
-      if (content.includes(original)) {
-        content = content.replace(original, original + helpers);
-        logger.dim(`Patched clipboard helpers in ${file}`);
-      } else {
-        failures.push(`${file}: clipboard helper anchor`);
-        continue;
+    if (ch === '"' || ch === "'" || ch === '`') {
+      inStr = ch;
+    } else if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return content.slice(0, start) + replacement + content.slice(i + 1);
       }
     }
-
-    if (file === 'preload-render.js') {
-      const handlerStart = content.indexOf('// CLIPBOARD IMAGE PASTE FIX');
-      const bundleStart = content.indexOf('__ZaBUNDLENAME__="preload-render"');
-
-      if (handlerStart !== -1 && bundleStart > handlerStart) {
-        // Replace older versions of this patch as well as the current version.
-        // This keeps repeated prepare-app runs idempotent and rolls the text-paste
-        // fix into an already-prepared app directory.
-        content = content.slice(0, handlerStart) + pasteHandler + content.slice(bundleStart);
-        logger.dim(`Updated tryPasteImage listener in ${file}`);
-      } else if (handlerStart === -1) {
-        content = pasteHandler + content;
-        logger.dim(`Patched tryPasteImage listener in ${file}`);
-      } else {
-        failures.push(`${file}: bundle marker`);
-        continue;
-      }
-    }
-
-    fs.writeFileSync(filePath, content, 'utf8');
   }
-  if (failures.length) {
-    throw new Error('Clipboard image paste patch not applied, Zalo changed: ' + failures.join('; '));
+  return null;
+}
+
+// Zalo's renderer paste handler (_e -> Ee) always calls $zscreencap.getClipboard(userId)
+// before calling uploadPhoto(). On Windows/macOS, ZaloCap responds with { requestId, content }.
+// On Linux without ZaloCap, main.js rejected with "clipboard native not ready" and returned null,
+// causing Zalo's renderer to silently abort every image paste!
+function patchMainContent(content) {
+  if (content.includes(MAIN_PATCH_MARKER)) {
+    return { content, status: 'already' };
   }
+
+  const getClipReplacement =
+    `startGetClipboard:function(e){${MAIN_PATCH_MARKER}try{const{clipboard:c}=require("electron"),f=require("fs"),{fileURLToPath:u}=require("url");let r="";const b=c.readBuffer("text/uri-list");if(b&&b.length>0)r=b.toString("utf8");else if(c.has&&c.has("x-special/gnome-copied-files")){const g=c.readBuffer("x-special/gnome-copied-files");g&&g.length>0&&(r=g.toString("utf8").split(/\\r?\\n/).slice(1).join("\\n"))}const p=[];if(r)for(const l of r.split(/\\r?\\n/)){const s=l.trim();if(s&&!s.startsWith("#")&&s.startsWith("file://"))try{const d=u(s);f.statSync(d).isFile()&&p.push(d)}catch(_){}}return Promise.resolve({requestId:e,content:p.length>0?p.join("|"):null})}catch(_){return Promise.resolve({requestId:e,content:null})}}`;
+
+  const rewriteClipReplacement =
+    `startRewriteClipboard:function(e){${MAIN_PATCH_MARKER}return Promise.resolve({requestId:e})}`;
+
+  let updated = replaceMethodBody(content, 'startGetClipboard:function(', getClipReplacement);
+  if (updated === null) {
+    throw new Error('Clipboard image paste patch not applied, Zalo changed: main.js: startGetClipboard');
+  }
+
+  const updatedRewrite = replaceMethodBody(updated, 'startRewriteClipboard:function(', rewriteClipReplacement);
+  if (updatedRewrite === null) {
+    throw new Error('Clipboard image paste patch not applied, Zalo changed: main.js: startRewriteClipboard');
+  }
+
+  return { content: updatedRewrite, status: 'patched' };
+}
+
+function patchContent(content) {
+  const pasteHandler = buildPasteHandler();
+  const handlerStart = content.indexOf(PATCH_START);
+  const bundleStart = content.indexOf(BUNDLE_MARKER);
+
+  if (bundleStart === -1) {
+    throw new Error('Clipboard image paste patch not applied, Zalo changed: preload-render.js: bundle marker');
+  }
+
+  if (handlerStart !== -1 && bundleStart > handlerStart) {
+    const updated = content.slice(0, handlerStart) + pasteHandler + content.slice(bundleStart);
+    return { content: updated, status: updated === content ? 'already' : 'updated' };
+  }
+
+  if (handlerStart === -1) {
+    const updated = content.slice(0, bundleStart) + pasteHandler + content.slice(bundleStart);
+    return { content: updated, status: 'patched' };
+  }
+
+  throw new Error('Clipboard image paste patch not applied, Zalo changed: preload-render.js: bundle marker');
+}
+
+async function main(mainDistDir = APP_MAIN_DIST) {
+  const mainJsPath = path.join(mainDistDir, 'main.js');
+  if (!fs.existsSync(mainJsPath)) {
+    throw new Error('Clipboard image paste patch not applied, Zalo changed: main.js: not found');
+  }
+  const mainContent = fs.readFileSync(mainJsPath, 'utf8');
+  const mainRes = patchMainContent(mainContent);
+  if (mainRes.status === 'already') {
+    logger.dim('Main-process clipboard IPC handler already up to date in main.js');
+  } else {
+    fs.writeFileSync(mainJsPath, mainRes.content, 'utf8');
+    logger.dim('Patched main-process clipboard IPC handler in main.js');
+  }
+
+  const preloadPath = path.join(mainDistDir, 'preload-render.js');
+  if (!fs.existsSync(preloadPath)) {
+    throw new Error('Clipboard image paste patch not applied, Zalo changed: preload-render.js: not found');
+  }
+
+  const content = fs.readFileSync(preloadPath, 'utf8');
+  const { content: updated, status } = patchContent(content);
+
+  if (status === 'already') {
+    logger.dim('Clipboard image paste handler already up to date in preload-render.js');
+    return;
+  }
+
+  fs.writeFileSync(preloadPath, updated, 'utf8');
+  logger.dim(`${status === 'updated' ? 'Updated' : 'Patched'} clipboard image paste handler in preload-render.js`);
 }
 
 if (require.main === module) {
   main();
 }
 
-module.exports = { main };
+module.exports = {
+  PATCH_START,
+  PATCH_END,
+  BUNDLE_MARKER,
+  MAIN_PATCH_MARKER,
+  buildPasteHandler,
+  patchMainContent,
+  patchContent,
+  main,
+};
