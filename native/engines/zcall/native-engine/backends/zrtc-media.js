@@ -855,12 +855,13 @@ class ZrtcMediaBackend extends EventEmitter {
   // Relay: MsgType 13 with the token (like audio type 3); P2P: kind 8.
   // Until a key frame went out, other frames are useless to the phone: drop
   // them and ask for a key frame ('keyframe' event) instead.
-  // Group calls with an empty srtpKey send plain RTP: our H.264 goes out that way
-  // (type 13, PT 98/97) with the header of buildGroupVideoRtpHeader. On by default
+  // Group: our H.264 goes out as type 13, PT 98/97, with the header of
+  // buildGroupVideoRtpHeader; plain RTP when the call has no srtpKey, else
+  // SRTP with that key (srtpNoSeq: no tag, see srtp-aes.js). On by default
   // since it works with a phone and the macOS client (2026-10-08);
   // ZCALL_GROUP_CAMERA=0 keeps the camera to ourselves.
   _groupCameraSend() {
-    return this.group && this.plainMedia && process.env.ZCALL_GROUP_CAMERA !== '0';
+    return this.group && (this.plainMedia || !!this.srtpContext) && process.env.ZCALL_GROUP_CAMERA !== '0';
   }
 
   setGroupCamera(on) { this.groupCameraOn = !!on; }
@@ -883,7 +884,7 @@ class ZrtcMediaBackend extends EventEmitter {
     chunks.forEach((chunk, i) => {
       const hdrArgs = { seq: this.vSeq, ts, ssrc, twSeq: this.twSeq, marker: i === chunks.length - 1, pt: key ? KEY_PT : DELTA_PT, layerSeq: sfu ? (this.vLayerSeq = (this.vLayerSeq + 1) & 0xffff) : 0, captureMs };
       const hdr = sfu ? buildGroupVideoRtpHeader(Object.assign({ sfu }, hdrArgs)) : buildAudioRtpHeader(hdrArgs);
-      const rtp = groupCam ? Buffer.concat([hdr, chunk])
+      const rtp = this.plainMedia ? Buffer.concat([hdr, chunk])
         : protectRtp(hdr, chunk, this.srtpContext, this.vSeq, ssrc, this.vRoc, this.noSeq && this.noSeq.video);
       const relay = wrapMediaPacket({ msgType: MSG_TYPES.VIDEO_RTP, token: this.serverToken, payload: rtp });
       const p2p = this.p2pPath ? [wrapP2pVideo({ role: this.params.role, callId: this.params.callId, rtp }), this.p2pPath] : null;
@@ -909,7 +910,7 @@ class ZrtcMediaBackend extends EventEmitter {
     if (groupCam && this.vTx === 1) {
       const ext = sfu ? ('SFU id ' + sfu.id + (sfu.long ? ' long' : ' short') + ', layer 0') : 'no SFU extension';
       const head = chunks[0].subarray(0, Math.min(8, chunks[0].length)).toString('hex');
-      this.log('media: group camera probe: plain H.264, type 13, PT 98/97, ' + ext + ', payload ' + head);
+      this.log('media: group camera probe: ' + (this.plainMedia ? 'plain' : 'SRTP') + ' H.264, type 13, PT 98/97, ' + ext + ', payload ' + head);
     }
   }
 
@@ -1096,7 +1097,10 @@ class ZrtcMediaBackend extends EventEmitter {
     const captureMs = Date.now();
     chunks.forEach((chunk, i) => {
       const hdr = buildGroupVideoRtpHeader({ captureMs, sfu, seq: sh.seq, ts, ssrc: sh.uid, twSeq: sh.twSeq, marker: i === chunks.length - 1, pt: key ? KEY_PT : DELTA_PT, layerSeq: (sh.layerSeq = (sh.layerSeq + 1) & 0xffff) });
-      sh.queue.push(wrapMediaPacket({ msgType: MSG_TYPES.VIDEO_RTP, token: sh.token, payload: Buffer.concat([hdr, chunk]) }));
+      // ShareScreenPeer::_createAndInitSRTP takes the call's srtpKey and srtpNoSeq.
+      const payload = this.plainMedia || !this.srtpContext ? Buffer.concat([hdr, chunk])
+        : protectRtp(hdr, chunk, this.srtpContext, sh.seq, sh.uid >>> 0, 0, this.noSeq && this.noSeq.video);
+      sh.queue.push(wrapMediaPacket({ msgType: MSG_TYPES.VIDEO_RTP, token: sh.token, payload }));
       sh.seq = (sh.seq + 1) & 0xffff;
       sh.twSeq = (sh.twSeq + 1) & 0xffff;
     });
