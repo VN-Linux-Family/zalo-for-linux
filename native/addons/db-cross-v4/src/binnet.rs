@@ -1,5 +1,6 @@
 use crate::tlv::{is_likely_utf8_printable, try_decode_text_smart, TlvBoxLite};
-use napi::{Env, JsObject, Result};
+use napi::bindgen_prelude::{JsObjectValue, Object};
+use napi::{Env, Result};
 
 /// Zalo `BinNet` TLV tag constants (describing `rich-message` metadata fields)
 pub mod tag {
@@ -65,13 +66,13 @@ pub mod tag {
     clippy::too_many_lines,
     reason = "single protocol pipeline, splitting hurts readability"
 )]
-pub fn parse_attach_chat_msg_lite(buf: &[u8], env: Env) -> Option<JsObject> {
+pub fn parse_attach_chat_msg_lite<'env>(buf: &[u8], env: &'env Env) -> Option<Object<'env>> {
     let mut tlv = TlvBoxLite::new();
     if tlv.parse(buf).is_err() {
         return None;
     }
 
-    let mut out = env.create_object().ok()?;
+    let mut out = Object::new(env).ok()?;
     let mut has_props = false;
 
     for k in tlv.get_all_keys() {
@@ -220,13 +221,13 @@ pub fn parse_attach_chat_msg_lite(buf: &[u8], env: Env) -> Option<JsObject> {
     clippy::cast_precision_loss,
     reason = "protocol ids/timestamps as f64; precision below 2^52 is irrelevant"
 )]
-pub fn parse_reference_or_quote_lite(buf: &[u8], env: Env) -> Option<JsObject> {
+pub fn parse_reference_or_quote_lite<'env>(buf: &[u8], env: &'env Env) -> Option<Object<'env>> {
     let mut tlv = TlvBoxLite::new();
     if tlv.parse(buf).is_err() {
         return None;
     }
 
-    let mut out = env.create_object().ok()?;
+    let mut out = Object::new(env).ok()?;
     let mut has_props = false;
 
     if let Some(i32_val) = tlv.get_int_value(tag::QUOTE_OWNER_ID) {
@@ -286,13 +287,13 @@ pub fn parse_reference_or_quote_lite(buf: &[u8], env: Env) -> Option<JsObject> {
     }
 }
 
-pub fn parse_mention_lite(buf: &[u8], env: Env) -> Option<JsObject> {
+pub fn parse_mention_lite<'env>(buf: &[u8], env: &'env Env) -> Option<Object<'env>> {
     let mut tlv = TlvBoxLite::new();
     if tlv.parse(buf).is_err() {
         return None;
     }
 
-    let mut out = env.create_object().ok()?;
+    let mut out = Object::new(env).ok()?;
     let mut has_props = false;
 
     if let Some(i) = tlv.get_int_value(tag::MENTION_UID) {
@@ -327,8 +328,8 @@ pub fn parse_mention_lite(buf: &[u8], env: Env) -> Option<JsObject> {
     clippy::cast_precision_loss,
     reason = "buffer lengths as f64; precision below 2^52 is irrelevant"
 )]
-pub fn parse_bin_net_internal(p: &[u8], env: Env) -> Result<JsObject> {
-    let mut ret = env.create_object()?;
+pub fn parse_bin_net_internal<'env>(p: &[u8], env: &'env Env) -> Result<Object<'env>> {
+    let mut ret = Object::new(env)?;
     ret.set_named_property("result", 0)?;
     ret.set_named_property("error_message", "")?;
     ret.set_named_property("inner_error", "")?;
@@ -337,7 +338,7 @@ pub fn parse_bin_net_internal(p: &[u8], env: Env) -> Result<JsObject> {
         ret.set_named_property("result", 2)?;
         ret.set_named_property("error_message", "Something went wrong while parsing")?;
         ret.set_named_property("inner_error", "Empty BinNet")?;
-        ret.set_named_property("data", env.create_object()?)?;
+        ret.set_named_property("data", Object::new(env)?)?;
         return Ok(ret);
     }
 
@@ -346,11 +347,11 @@ pub fn parse_bin_net_internal(p: &[u8], env: Env) -> Result<JsObject> {
         ret.set_named_property("result", 2)?;
         ret.set_named_property("error_message", "Something went wrong while parsing")?;
         ret.set_named_property("inner_error", err)?;
-        ret.set_named_property("data", env.create_object()?)?;
+        ret.set_named_property("data", Object::new(env)?)?;
         return Ok(ret);
     }
 
-    let mut debug = env.create_object()?;
+    let mut debug = Object::new(env)?;
     debug.set_named_property("inputLen", p.len() as f64)?;
     debug.set_named_property(
         "tlvEndian",
@@ -358,7 +359,7 @@ pub fn parse_bin_net_internal(p: &[u8], env: Env) -> Result<JsObject> {
     )?;
 
     let all_keys = tlv.get_all_keys();
-    let mut top_keys = env.create_array_with_length(all_keys.len())?;
+    let mut top_keys = env.create_array(all_keys.len() as u32)?;
     for (i, &k) in all_keys.iter().enumerate() {
         let num = env.create_uint32(k)?;
         top_keys.set_element(i as u32, num)?;
@@ -366,13 +367,13 @@ pub fn parse_bin_net_internal(p: &[u8], env: Env) -> Result<JsObject> {
     debug.set_named_property("topKeys", top_keys)?;
     debug.set_named_property("topKeyCount", all_keys.len() as f64)?;
 
-    let mut attach_candidates = env.create_array_with_length(0)?;
+    let mut attach_candidates = env.create_array(0)?;
     let mut attach_candidate_idx = 0u32;
 
-    let mut data = env.create_object()?;
-    let mut attachs = env.create_array_with_length(0)?;
+    let mut data = Object::new(env)?;
+    let mut attachs = env.create_array(0)?;
     let mut attach_idx = 0u32;
-    let mut mentions = env.create_array_with_length(0)?;
+    let mut mentions = env.create_array(0)?;
     let mut mention_idx = 0u32;
 
     for &k in &all_keys {
@@ -386,7 +387,7 @@ pub fn parse_bin_net_internal(p: &[u8], env: Env) -> Result<JsObject> {
                 let v = &vals[0];
                 let mut ptlv = TlvBoxLite::new();
                 if ptlv.parse(v).is_ok() {
-                    let mut prop = env.create_object()?;
+                    let mut prop = Object::new(env)?;
                     let mut has_prop = false;
                     if let Some(iv) = ptlv.get_int_value(tag::PROP_SIZE) {
                         prop.set_named_property("size", iv)?;
@@ -424,12 +425,12 @@ pub fn parse_bin_net_internal(p: &[u8], env: Env) -> Result<JsObject> {
                     let accepted = att_opt.is_some();
 
                     if attach_candidate_idx < 32 {
-                        let mut cand = env.create_object()?;
+                        let mut cand = Object::new(env)?;
                         cand.set_named_property("source", "key_0x06")?;
                         cand.set_named_property("len", v.len() as f64)?;
                         cand.set_named_property("accepted", accepted)?;
 
-                        let mut key_arr = env.create_array_with_length(0)?;
+                        let mut key_arr = env.create_array(0)?;
                         if let Some(att) = &att_opt {
                             if let Ok(prop_names) = att.get_property_names() {
                                 let len = prop_names.get_array_length()?;
