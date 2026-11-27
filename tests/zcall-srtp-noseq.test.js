@@ -19,3 +19,16 @@ test('noSeq: AES-CM with seq 0, no tag; the header keeps the real seq', () => {
   assert.strictEqual(got.opus.toString(), 'opus frame');
   assert.strictEqual(pkt.readUInt16BE(2), 0x3bcd, 'input untouched');
 });
+
+test('group camera goes out with an SRTP group key, not only in plain RTP calls', () => {
+  const { ZrtcMediaBackend } = require('../native/engines/zcall/native-engine/backends/zrtc-media');
+  const b = new ZrtcMediaBackend({});
+  b.group = true;
+  b.plainMedia = false;
+  b.srtpContext = keys;
+  assert.strictEqual(b._groupCameraSend(), true);
+  b.srtpContext = null;
+  assert.strictEqual(b._groupCameraSend(), false);
+  b.plainMedia = true;
+  assert.strictEqual(b._groupCameraSend(), true);
+});
