@@ -86,8 +86,7 @@ async function main() {
   ['networkConnected(){this.getStateNetwork()!==u.CONNECTED&&', 'networkConnected(){this.stateCur!==u.CONNECTED&&'],
   ['const n=()=>{this.getStateNetwork()===u.CHECKING?', 'const n=()=>{this.stateCur===u.CHECKING?'],
   ['t<=0?(this.getStateNetwork()===u.CONNECTED?', 't<=0?(this.stateCur===u.CONNECTED?'],
-  // Also repair applications prepared with the old forced-connected patch.
-  ['getStateNetwork(){return u.CONNECTED}', 'getStateNetwork(){return this.stateCur}']
+
   // NOTE: _pingToDomain is deliberately NOT replaced. The original code probes
   // the real network (XHR). Both the upstream #87 stub (always resolve -> never
   // detects offline) and the earlier navigator.onLine variant (stays false after

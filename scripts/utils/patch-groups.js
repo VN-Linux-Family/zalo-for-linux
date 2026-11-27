@@ -5,7 +5,7 @@ const path = require('path');
 const { APP_MAIN_DIST, APP_PC_DIST, resolveLazyLoginBundles } = require('./paths');
 const { runFileGroup } = require('./patch-pipeline');
 
-const patchTitlebar = require('../patches/patch-titlebar');
+const patchTitlebarLinux = require('../patches/patch-titlebar-linux');
 const patchLinuxGuards = require('../patches/patch-linux-guards');
 const patchQuitNoShow = require('../patches/patch-quit-no-show');
 const patchShellOpenLinux = require('../patches/patch-shell-open-linux');
@@ -122,9 +122,8 @@ async function runMainDistGroup() {
       targetPath: mainJsPath,
       astSteps: [
         {
-          name: 'patch-titlebar',
-          isAlreadyPatched: (content) => content.includes('frame:!global.__zaloNativeWayland'),
-          collectEdits: ({ content, root }) => patchTitlebar.collectEdits(content, root),
+          name: 'patch-titlebar-linux',
+          collectEdits: ({ content, root }) => patchTitlebarLinux.collectEdits(content, root),
         },
         {
           name: 'patch-linux-guards',
@@ -150,11 +149,8 @@ async function runMainDistGroup() {
       ],
       contentSteps: [
         {
-          name: 'patch-titlebar-fallback',
-          transform: ({ content }) => {
-            if (content.includes('frame:!global.__zaloNativeWayland')) return { content };
-            return { content: patchTitlebar.patchContent(content).content };
-          },
+          name: 'patch-titlebar-content',
+          transform: ({ content }) => ({ content: patchTitlebarLinux.patchTitlebarContent(content) }),
         },
         {
           name: 'patch-quit-no-show-fallback',
@@ -182,7 +178,6 @@ async function runMainDistGroup() {
   // Secondary/non-AST main-dist patches (compact-app.js runs in parallel in runCompactAppGroup;
   // patch-flatpak-file-transfer runs in Wave 2 so it never races compact-app.js)
   const remaining = [
-    'patch-wayland-titlebar',
     'patch-pasting-img',
     'patch-db-cross-v4',
     'patch-os-sys-info',

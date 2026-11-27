@@ -11,7 +11,6 @@ const userscriptsPlugin = require('./userscripts');
 const languageCorePlugin = require('./language-core');
 const advancedSettingsPlugin = require('./advanced-settings');
 const devModePlugin = require('./dev-mode');
-const waylandTitlebarPlugin = require('./wayland-titlebar');
 const offlinePlugin = require('./offline');
 const zadarkPlugin = require('./zadark');
 const recalledMessagesPlugin = require('./recalled-messages');
@@ -37,21 +36,10 @@ function safeRegister(name, fn) {
  }
 }
 
-/**
- * Early initialization required before Zalo window creation (e.g. Wayland frame check).
- *
- * @param {object} context
- * @param {import('electron').App} context.app
- * @param {import('electron').IpcMain} context.ipcMain
+/*
+ * Retained as a no-op for the main-process plugin lifecycle API.
  */
-function initEarly(context = {}) {
- const { app, ipcMain } = context;
- safeRegister('waylandTitlebar:init', () => {
-  if (waylandTitlebarPlugin && typeof waylandTitlebarPlugin.init === 'function') {
-   waylandTitlebarPlugin.init({ app, ipcMain });
-  }
- });
-}
+function initEarly() {}
 
 /**
  * Registers all UI and IPC feature plugins.
@@ -115,11 +103,6 @@ function register(context = {}) {
   }
  });
 
- safeRegister('waylandTitlebar', () => {
-  if (waylandTitlebarPlugin && typeof waylandTitlebarPlugin.register === 'function') {
-   waylandTitlebarPlugin.register({ app, ipcMain, BrowserWindow });
-  }
- });
 
  safeRegister('offline', () => {
   if (offlinePlugin && typeof offlinePlugin.register === 'function') {
@@ -226,7 +209,6 @@ module.exports = {
   languageCorePlugin,
   advancedSettingsPlugin,
   devModePlugin,
-  waylandTitlebarPlugin,
   offlinePlugin,
   recalledMessagesPlugin
  }

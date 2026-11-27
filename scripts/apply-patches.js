@@ -10,8 +10,9 @@ const { runBoundedPool } = require('./utils/patch-pipeline');
 const PATCHES = [
   'patch-zalo-language-bridge',
   'patch-zalo-language-transport',
-  'patch-titlebar',
-  'patch-wayland-titlebar',
+  'patch-titlebar-linux',
+  'patch-titlebar-linux-css',
+  'patch-wco-react',
   'patch-pasting-img',
   'patch-sqlite3',
   'patch-db-cross-v4',
@@ -56,8 +57,7 @@ const DISJOINT_GROUPS = [
     module: '../utils/patch-groups.js',
     exportName: 'runMainDistGroup',
     patches: [
-      'patch-titlebar',
-      'patch-wayland-titlebar',
+      'patch-titlebar-linux',
       'patch-pasting-img',
       'patch-db-cross-v4',
       'patch-os-sys-info',
@@ -133,6 +133,8 @@ const DISJOINT_GROUPS = [
 
 // Patches that mutate multiple bundles or touch compact-app.js run sequentially after Wave 1.
 const CROSS_CUTTING_PATCHES = [
+  'patch-titlebar-linux-css',
+  'patch-wco-react',
   // Writes the lazy login bundle, which pc-dist-lazy-login patches in parallel
   // during wave 1; running it there loses one side's edits.
   'patch-offline-startup',
