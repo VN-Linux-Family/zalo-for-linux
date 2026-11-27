@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const logger = require('../utils/logger');
 
-const { APP_DIR, APP_PC_DIST } = require('../utils/paths');
+const { APP_DIR, APP_PC_DIST, resolveLazyLoginBundles } = require('../utils/paths');
 
 function patch(source) {
   // OCR button visibility (may reside in a split module outside EzwU in newer bundles)
@@ -93,9 +93,7 @@ function main() {
     ...fs.readdirSync(root)
       .filter(name => /^(compact-app-pc|search-worker|sync-v2-sub-worker)\.[\da-f]+\.js$/.test(name))
       .map(name => path.join(root, name)),
-    ...fs.readdirSync(path.join(root, 'lazy'))
-      .filter(name => /^default-login-main-startup-shared-worker-znotification\.[\da-f]+\.js$/.test(name))
-      .map(name => path.join(root, 'lazy', name)),
+    ...resolveLazyLoginBundles(root),
   ];
   const staged = [];
   let found = 0;
