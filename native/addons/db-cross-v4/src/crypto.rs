@@ -1,6 +1,5 @@
 use aes::Aes256;
-use cbc::cipher::generic_array::GenericArray;
-use cbc::cipher::{BlockDecryptMut, KeyIvInit};
+use cbc::cipher::{BlockModeDecrypt, KeyIvInit};
 use cbc::Decryptor;
 
 type Aes256CbcDec = Decryptor<Aes256>;
@@ -18,10 +17,9 @@ pub fn aes256cbc_decrypt_nopad(ct: &[u8], key: &[u8; 32], iv: &[u8; 16]) -> Opti
         return None;
     }
     let mut pt = ct.to_vec();
-    let mut decryptor =
-        Aes256CbcDec::new(GenericArray::from_slice(key), GenericArray::from_slice(iv));
+    let mut decryptor = Aes256CbcDec::new(key.into(), iv.into());
     for block in pt.as_chunks_mut::<16>().0 {
-        decryptor.decrypt_block_mut(GenericArray::from_mut_slice(block));
+        decryptor.decrypt_block(block.into());
     }
     Some(pt)
 }

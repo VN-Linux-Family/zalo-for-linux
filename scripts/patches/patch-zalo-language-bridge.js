@@ -6,7 +6,7 @@ const vm = require('vm');
 const { spawnSync } = require('child_process');
 const logger = require('../utils/logger');
 const { parseAst, extractBlockFrom } = require('../utils/ast-transform');
-const { APP_PC_DIST } = require('../utils/paths');
+const { APP_PC_DIST, resolveLazyLoginBundles } = require('../utils/paths');
 
 const MARKER = 'zalo-language-bridge';
 const VALID_INDEX_GUARD = 'this.currentLanguageIndex===0||this.currentLanguageIndex===1';
@@ -153,10 +153,7 @@ function patchFileIsolated(filePath) {
 function findTargetBundles(appPcDist) {
   const compactBundles = fs.readdirSync(appPcDist)
     .filter((name) => /^compact-app-pc.*\.js$/.test(name));
-  const lazyDir = path.join(appPcDist, 'lazy');
-  const loginBundles = fs.existsSync(lazyDir)
-    ? fs.readdirSync(lazyDir).filter((name) => /^default-login-main-startup-shared-worker-znotification\..*\.js$/.test(name))
-    : [];
+  const loginBundles = resolveLazyLoginBundles(appPcDist);
   if (compactBundles.length !== 1) {
     throw new Error(`Expected one compact-app-pc bundle, found ${compactBundles.length}`);
   }
@@ -165,7 +162,7 @@ function findTargetBundles(appPcDist) {
   }
   return [
     path.join(appPcDist, compactBundles[0]),
-    path.join(lazyDir, loginBundles[0])
+    loginBundles[0]
   ];
 }
 

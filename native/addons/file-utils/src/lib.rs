@@ -1,7 +1,7 @@
 #![cfg(target_os = "linux")]
 
-use napi::bindgen_prelude::FromNapiValue;
-use napi::{Error, JsUnknown, Result, Status, ValueType};
+use napi::bindgen_prelude::{FromNapiValue, Unknown};
+use napi::{Error, Result, Status, ValueType};
 use napi_derive::napi;
 
 #[napi(object)]
@@ -16,7 +16,7 @@ pub struct DiskUsage {
     clippy::cast_precision_loss,
     reason = "disk sizes in bytes as f64; precision below 2^52 is irrelevant"
 )]
-pub fn get_disk_usage(path: Option<JsUnknown>) -> Result<DiskUsage> {
+pub fn get_disk_usage(path: Option<Unknown>) -> Result<DiskUsage> {
     let Some(path_arg) = path else {
         return Err(Error::new(
             Status::InvalidArg,

@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
-const { APP_DIR } = require('../utils/paths');
+const { APP_DIR, resolveLazyLoginBundles } = require('../utils/paths');
 const { parseAst } = require('../utils/ast-transform');
 
 const MARKER = '/* zalo-linux-offline */';
@@ -344,11 +344,12 @@ function patchAuthMethods(source) {
   }
 
   const messageBubble = method('render', (_node, body) =>
-    body.includes('this.props.focusId.indexOf(b.msgId)') &&
+    body.includes('this.state.aniHighlight') &&
+    /this\.props\.focusId\.indexOf\([$\w]+\.msgId\)/.test(body) &&
     body.includes('this.props.focusType'), 'message bubble renderer');
   const focusIdGuard = 'if(globalThis.__zaloOffline&&globalThis.__zaloOffline.active&&!Array.isArray(this.props.focusId))this.props.focusId=[];';
   if (!messageBubble.bodyText.includes(focusIdGuard)) {
-    if ((messageBubble.bodyText.match(/this\.props\.focusId\.indexOf\(b\.msgId\)/g) || []).length !== 2) {
+    if ((messageBubble.bodyText.match(/this\.props\.focusId\.indexOf\([$\w]+\.msgId\)/g) || []).length !== 2) {
       throw new Error('Offline startup: expected two focusId lookups in message bubble renderer');
     }
     edits.push({ start: messageBubble.bodyStart, text: focusIdGuard });
@@ -459,16 +460,14 @@ async function main(appDir = process.env.ZALO_APP_DIR || APP_DIR) {
       if (!fs.existsSync(filePath)) throw new Error('Offline startup target not found: ' + filePath);
     }
 
-    const bundles = fs.readdirSync(lazy).filter(name =>
-      /^default-login-main-startup-shared-worker-znotification\..*\.js$/.test(name)
-    );
+    const bundles = resolveLazyLoginBundles(pc);
     if (bundles.length !== 1) {
       throw new Error('Offline startup: expected exactly one authentication bundle');
     }
 
     // Prepare all outputs first. The patch never resolves, reads or copies a
     // plugin file: the offline plugin supplies its renderer through its own IPC.
-    const bundlePath = path.join(lazy, bundles[0]);
+    const bundlePath = bundles[0];
     const originalBundle = fs.readFileSync(bundlePath, 'utf8');
     const patchedBundle = patchAuthBundle(originalBundle);
     const bundleStatus = patchedBundle === originalBundle ? 'already' : 'patched';

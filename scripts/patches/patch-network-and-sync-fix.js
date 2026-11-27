@@ -14,7 +14,7 @@ try {
  };
 }
 
-const { APP_DIR, APP_PC_DIST, APP_MAIN_DIST } = require('../utils/paths');
+const { APP_DIR, APP_PC_DIST, APP_MAIN_DIST, resolveLazyLoginBundles } = require('../utils/paths');
 
 /**
  * Patch Zalo network state detection (gwig) and sync controller routing:
@@ -118,7 +118,7 @@ async function main() {
  }
 
  // 2. default-login bundle in lazy/
- const defaultLoginFiles = findFiles(lazyDir, /^default-login-main-startup-shared-worker-znotification\..*\.js$/);
+ const defaultLoginFiles = resolveLazyLoginBundles(pcDistDir);
  for (const f of defaultLoginFiles) {
   patchFile(f, [
    // Direct transfer_msg control events to SyncMessageController (Sync V1)
@@ -150,42 +150,73 @@ async function main() {
  }
 
  // 4. preload-sqlite.js
+ // The minifier renames these locals between releases (at/ht in 26.11.10,
+ // rt/ft in 26.11.20), so match the shape, not the names.
  const preloadSqlite = path.join(mainDistDir, 'preload-sqlite.js');
  if (fs.existsSync(preloadSqlite)) {
   patchFile(preloadSqlite, [
    ['cross_setting:{offFeature:!1,isMobileSupport:!1,', 'cross_setting:{enable:!0,offFeature:!1,isMobileSupport:!0,'],
-   ['try{let t=1==e.settings.chat.enable_call;at.enableCall=t}catch(ht){}', 'try{let t=1==e.settings.chat.enable_call;at.enableCall=!0}catch(ht){}'],
-   ['try{let t=1==e.settings.chat.enable_video_call;at.enableVideoCall=t}catch(ht){}', 'try{let t=1==e.settings.chat.enable_video_call;at.enableVideoCall=!0}catch(ht){}'],
+   [CALL_SETTING('enable_call', 'enableCall'), '$1!0}'],
+   [CALL_SETTING('enable_video_call', 'enableVideoCall'), '$1!0}'],
    ['enable_group_call_for_user:0,enable_group_call_entry_for_group:0', 'enable_group_call_for_user:1,enable_group_call_entry_for_group:1']
   ]);
  }
 
  // 5. Enable SQLite backup data adapter flag in main process
- const mainJs = path.join(mainDistDir, 'main.js');
- if (fs.existsSync(mainJs)) {
-  patchFile(mainJs, [
-   [
-    'const a=!1,s="--backupdata",c="ABORT_BACKING_UP_FOR_ALL_SESSION",l="CREATE_BACKING_UP_FOR_NO_SESSION";const d=!1',
-    'const a=!0,s="--backupdata",c="ABORT_BACKING_UP_FOR_ALL_SESSION",l="CREATE_BACKING_UP_FOR_NO_SESSION";const d=!0'
-   ]
-  ]);
+ for (const name of ['main.js', 'utility-process-sqlite.js']) {
+  const file = path.join(mainDistDir, name);
+  if (fs.existsSync(file)) patchFile(file, [[BACKUP_FLAGS, '$1!0$2!0']]);
  }
 
- const utilSqlite = path.join(mainDistDir, 'utility-process-sqlite.js');
- if (fs.existsSync(utilSqlite)) {
-  patchFile(utilSqlite, [
-   [
-    'const s=!1,a="--backupdata",c="ABORT_BACKING_UP_FOR_ALL_SESSION",u="CREATE_BACKING_UP_FOR_NO_SESSION";const l=!1',
-    'const s=!0,a="--backupdata",c="ABORT_BACKING_UP_FOR_ALL_SESSION",u="CREATE_BACKING_UP_FOR_NO_SESSION";const l=!0'
-   ]
-  ]);
- }
-
+ verify(pcDistDir, mainDistDir, defaultLoginFiles);
  logger.success('Network and sync patches applied');
+}
+
+// `try{let t=1==e.settings.chat.enable_call;rt.enableCall=t}` -> `...=!0}`
+function CALL_SETTING(setting, field) {
+ return new RegExp(`(try\\{let ([\\w$]+)=1==[\\w$]+\\.settings\\.chat\\.${setting};[\\w$]+\\.${field}=)\\2\\}`, 'g');
+}
+
+const BACKUP_FLAGS = /(const [\w$]+=)!1(,[\w$]+="--backupdata",[\w$]+="ABORT_BACKING_UP_FOR_ALL_SESSION",[\w$]+="CREATE_BACKING_UP_FOR_NO_SESSION";const [\w$]+=)!1/;
+
+// Calls stay disabled, or messages stop syncing, when any of these is
+// missing. A changed bundle must fail the build instead of shipping quietly.
+function verify(pcDistDir, mainDistDir, defaultLoginFiles) {
+ const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
+ const missing = [];
+ const need = (label, content, ...markers) => {
+  if (content === null) return missing.push(`${label}: file not found`);
+  for (const marker of markers) {
+   const ok = marker instanceof RegExp ? marker.test(content) : content.includes(marker);
+   if (!ok) missing.push(`${label}: ${marker}`);
+  }
+ };
+
+ const compact = fs.readdirSync(pcDistDir).filter(f => /^compact-app-pc\..*\.js$/.test(f));
+ const bundles = [...compact.map(f => path.join(pcDistDir, f)), ...defaultLoginFiles];
+ if (!bundles.length) missing.push('compact-app-pc / default-login bundles not found');
+ for (const file of bundles) {
+  need(path.basename(file), read(file),
+   'isSupport(){return !0}', 'isSupportVideoCall(){return !0}', 'canUseIpcCall(){return !0}');
+ }
+
+ const sqlite = read(path.join(mainDistDir, 'preload-sqlite.js'));
+ need('preload-sqlite.js', sqlite,
+  /\.settings\.chat\.enable_call;[\w$]+\.enableCall=!0\}/,
+  /\.settings\.chat\.enable_video_call;[\w$]+\.enableVideoCall=!0\}/,
+  'cross_setting:{enable:!0,');
+
+ for (const name of ['main.js', 'utility-process-sqlite.js']) {
+  need(name, read(path.join(mainDistDir, name)), /const [\w$]+=!0,[\w$]+="--backupdata"/);
+ }
+
+ if (missing.length) {
+  throw new Error('network-and-sync fix not applied, Zalo changed: ' + missing.join('; '));
+ }
 }
 
 if (require.main === module) {
  main();
 }
 
-module.exports = { main };
+module.exports = { main, CALL_SETTING, BACKUP_FLAGS };

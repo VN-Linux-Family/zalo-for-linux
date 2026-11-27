@@ -9,8 +9,8 @@ authors = ["ngxccc", "Việt Nam Linux Family"]
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "2", features = ["napi4", "async"] }
-napi-derive = "2"
+napi = { version = "3", features = ["napi4", "async"] }
+napi-derive = "3"
 whatlang = "0.18.0"
 
 [build-dependencies]

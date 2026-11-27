@@ -7,16 +7,16 @@ build = "build.rs"
 
 [dependencies]
 anyhow = "1"
-aes = { version = "0.8", features = ["zeroize"] }
-aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
-hmac = "0.12"
-sha2 = "0.10"
+aes = { version = "0.9", features = ["zeroize"] }
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
+hmac = "0.13"
+sha2 = "0.11"
 hex = "0.4"
 zeroize = "1"
 subtle = "2.6"
-nix = { version = "0.31", features = ["resource", "time"] }
+nix = { version = "0.32", features = ["resource", "time"] }
 rustix = { version = "1", features = ["event", "fs", "linux_5_11", "net", "pipe", "process", "rand", "stdio", "thread", "time"] }
-signal-hook = "0.3"
+signal-hook = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "tiff"] }

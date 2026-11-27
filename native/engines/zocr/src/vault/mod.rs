@@ -1,8 +1,8 @@
 pub mod container;
 pub mod key;
 use aes_gcm::{
-    aead::{AeadInPlace, KeyInit},
-    Aes256Gcm, Nonce, Tag,
+    aead::{AeadInOut, KeyInit, Nonce, Tag},
+    Aes256Gcm,
 };
 use anyhow::{Context, Result};
 use hmac::{Hmac, Mac};
@@ -35,13 +35,12 @@ impl Vault {
             .map_err(|_| anyhow::anyhow!("invalid AES-256-GCM key length"))?;
         // Authenticate the complete header/index and the trailing 16-byte tag.
         let aad = &self.bytes[..24 + 29 * self.index.entries.len()];
+        let nonce: &Nonce<Aes256Gcm> = (&entry.nonce).into();
+        let tag: &Tag<Aes256Gcm> = (&ciphertext[split..])
+            .try_into()
+            .context("invalid AES-GCM tag length")?;
         cipher
-            .decrypt_in_place_detached(
-                Nonce::from_slice(&entry.nonce),
-                aad,
-                &mut data,
-                Tag::from_slice(&ciphertext[split..]),
-            )
+            .decrypt_inout_detached(nonce, aad, data.as_mut_slice().into(), tag)
             .map_err(|_| anyhow::anyhow!("authentication verification failed for entry {id}"))?;
         Ok(data)
     }
@@ -59,7 +58,7 @@ fn read_key(binary_dir: &Path, filename: &str) -> Result<Zeroizing<[u8; 32]>> {
 }
 fn hmac_sha256(key: &[u8], parts: &[&[u8]]) -> Zeroizing<[u8; 32]> {
     let mut mac =
-        <Hmac<Sha256> as Mac>::new_from_slice(key).expect("HMAC-SHA256 accepts keys of any length");
+        Hmac::<Sha256>::new_from_slice(key).expect("HMAC-SHA256 accepts keys of any length");
     for part in parts {
         mac.update(part);
     }
