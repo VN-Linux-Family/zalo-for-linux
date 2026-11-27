@@ -89,23 +89,25 @@ function buildGroupVideoRtpHeader({ seq, ts, ssrc, twSeq, marker = false, pt, sf
 // client's group audio carries id 2 (audio level) and id 13 on all 2097 packets of the
 // capture; receivers line video up with audio by it. With id 13 on our video only,
 // neither the Mac nor the phone drew our camera until it was restarted (2026-10-08
-// 02:12). transport-cc stays, as on our 1-1 audio. 1-1 keeps buildAudioRtpHeader.
+// 02:12). 1-1 keeps buildAudioRtpHeader.
 // id 2 is the audio level (RFC 6464, V bit 0 as the Mac sends it, -dBov 0..127),
-// which an SFU uses to pick who is speaking. Order 2, 5, 13; 13 bytes, padded to 16.
-function buildGroupAudioRtpHeader({ seq, ts, ssrc, twSeq, marker = false, pt = AUDIO_PT, captureMs = Date.now(), level = 127 }) {
-  const h = Buffer.alloc(12 + 4 + 16);
+// which an SFU uses to pick who is speaking. No transport-cc (id 5): neither the Mac
+// nor the phone puts it on group audio, and the SFU's transport-cc feedback only
+// follows video, so audio taking numbers from the shared sequence showed up there as
+// lost packets (about 70 % with the camera on). Order 2, 13; 10 bytes, padded to 12,
+// the same layout as the phone's group audio.
+function buildGroupAudioRtpHeader({ seq, ts, ssrc, marker = false, pt = AUDIO_PT, captureMs = Date.now(), level = 127 }) {
+  const h = Buffer.alloc(12 + 4 + 12);
   h[0] = 0x90;
   h[1] = (marker ? 0x80 : 0) | (pt & 0x7f);
   h.writeUInt16BE(seq & 0xffff, 2);
   h.writeUInt32BE(ts >>> 0, 4);
   h.writeUInt32BE(ssrc >>> 0, 8);
   h.writeUInt16BE(0xbede, 12);
-  h.writeUInt16BE(4, 14);
+  h.writeUInt16BE(3, 14);
   h[16] = (AUDIO_LEVEL_EXT_ID << 4) | 0;
   h[17] = Math.min(127, Math.max(0, level | 0));
-  h[18] = (TWCC_EXT_ID << 4) | 1;
-  h.writeUInt16BE(twSeq & 0xffff, 19);
-  writeCaptureNtp(h, 21, captureMs);
+  writeCaptureNtp(h, 18, captureMs);
   return h;
 }
 
