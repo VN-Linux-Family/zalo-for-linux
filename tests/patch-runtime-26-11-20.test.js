@@ -96,4 +96,15 @@ describe('Zalo 26.11.20 patches', () => {
     assert.ok(!wave1.includes('patch-offline-startup'));
     assert.ok(applyPatches.CROSS_CUTTING_PATCHES.includes('patch-offline-startup'));
   });
+
+  it('keeps patch-zalo-language-transport out of the parallel wave', () => {
+    // It rewrites preload-render.js and compact-app-preload.js, which
+    // group-main-dist (pasting-img among others) patches in wave 1. In parallel
+    // pasting-img read preload-render.js while it was being rewritten and
+    // failed the build on its anchor.
+    const applyPatches = require('../scripts/apply-patches');
+    const wave1 = applyPatches.DISJOINT_GROUPS.flatMap(g => [g.name, ...(g.patches || [])]);
+    assert.ok(!wave1.includes('patch-zalo-language-transport'));
+    assert.ok(applyPatches.CROSS_CUTTING_PATCHES.includes('patch-zalo-language-transport'));
+  });
 });
