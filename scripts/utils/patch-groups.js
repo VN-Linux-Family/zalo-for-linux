@@ -16,6 +16,7 @@ const patchLanguageBridge = require('../patches/patch-zalo-language-bridge');
 const patchDiskSpace = require('../patches/patch-disk-space');
 const patchZocrPcDist = require('../patches/patch-zocr-pc-dist');
 const { patchXdgUserDirs } = require('../patches/patch-xdg-user-dirs');
+const patchAppLockTitlebar = require('../patches/patch-app-lock-titlebar');
 
 const PC_DIST_TARGETS = {
   'compact-app-pc': {
@@ -111,6 +112,13 @@ function runPcDistBundleGroup(bundleKey) {
       },
     },
   );
+
+  if (bundleKey === 'compact-app-pc' || bundleKey === 'lazy-login') {
+    contentSteps.push({
+      name: 'patch-app-lock-titlebar',
+      transform: ({ content }) => ({ content: patchAppLockTitlebar.patchContent(content).content }),
+    });
+  }
 
   return runFileGroup({ targetPath, contentSteps });
 }
