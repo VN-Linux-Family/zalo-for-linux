@@ -86,8 +86,22 @@ function parseRtp(buf) {
   return { seq, ssrc, hdr: buf.subarray(0, off), payload: buf.subarray(off) };
 }
 
-function unprotectRtp(rtpBuf, keys, roc = 0) {
+// Group calls with srtpNoSeq / audSrtpNoSeq set (zrtcConfig). ZaloCall's
+// cricket::SrtpSession::{Protect,Unprotect}Rtp write seq 0 into the header
+// around srtp_protect/srtp_unprotect, and zrtc::SrtpTransport::SetUpKey picks
+// crypto suite 3 instead of 1, srtp_crypto_policy_set_aes_cm_128_null_auth.
+// So: AES-CM with packet index 0 (only the SSRC changes the IV) and no
+// authentication tag; the header keeps the real seq.
+function xorNoSeq(keys, ssrc, data) {
+  const ks = aesCmExpand(keys.enc, packetIv(keys.salt, ssrc, 0, 0), data.length);
+  const out = Buffer.alloc(data.length);
+  for (let i = 0; i < data.length; i++) out[i] = data[i] ^ ks[i];
+  return out;
+}
+
+function unprotectRtp(rtpBuf, keys, roc = 0, noSeq = false) {
   const p = parseRtp(rtpBuf);
+  if (noSeq) return p ? { seq: p.seq, ssrc: p.ssrc, opus: xorNoSeq(keys, p.ssrc, p.payload) } : null;
   if (!p || p.payload.length < 10) return null;
   const body = p.payload.subarray(0, p.payload.length - 10);
   const tag = p.payload.subarray(p.payload.length - 10);
@@ -102,7 +116,8 @@ function unprotectRtp(rtpBuf, keys, roc = 0) {
   return { seq: p.seq, ssrc: p.ssrc, opus: plain };
 }
 
-function protectRtp(rtpHeaderAndExt, opus, keys, seq, ssrc, roc = 0) {
+function protectRtp(rtpHeaderAndExt, opus, keys, seq, ssrc, roc = 0, noSeq = false) {
+  if (noSeq) return Buffer.concat([rtpHeaderAndExt, xorNoSeq(keys, ssrc, opus)]);
   const iv = packetIv(keys.salt, ssrc, seq, roc);
   const ks = aesCmExpand(keys.enc, iv, opus.length);
   const body = Buffer.alloc(opus.length);

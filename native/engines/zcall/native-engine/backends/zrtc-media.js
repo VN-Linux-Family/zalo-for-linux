@@ -134,7 +134,8 @@ class RocTracker {
   }
 }
 
-function unprotectWithTracker(rtp, srtpContext, tracker) {
+function unprotectWithTracker(rtp, srtpContext, tracker, noSeq = false) {
+  if (noSeq) return { got: unprotectRtp(rtp, srtpContext, 0, true), roc: 0 };
   const seq = rtp.readUInt16BE(2);
   const guessed = tracker.guess(seq);
   let got = unprotectRtp(rtp, srtpContext, guessed);
@@ -323,6 +324,15 @@ class ZrtcMediaBackend extends EventEmitter {
         this.log('media: SRTP key setup failed', e.message);
       }
     }
+    // Group: GroupCallPeer::_startPeer hands srtpNoSeq to the video
+    // SrtpTransport and audSrtpNoSeq (GroupZRtcConfig::fromJson defaults it to
+    // srtpNoSeq) to the audio one. Set, the stream uses seq 0 and no tag
+    // (srtp-aes.js).
+    const gcfg = (this.group && this.params.config) || {};
+    const vNoSeq = Number(gcfg.srtpNoSeq) || 0;
+    const aNoSeq = gcfg.audSrtpNoSeq !== undefined ? Number(gcfg.audSrtpNoSeq) || 0 : vNoSeq;
+    this.noSeq = { video: this.group && vNoSeq !== 0, audio: this.group && aNoSeq !== 0 };
+    if (this.group) this.log('media: group SRTP noSeq', JSON.stringify(this.noSeq));
   }
 
   // InitZRTP to every server; resolves with the fastest reply
@@ -812,18 +822,20 @@ class ZrtcMediaBackend extends EventEmitter {
     const ssrc = this.params.localUid >>> 0;
     const hdr = (this.group ? buildGroupAudioRtpHeader : buildAudioRtpHeader)({ seq: this.seq, ts: this.ts, ssrc, twSeq: this.twSeq, level });
     const rtp = this.plainMedia ? Buffer.concat([hdr, Buffer.from(opus)])
-      : protectRtp(hdr, Buffer.from(opus), this.srtpContext, this.seq, ssrc, this.roc);
+      : protectRtp(hdr, Buffer.from(opus), this.srtpContext, this.seq, ssrc, this.roc, this.noSeq && this.noSeq.audio);
     this._send(wrapMediaPacket({ msgType: MSG_TYPES.AUDIO_RTP, token: this.serverToken, payload: rtp }), this.activeServer, 'audio');
     // Same packet over P2P once the peer reached us: it drops duplicates by seq.
     if (this.p2pPath) this._send(wrapP2pAudio({ role: this.params.role, callId: this.params.callId, rtp }), this.p2pPath, 'P2P audio');
-    if (this.sendRate) this.sendRate.onSent(this.twSeq);
+    // Group audio carries no transport-cc (buildGroupAudioRtpHeader): only video
+    // takes numbers from the shared sequence.
+    if (this.sendRate && !this.group) this.sendRate.onSent(this.twSeq);
     this.counters.tx++;
     this.audioOctets += opus.length;
     this._noteAudioTx();
     this.seq = (this.seq + 1) & 0xffff;
     if (this.seq === 0) this.roc++;
     this.ts = (this.ts + FRAME_SAMPLES) >>> 0;
-    this.twSeq = (this.twSeq + 1) & 0xffff;
+    if (!this.group) this.twSeq = (this.twSeq + 1) & 0xffff;
   }
 
   // 1-1: tell the window the ladder rung. Group: the same, and tell the SFU
@@ -845,12 +857,13 @@ class ZrtcMediaBackend extends EventEmitter {
   // Relay: MsgType 13 with the token (like audio type 3); P2P: kind 8.
   // Until a key frame went out, other frames are useless to the phone: drop
   // them and ask for a key frame ('keyframe' event) instead.
-  // Group calls with an empty srtpKey send plain RTP: our H.264 goes out that way
-  // (type 13, PT 98/97) with the header of buildGroupVideoRtpHeader. On by default
+  // Group: our H.264 goes out as type 13, PT 98/97, with the header of
+  // buildGroupVideoRtpHeader; plain RTP when the call has no srtpKey, else
+  // SRTP with that key (srtpNoSeq: no tag, see srtp-aes.js). On by default
   // since it works with a phone and the macOS client (2026-10-08);
   // ZCALL_GROUP_CAMERA=0 keeps the camera to ourselves.
   _groupCameraSend() {
-    return this.group && this.plainMedia && process.env.ZCALL_GROUP_CAMERA !== '0';
+    return this.group && (this.plainMedia || !!this.srtpContext) && process.env.ZCALL_GROUP_CAMERA !== '0';
   }
 
   setGroupCamera(on) { this.groupCameraOn = !!on; }
@@ -873,8 +886,8 @@ class ZrtcMediaBackend extends EventEmitter {
     chunks.forEach((chunk, i) => {
       const hdrArgs = { seq: this.vSeq, ts, ssrc, twSeq: this.twSeq, marker: i === chunks.length - 1, pt: key ? KEY_PT : DELTA_PT, layerSeq: sfu ? (this.vLayerSeq = (this.vLayerSeq + 1) & 0xffff) : 0, captureMs };
       const hdr = sfu ? buildGroupVideoRtpHeader(Object.assign({ sfu }, hdrArgs)) : buildAudioRtpHeader(hdrArgs);
-      const rtp = groupCam ? Buffer.concat([hdr, chunk])
-        : protectRtp(hdr, chunk, this.srtpContext, this.vSeq, ssrc, this.vRoc);
+      const rtp = this.plainMedia ? Buffer.concat([hdr, chunk])
+        : protectRtp(hdr, chunk, this.srtpContext, this.vSeq, ssrc, this.vRoc, this.noSeq && this.noSeq.video);
       const relay = wrapMediaPacket({ msgType: MSG_TYPES.VIDEO_RTP, token: this.serverToken, payload: rtp });
       const p2p = this.p2pPath ? [wrapP2pVideo({ role: this.params.role, callId: this.params.callId, rtp }), this.p2pPath] : null;
       if (!this.group && (chunks.length > VIDEO_BURST || this.vOut.length)) {
@@ -899,7 +912,7 @@ class ZrtcMediaBackend extends EventEmitter {
     if (groupCam && this.vTx === 1) {
       const ext = sfu ? ('SFU id ' + sfu.id + (sfu.long ? ' long' : ' short') + ', layer 0') : 'no SFU extension';
       const head = chunks[0].subarray(0, Math.min(8, chunks[0].length)).toString('hex');
-      this.log('media: group camera probe: plain H.264, type 13, PT 98/97, ' + ext + ', payload ' + head);
+      this.log('media: group camera probe: ' + (this.plainMedia ? 'plain' : 'SRTP') + ' H.264, type 13, PT 98/97, ' + ext + ', payload ' + head);
     }
   }
 
@@ -1086,7 +1099,10 @@ class ZrtcMediaBackend extends EventEmitter {
     const captureMs = Date.now();
     chunks.forEach((chunk, i) => {
       const hdr = buildGroupVideoRtpHeader({ captureMs, sfu, seq: sh.seq, ts, ssrc: sh.uid, twSeq: sh.twSeq, marker: i === chunks.length - 1, pt: key ? KEY_PT : DELTA_PT, layerSeq: (sh.layerSeq = (sh.layerSeq + 1) & 0xffff) });
-      sh.queue.push(wrapMediaPacket({ msgType: MSG_TYPES.VIDEO_RTP, token: sh.token, payload: Buffer.concat([hdr, chunk]) }));
+      // ShareScreenPeer::_createAndInitSRTP takes the call's srtpKey and srtpNoSeq.
+      const payload = this.plainMedia || !this.srtpContext ? Buffer.concat([hdr, chunk])
+        : protectRtp(hdr, chunk, this.srtpContext, sh.seq, sh.uid >>> 0, 0, this.noSeq && this.noSeq.video);
+      sh.queue.push(wrapMediaPacket({ msgType: MSG_TYPES.VIDEO_RTP, token: sh.token, payload }));
       sh.seq = (sh.seq + 1) & 0xffff;
       sh.twSeq = (sh.twSeq + 1) & 0xffff;
     });
@@ -1450,7 +1466,7 @@ class ZrtcMediaBackend extends EventEmitter {
       const p = (rtp[0] >> 6) === 2 ? parseRtp(rtp) : null;
       if (p && p.payload.length) got = { seq: p.seq, ssrc: p.ssrc, opus: p.payload };
     } else {
-      const res = unprotectWithTracker(rtp, this.srtpContext, tracker);
+      const res = unprotectWithTracker(rtp, this.srtpContext, tracker, this.noSeq && this.noSeq.video);
       got = res.got;
       roc = res.roc;
     }
@@ -1643,7 +1659,7 @@ class ZrtcMediaBackend extends EventEmitter {
       const p = (rtp[0] >> 6) === 2 ? parseRtp(rtp) : null;
       if (p && p.payload.length) got = { seq: p.seq, ssrc: p.ssrc, opus: p.payload };
     } else {
-      const res = unprotectWithTracker(rtp, this.srtpContext, tracker);
+      const res = unprotectWithTracker(rtp, this.srtpContext, tracker, this.noSeq && this.noSeq.audio);
       got = res.got;
       roc = res.roc;
     }

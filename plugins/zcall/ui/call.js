@@ -230,9 +230,14 @@ function updateSelfTile() {
   selfMic.classList.toggle('hide', !state.muted);
 }
 
+// The preview canvas, kept by reference: the end of a group call empties #stage with
+// it inside selfTile, and the body-class observer below then calls placeSelf again,
+// when $('self') no longer finds it. An ended call puts it back in #pip, so the
+// emptied stage stays empty and a call opened in this window still has it.
+const selfCanvas = $('self');
 function placeSelf() {
-  const self = $('self');
-  const isGroup = !!state.group;
+  const self = selfCanvas;
+  const isGroup = !!state.group && state.phase !== 'ended';
   if (isGroup) {
     if (self.parentNode !== selfTile) { selfTile.insertBefore(self, selfLabel); }
     if (selfTile.parentNode !== $('stage')) { $('stage').prepend(selfTile); }
