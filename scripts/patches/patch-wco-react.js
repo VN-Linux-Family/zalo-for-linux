@@ -89,63 +89,49 @@ function findModuleFunction(method) {
   return null;
 }
 
+const THEME_HOOK_MARKER = '__zaloWcoThemeHookSync';
+
 function patchReactContent(content) {
-  if (content.includes(REACT_MARKER)) return { content, status: 'already' };
+  if (content.includes(THEME_HOOK_MARKER)) return { content, status: 'already' };
   const root = parseAst(content);
-  const renderFunctions = [
-    ...root.findAll({ rule: { kind: 'method_definition' } }),
-    ...root.findAll({ rule: { kind: 'arrow_function' } }),
-  ].filter(render => {
-    const values = stringValues(render);
-    return values.includes('titleBar') &&
-      render.text().includes('.createElement(');
+  const themeModuleId = findThemeHookModuleId(content, root);
+  const modulePair = root.findAll({ rule: { kind: 'pair' } }).find(pair => {
+    const key = pair.field('key')?.text().replace(/["']/g, '');
+    return key === themeModuleId;
   });
-  const modules = new Map();
-  for (const render of renderFunctions) {
-    const createCalls = render.findAll({ rule: { kind: 'call_expression' } }).filter(call =>
-      call.field('function')?.text().endsWith('.createElement')
-    );
-    const returns = render.findAll({ rule: { kind: 'return_statement' } }).filter(statement =>
-      stringValues(statement).includes('titleBar')
-    );
-    if (!createCalls.length || !returns.length) continue;
-    const module = findModuleFunction(render);
-    if (!module) continue;
-    const react = createCalls[0].field('function').text().replace(/\.createElement$/, '');
-    const entry = modules.get(module) || { module, react, methods: [] };
-    entry.methods.push({ render, statement: returns[0] });
-    modules.set(module, entry);
-  }
-  if (!modules.size) {
-    throw new Error('WCO React patch: React titlebar render method not found by AST');
+  if (!modulePair) throw new Error(`WCO React patch: theme hook module ${themeModuleId} not found`);
+
+  const module = modulePair.field('value');
+  const hook = module.findAll({ rule: { kind: 'arrow_function' } }).find(fn =>
+    /isDark\s*:/.test(fn.text()) && /THEME\.DARK/.test(fn.text()) && /return\s*\{/.test(fn.text())
+  );
+  if (!hook) throw new Error('WCO React patch: theme hook function not found');
+
+  const hookSource = hook.text();
+  const reactAlias = /Object\((\w+)\.useEffect\)\(/.exec(hookSource)?.[1];
+  const themeAlias = /isDark\s*:\s*(\w+)\s*===\s*([\w$.]+\.DARK)/.exec(hookSource);
+  const returnStatement = hook.findAll({ rule: { kind: 'return_statement' } }).find(statement => /isDark/.test(statement.text()));
+  if (!reactAlias || !themeAlias || !returnStatement) {
+    throw new Error('WCO React patch: cannot identify React alias or effective theme in Zalo theme hook');
   }
 
-  const themeModuleId = findThemeHookModuleId(content, root);
-  const reactBridge = buildReactBridge(themeModuleId);
-  const edits = [];
-  for (const { module, react, methods: targets } of modules.values()) {
-    let moduleText = module.text();
-    const body = module.field('body') || module.findAll({ rule: { kind: 'statement_block' } })[0];
-    if (!body) throw new Error('WCO React patch: module function body not found');
-    const bodyAt = moduleText.indexOf(body.text());
-    if (bodyAt < 0) throw new Error('WCO React patch: cannot locate module body');
-    for (const { render, statement } of targets) {
-      const methodText = render.text();
-      const argument = statement.text().replace(/^return\s*/, '');
-      const wrapped = `${react}.createElement(${react}.Fragment,null,${argument},${react}.createElement(${REACT_MARKER},null))`;
-      const methodAt = moduleText.indexOf(methodText);
-      const argumentAt = moduleText.indexOf(argument, methodAt);
-      if (methodAt < 0 || argumentAt < 0) throw new Error('WCO React patch: cannot locate titlebar render expression');
-      moduleText = moduleText.slice(0, argumentAt) + wrapped + moduleText.slice(argumentAt + argument.length);
-    }
-    const declaration = reactBridge.replaceAll('React.', `${react}.`);
-    const bodySource = body.text();
-    const directive = /^\{\s*(?:(["'])use strict\1\s*;)?/.exec(bodySource);
-    const declarationAt = bodyAt + (directive ? directive[0].length : 1);
-    moduleText = moduleText.slice(0, declarationAt) + '\n' + declaration + '\n' + moduleText.slice(declarationAt);
-    edits.push(module.replace(moduleText));
-  }
-  return { content: applyEdits(root, edits), status: 'patched' };
+  const themeValue = themeAlias[1];
+  const darkExpression = themeAlias[2];
+  const effect = `Object(${reactAlias}.useEffect)(()=>{if(window.$zapp&&typeof window.$zapp.setWcoTheme==="function")window.$zapp.setWcoTheme(${themeValue}===${darkExpression}?"#ffffff":"#000000")},[${themeValue}]);`;
+  const returnAt = hookSource.indexOf(returnStatement.text());
+  if (returnAt < 0) throw new Error('WCO React patch: cannot locate theme hook return');
+  const updatedHook = hookSource.slice(0, returnAt) + effect + returnStatement.text() + `/*${THEME_HOOK_MARKER}*/` + hookSource.slice(returnAt + returnStatement.text().length);
+  const moduleSource = module.text();
+  const hookAt = moduleSource.indexOf(hookSource);
+  if (hookAt < 0) throw new Error('WCO React patch: cannot locate theme hook source');
+  const updatedModule = moduleSource.slice(0, hookAt) + updatedHook + moduleSource.slice(hookAt + hookSource.length);
+  const pairSource = modulePair.text();
+  const moduleAt = pairSource.indexOf(moduleSource);
+  if (moduleAt < 0) throw new Error('WCO React patch: cannot locate theme module source');
+  const updatedPair = pairSource.slice(0, moduleAt) + updatedModule + pairSource.slice(moduleAt + moduleSource.length);
+  const updated = applyEdits(root, [modulePair.replace(updatedPair)]);
+  parseAst(updated);
+  return { content: updated, status: 'patched' };
 }
 
 function patchFile(filePath, transform) {
@@ -187,9 +173,12 @@ async function main() {
     try {
       status = patchFile(file, patchReactContent);
     } catch (error) {
-      if (!String(error && error.message).includes('React titlebar render method not found by AST')) throw error;
-      logger.dim(`WCO React bridge skipped (no titlebar component): ${path.relative(APP_PC_DIST, file)}`);
-      continue;
+      const message = String(error && error.message);
+      if (message.includes('expected one unique Zalo theme hook implementation, found 0')) {
+        logger.dim(`WCO React theme hook skipped (not present): ${path.relative(APP_PC_DIST, file)}`);
+        continue;
+      }
+      throw error;
     }
     if (status === 'patched') patched++;
     logger.dim(`WCO React bridge ${status}: ${path.relative(APP_PC_DIST, file)}`);
@@ -201,4 +190,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });
-module.exports = { main, patchMainContent, patchPreloadContent, patchReactContent, findCompactTargets, findLazyTargets, findThemeHookModuleId, buildReactBridge, IPC_CHANNEL, MAIN_MARKER, REACT_MARKER, MAIN_LISTENER };
+module.exports = { main, patchMainContent, patchPreloadContent, patchReactContent, findCompactTargets, findLazyTargets, findThemeHookModuleId, IPC_CHANNEL, MAIN_MARKER, MAIN_LISTENER, THEME_HOOK_MARKER };

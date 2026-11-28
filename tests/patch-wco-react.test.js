@@ -11,12 +11,11 @@ const {
   patchReactContent,
   IPC_CHANNEL,
   MAIN_MARKER,
-  REACT_MARKER,
   findThemeHookModuleId,
   findCompactTargets,
 } = require('../scripts/patches/patch-wco-react');
 
-const THEME_HOOK_MODULE = 'var modules={"theme-module-v2":function(e,t,n){const a=n("react");function getThemeSetting(){return {theme:"light"}}const events={SETTING_UPDATED:"app_theme_setting_updated"};const THEME={DARK:"dark"};const state=Object(a.useState)(()=>getThemeSetting());Object(a.useEffect)(()=>events.SETTING_UPDATED);const isDark=state.theme===THEME.DARK;return {isDark}}};';
+const THEME_HOOK_MODULE = 'var modules={"theme-module-v2":function(e,t,n){const a=n("react");function getThemeSetting(){return {theme:"dark"}}const events={SETTING_UPDATED:"app_theme_setting_updated"};const THEME={DARK:"dark"};const useTheme=()=>{const[state,setState]=Object(a.useState)(()=>getThemeSetting());Object(a.useEffect)(()=>events.SETTING_UPDATED);const{theme:o}=state||{};return{themeSetting:state,theme:o,themeSettingOpt:1,token:null,isDark:o===THEME.DARK}};return useTheme()}};'
 const withThemeHook = source => `${THEME_HOOK_MODULE}${source}`;
 
 describe('patch-wco-react', () => {
@@ -37,32 +36,17 @@ describe('patch-wco-react', () => {
     assert.equal(patchPreloadContent(result.content).status, 'already');
   });
 
-  it('keeps the observer at module scope for arrow-function titlebar components', () => {
-    const original = 'function module(e,t,n){var ReactAlias=n(\"react\");const Titlebar=({platform:e})=>{return ReactAlias.a.createElement(\"div\",{id:\"titleBar\",className:\"login-title-bar\"},ReactAlias.a.createElement(\"div\",{className:\"title-name  +  macos\"}))}}';
-    const result = patchReactContent(withThemeHook(original));
+  it('syncs WCO from Zalo theme state inside the theme hook before titlebar render', () => {
+    const result = patchReactContent(THEME_HOOK_MODULE);
     assert.equal(result.status, 'patched');
-    assert.ok(result.content.indexOf(`const ${REACT_MARKER}`) < result.content.indexOf('const Titlebar='));
-    assert.ok(result.content.includes('ReactAlias.a.Fragment'));
+    assert.ok(result.content.includes('window.$zapp.setWcoTheme(o===THEME.DARK?\"#ffffff\":\"#000000\")'));
+    assert.ok(result.content.indexOf('useWcoThemeSync') === -1);
+    assert.ok(result.content.includes('__zaloWcoThemeHookSync'));
+    assert.ok(result.content.indexOf('useEffect)(()=>{if(window.$zapp') < result.content.indexOf('return{themeSetting'));
     assert.doesNotThrow(() => new Function(result.content));
     assert.equal(patchReactContent(result.content).status, 'already');
   });
 
-  it('injects a React-owned theme observer into titlebar render using discovered React alias', () => {
-    const original = 'function module(e,t,n){"use strict";var ReactAlias=n("react");class Titlebar{render(){return ReactAlias.a.createElement("div",{id:"titleBar",className:"titlebar"},ReactAlias.a.createElement("div",{className:"title-name  +  macos"},"title"))}}t.a=Titlebar}';
-    const result = patchReactContent(withThemeHook(original));
-    assert.equal(result.status, 'patched');
-    assert.ok(result.content.includes(REACT_MARKER));
-    assert.ok(result.content.includes('n(\"theme-module-v2\").a'));
-    assert.ok(result.content.includes('isDark?\"#ffffff\":\"#000000\"'));
-    assert.ok(result.content.includes('app_theme_setting_updated') || result.content.includes('xPHB'));
-    assert.ok(!result.content.includes('unfocus'));
-    assert.ok(result.content.includes('__zaloWcoUseTheme')); 
-    assert.ok(result.content.includes('ReactAlias.a.useEffect'));
-    assert.ok(result.content.indexOf('"use strict";') < result.content.indexOf('const __zaloWcoUseTheme'));
-    assert.ok(result.content.includes('ReactAlias.a.Fragment'));
-    assert.doesNotThrow(() => new Function(result.content));
-    assert.equal(patchReactContent(result.content).status, 'already');
-  });
   it('discovers compact-app-pc bundles by filename pattern rather than a build hash', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wco-targets-'));
     try {
