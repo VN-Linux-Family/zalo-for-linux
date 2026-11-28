@@ -13,6 +13,7 @@ const PATCHES = [
   'patch-titlebar-linux',
   'patch-titlebar-linux-css',
   'patch-wco-react',
+  'patch-app-lock-titlebar',
   'patch-pasting-img',
   'patch-sqlite3',
   'patch-db-cross-v4',
@@ -135,6 +136,7 @@ const DISJOINT_GROUPS = [
 const CROSS_CUTTING_PATCHES = [
   'patch-titlebar-linux-css',
   'patch-wco-react',
+  'patch-app-lock-titlebar',
   // Writes the lazy login bundle, which pc-dist-lazy-login patches in parallel
   // during wave 1; running it there loses one side's edits.
   'patch-offline-startup',
