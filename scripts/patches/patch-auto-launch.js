@@ -11,7 +11,7 @@ const START = '// --- Zalo Linux DBus Autostart ---';
 const END = '// --- End Zalo Linux DBus Autostart ---';
 
 const DBUS_LAUNCHER_HELPER = `function __zaloWrapLinuxLauncher(r){
-  const{execFile:e}=require("child_process"),t=require("fs"),n=Boolean(process.env.FLATPAK_ID||t.existsSync("/.flatpak-info"));
+  const{execFile:e}=require("child_process"),t=require("fs"),a=require("path"),i=require("os"),n=Boolean(process.env.FLATPAK_ID||t.existsSync("/.flatpak-info"));
   const APP_ID="net.vietnamlinuxfamily.zalo_for_linux";
   function o(t,n=3000){return new Promise(((o,a)=>{e("gdbus",t,{timeout:n},((e,t,n)=>e?a(new Error(n||(e&&e.message)||"gdbus error")):o(t?t.trim():"")))}))}
   return{
@@ -22,27 +22,31 @@ const DBUS_LAUNCHER_HELPER = `function __zaloWrapLinuxLauncher(r){
           if(e.includes("'yes'"))return!0;
           if(e.includes("'no'"))return!1
         }catch(e){}
+        return!1
       }
       if(r&&"function"==typeof r.isEnabled)try{return await r.isEnabled()}catch(e){}
       return!1
     },
     async enable(){
-      let e=!1;
-      try{
-        if(n)try{await o(["call","--session","--dest","org.freedesktop.impl.portal.PermissionStore","--object-path","/org/freedesktop/impl/portal/PermissionStore","--method","org.freedesktop.impl.portal.PermissionStore.SetPermission","background","true","background",APP_ID,"['yes']"],3000)}catch(_){}
-        const t="zalo_auto_"+Math.floor(1e8*Math.random()),a=n?"['zalo', '--file-forwarding', '--hidden']":"['"+(process.env.APPIMAGE||process.execPath)+"', '--hidden']",s="{'handle_token': <'"+t+"'>, 'reason': <'Tự động khởi động Zalo khi đăng nhập'>, 'autostart': <true>, 'commandline': <"+a+">, 'dbus-activatable': <false>}";
-        await o(["call","--session","--dest","org.freedesktop.portal.Desktop","--object-path","/org/freedesktop/portal/desktop","--method","org.freedesktop.portal.Background.RequestBackground","",s],5000);
-        e=!0
-      }catch(t){console.warn("[autostart-dbus] Portal enable failed:",t&&t.message||t)}
-      if(r&&"function"==typeof r.enable)try{await r.enable()}catch(t){if(!e)throw t}
+      if(n){
+        try{await o(["call","--session","--dest","org.freedesktop.impl.portal.PermissionStore","--object-path","/org/freedesktop/impl/portal/PermissionStore","--method","org.freedesktop.impl.portal.PermissionStore.SetPermission","background","true","background",APP_ID,"['yes']"],3000)}catch(_){}
+        const t="zalo_auto_"+Math.floor(1e8*Math.random()),a="{'handle_token': <'"+t+"'>, 'reason': <'Tự động khởi động Zalo khi đăng nhập'>, 'autostart': <true>, 'commandline': <['zalo', '--file-forwarding', '--hidden']>, 'dbus-activatable': <false>}";
+        return await o(["call","--session","--dest","org.freedesktop.portal.Desktop","--object-path","/org/freedesktop/portal/desktop","--method","org.freedesktop.portal.Background.RequestBackground","",a],5000)
+      }
+      if(r&&"function"==typeof r.enable)return await r.enable()
     },
     async disable(){
-      try{
+      if(n){
         const e="zalo_auto_"+Math.floor(1e8*Math.random()),t="{'handle_token': <'"+e+"'>, 'autostart': <false>}";
-        await o(["call","--session","--dest","org.freedesktop.portal.Desktop","--object-path","/org/freedesktop/portal/desktop","--method","org.freedesktop.portal.Background.RequestBackground","",t],5000);
-        if(n)try{await o(["call","--session","--dest","org.freedesktop.impl.portal.PermissionStore","--object-path","/org/freedesktop/impl/portal/PermissionStore","--method","org.freedesktop.impl.portal.PermissionStore.SetPermission","background","false","background",APP_ID,"['no']"],3000)}catch(_){}
-      }catch(e){console.warn("[autostart-dbus] Portal disable failed:",e&&e.message||e)}
+        try{
+          await o(["call","--session","--dest","org.freedesktop.portal.Desktop","--object-path","/org/freedesktop/portal/desktop","--method","org.freedesktop.portal.Background.RequestBackground","",t],5000);
+          try{await o(["call","--session","--dest","org.freedesktop.impl.portal.PermissionStore","--object-path","/org/freedesktop/impl/portal/PermissionStore","--method","org.freedesktop.impl.portal.PermissionStore.SetPermission","background","false","background",APP_ID,"['no']"],3000)}catch(_){}
+        }catch(e){console.warn("[autostart-dbus] Portal disable failed:",e&&e.message||e)}
+        return
+      }
       if(r&&"function"==typeof r.disable)try{await r.disable()}catch(e){}
+      const s=a.join(process.env.XDG_CONFIG_HOME||a.join(i.homedir(),".config"),"autostart");
+      for(const c of new Set(["Zalo.AppImage",process.env.APPIMAGE?a.basename(process.env.APPIMAGE):""]))if(c&&"zalo"!==c)try{t.unlinkSync(a.join(s,c+".desktop"))}catch(_){}
     }
   }
 }`;
@@ -58,16 +62,23 @@ function injectHelper(content) {
 
 // main-dist/main.js 26.08.20+ release: launcher=d, initializer=u, config=l (swap d and l).
 
+const LINUX_LAUNCHER_OPTIONS_LEGACY =
+  'else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;';
+const LINUX_LAUNCHER_OPTIONS =
+  'else if("linux"===process.platform)e.name="zalo",e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;';
+
 const LAUNCHER_OPTIONS_ORIGINAL =
   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}d=new r(e)';
 // On Linux, wrap launcher with DBus portal Background support (works in Flatpak and on host)
 const LAUNCHER_OPTIONS_PATCHED =
-  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;d=__zaloWrapLinuxLauncher(new r(e))';
+  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}' +
+  LINUX_LAUNCHER_OPTIONS + 'd=__zaloWrapLinuxLauncher(new r(e))';
 
 const COMPACT_LAUNCHER_OPTIONS_ORIGINAL =
   'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}u=new r(e)';
 const COMPACT_LAUNCHER_OPTIONS_PATCHED =
-  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;u=__zaloWrapLinuxLauncher(new r(e))';
+  'else if("win32"===process.platform){let t=o.join(o.dirname(i.getPath("exe")),"..","Zalo.exe");e.path=t}' +
+  LINUX_LAUNCHER_OPTIONS + 'u=__zaloWrapLinuxLauncher(new r(e))';
 
 const GET_LAUNCHER_ORIGINAL = 'getZaloLauncher:()=>d';
 const GET_LAUNCHER_PATCHED = 'getZaloLauncher:()=>{if(!d)u(l);return d}';
@@ -91,8 +102,22 @@ const HANDLERS_PATCHED =
   '($3.zsymb(4,"$6",["autolaunch to disable","$7"]),await o.disable(),r.set("autolaunch",!1),!0)' +
   '}catch(e){return $3.zsymb(19,"linux_auto_launch_error",e),!1}},';
 
+const STARTUP_SYNC_ORIGINAL = new RegExp(
+  'const ([A-Za-z_$][A-Za-z0-9_$]*)=!1!==([A-Za-z_$][A-Za-z0-9_$]*)\\.get\\("autolaunch"\\);' +
+  '([A-Za-z_$][A-Za-z0-9_$]*)\\.isEnabled\\(\\)\\.then\\(\\(e=>\\{' +
+  '([A-Za-z_$][A-Za-z0-9_$]*\\.zsymb\\(4,"[^"]+",\\["autolaunch isEnabled \\{\\} shouldEnable \\{\\}","[^"]+"\\],e,\\1\\))' +
+  ',e!==\\1\\?\\1\\?\\([^}]+\\.enable\\(\\)\\):\\([^}]+\\.disable\\(\\)\\):[A-Za-z_$][A-Za-z0-9_$]*\\.zsymb\\(4,"[^"]+",\\["autolaunch: already in sync, no write needed","[^"]+"\\]\\)\\}\\)\\)'
+);
+
+const STARTUP_SYNC_PATCHED =
+  'const $1=!0===$2.get("autolaunch"),__zaloAutoCfg=$2;$3.isEnabled().then((e=>{$4,($1&&!e)&&__zaloAutoCfg.set("autolaunch",!1)/* linux_autostart_ssot */}))';
+
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function replaceRequired(content, original, replacement, label) {
-  if (content.includes(replacement) || content.includes('linux_auto_launch_error')) {
+  if (content.includes(replacement) || (label === 'IPC handler' && content.includes('linux_auto_launch_error')) || (label === 'startup sync' && content.includes('linux_autostart_ssot'))) {
     return content;
   }
 
@@ -107,11 +132,17 @@ function replaceRequired(content, original, replacement, label) {
 }
 
 function patchAutoLaunch(content) {
-  if (content.includes('__zaloWrapLinuxLauncher') && content.includes('linux_auto_launch_error')) {
+  if (
+    content.includes('__zaloWrapLinuxLauncher') &&
+    content.includes('linux_auto_launch_error') &&
+    content.includes('linux_autostart_ssot') &&
+    content.includes('e.name="zalo"')
+  ) {
     return content;
   }
 
   content = injectHelper(content);
+  content = content.replaceAll(LINUX_LAUNCHER_OPTIONS_LEGACY, LINUX_LAUNCHER_OPTIONS);
 
   let astPatchedWin32 = false;
   // Attempt Snippet AST detection for getZaloLauncher variable
@@ -127,8 +158,9 @@ function patchAutoLaunch(content) {
       if (win32Assign) {
         const r = win32Assign.getMatch('R').text();
         const e = win32Assign.getMatch('E').text();
+        const assignPattern = new RegExp(`${escapeRegExp(varName)}\\s*=\\s*new\\s*${escapeRegExp(r)}\\(${escapeRegExp(e)}\\)$`);
         const edit = win32Assign.replace(
-          `${win32Assign.text().replace(new RegExp(`${varName}\\s*=\\s*new\\s*${r}\\(${e}\\)$`), '')}else if("linux"===process.platform)e.path=process.env.APPIMAGE||i.getPath("exe"),e.isHidden=!0;${varName}=__zaloWrapLinuxLauncher(new ${r}(${e}))`
+          `${win32Assign.text().replace(assignPattern, '')}${LINUX_LAUNCHER_OPTIONS}${varName}=__zaloWrapLinuxLauncher(new ${r}(${e}))`
         );
         const patchedTarget = applyEdits(root, [edit]);
         content = block
@@ -146,7 +178,6 @@ function patchAutoLaunch(content) {
     content.includes(LAUNCHER_OPTIONS_PATCHED) ||
     content.includes(GET_LAUNCHER_ORIGINAL) ||
     content.includes(GET_LAUNCHER_PATCHED);
-  content = injectHelper(content);
 
   if (isMainVariant) {
     if (!astPatchedWin32) {
@@ -169,6 +200,9 @@ function patchAutoLaunch(content) {
   }
   content = replaceRequired(
     content, HANDLERS_ORIGINAL, HANDLERS_PATCHED, 'IPC handler'
+  );
+  content = replaceRequired(
+    content, STARTUP_SYNC_ORIGINAL, STARTUP_SYNC_PATCHED, 'startup sync'
   );
   return content;
 }
