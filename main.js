@@ -226,8 +226,7 @@ app.on('browser-window-created', (_evt, win) => {
       if (!windowState) {
         windowState = require('./plugins/window-state').createWindowStateController({
           screen,
-          // Native Wayland windows cannot be moved by the app (plugins/wayland-titlebar).
-          canPosition: !global.__zaloNativeWayland,
+          canPosition: true,
           stateFile: path.join(app.getPath('userData'), 'zalo-linux-window-state.json')
         });
       }

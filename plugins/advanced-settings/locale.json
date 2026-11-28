@@ -3,7 +3,7 @@
   "plugin": "advanced-settings",
   "messages": {
     "advanced-settings.title": {
-      "vi": "Nâng cao",
+      "vi": "Cài đặt nâng cao",
       "en": "Advanced Settings"
     },
     "advanced-settings.tagline": {
@@ -147,8 +147,8 @@
       "en": "Disabled and saved recalled messages were deleted."
     },
     "advanced-settings.menu.open": {
-      "vi": "Nâng cao...",
-      "en": "Advanced Settings..."
+      "vi": "Cài đặt nâng cao",
+      "en": "Advanced Settings"
     },
     "advanced-settings.menu.title": {
       "vi": "Cài đặt nâng cao cho Zalo trên Linux",

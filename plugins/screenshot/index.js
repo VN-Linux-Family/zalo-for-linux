@@ -36,6 +36,18 @@ let _ipcMain = null;
 let _app = null;
 let _locale = 'vi';
 
+function isNativeWayland() {
+  try {
+    const app = _app || electron.app;
+    const platform = app.commandLine.getSwitchValue('ozone-platform');
+    const hint = app.commandLine.getSwitchValue('ozone-platform-hint');
+    return platform === 'wayland' ||
+      ((hint === 'wayland' || hint === 'auto') && process.env.XDG_SESSION_TYPE === 'wayland');
+  } catch (_) {
+    return process.env.XDG_SESSION_TYPE === 'wayland';
+  }
+}
+
 function setApp(app) {
   _app = app;
 }
@@ -111,7 +123,7 @@ function register({ ipcMain: customIpcMain, app: customApp } = {}) {
           if (hideWindow) {
             // Hide or minimize main window if requested (chế độ chụp không có Zalo)
             if (_mainWindow && !_mainWindow.isDestroyed()) {
-              if (global.__zaloNativeWayland || process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info')) {
+              if (isNativeWayland() || process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info')) {
                 _mainWindow.minimize();
               } else {
                 _mainWindow.hide();
